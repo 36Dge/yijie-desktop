@@ -237,13 +237,13 @@ impl Fixture {
                         .push((method.clone(), path.clone(), body.clone()));
                     let mut status = "200 OK";
                     let mut callback = None;
-                    let value = if path.starts_with("/v11/agent-sessions/")
+                    let value = if path.starts_with("/v13/agent-sessions/")
                         && path.ends_with("/events")
                     {
                         status = "SSE";
                         callback = s.on_stream.take();
                         let stream = Uuid::now_v7();
-                        let event = json!({"schema_version":11,"event_id":Uuid::now_v7(),"stream_id":stream,"sequence":1,"occurred_at":"2026-09-18T10:00:00Z","task_id":s.task,"agent_session_id":s.session,"codex_thread_id":s.thread,"turn_id":s.turn,"event_type":"native.notification","terminal":true,"payload":{"native":{"source":"runtime_notification","method":"turn/completed","threadId":s.thread,"turnId":s.turn,"availability":"available","turn":{"id":s.turn,"status":"completed","items":[],"itemsComplete":false}}}});
+                        let event = json!({"schema_version":13,"event_id":Uuid::now_v7(),"stream_id":stream,"sequence":1,"occurred_at":"2026-09-18T10:00:00Z","task_id":s.task,"agent_session_id":s.session,"codex_thread_id":s.thread,"turn_id":s.turn,"event_type":"native.notification","terminal":true,"payload":{"native":{"source":"runtime_notification","method":"turn/completed","threadId":s.thread,"turnId":s.turn,"availability":"available","turn":{"id":s.turn,"status":"completed","items":[],"itemsComplete":false}}}});
                         json!({"stream":stream,"body":format!("id: {stream}:1\nevent: native.notification\ndata: {event}\n\n")})
                     } else if path == "/v1/scheduled-plan-draft-capability" {
                         json!({"schema_version":1,"available":!s.reject,"reason":if s.reject{"policy_unqualified"}else{"ready"}})
@@ -320,7 +320,7 @@ impl Fixture {
                     {
                         json!({"schema_version":1,"source":"runtime_read","agent_session_id":s.session,"thread_id":s.thread,"turn_id":s.turn,"started_at":{"state":"known","value":0},"completed_at":{"state":"known","value":0},"duration_ms":{"state":"known","value":440}})
                     } else if path.ends_with("/native-thread") {
-                        json!({"schema_version":4,"source":"runtime_read","thread_id":s.thread,"turns":[{"id":s.turn,"status":if s.complete{"completed"}else{"inProgress"},"items":[],"itemsComplete":true}],"availability":"complete"})
+                        json!({"schema_version":6,"source":"runtime_read","thread_id":s.thread,"turns":[{"id":s.turn,"status":if s.complete{"completed"}else{"inProgress"},"items":[],"itemsComplete":true}],"availability":"complete"})
                     } else if method == "GET" && path == format!("/v1/agent-sessions/{}", s.session)
                     {
                         s.session()
@@ -332,7 +332,7 @@ impl Fixture {
                 if status == "SSE" {
                     let body = value["body"].as_str().unwrap();
                     let stream = value["stream"].as_str().unwrap();
-                    let response=format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nX-Accel-Buffering: no\r\nX-Yijie-Event-Schema-Version: 11\r\nX-Yijie-Event-Stream-ID: {stream}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",body.len());
+                    let response=format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nX-Accel-Buffering: no\r\nX-Yijie-Event-Schema-Version: 13\r\nX-Yijie-Event-Stream-ID: {stream}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",body.len());
                     socket.write_all(response.as_bytes()).await.unwrap();
                     if let Some(callback) = callback {
                         callback().await;
@@ -747,7 +747,7 @@ async fn feat155_3c1_original_coordinator_reaches_native_terminal_and_stops_norm
         .unwrap()
         .requests
         .iter()
-        .any(|r| r.1.starts_with("/v11/")));
+        .any(|r| r.1.starts_with("/v13/")));
     f.db.call(|r| {
         assert_eq!(
             r.connection

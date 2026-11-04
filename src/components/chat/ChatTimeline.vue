@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, provide, watch } from "vue";
+import { chatTracePresentationKey, createChatTracePresentationStore } from "../../stores/chat-trace-presentation.store";
 import { conversationDiagnosticMessage } from "../../domain/conversation-diagnostics";
 import type {
   ConversationTimelineArtifactReferenceContentBlock,
@@ -34,6 +35,10 @@ const props = withDefaults(defineProps<{
   approvalAuthorityRevision: 0,
   approvalTransients: () => Object.freeze({}),
 });
+
+const traceChoices = createChatTracePresentationStore();
+provide(chatTracePresentationKey, traceChoices);
+watch(() => props.timeline.identity, () => traceChoices.clear());
 
 // A normal output notification describes the existing final-output safety
 // policy, not an execution failure. Keep the diagnostic inspectable without

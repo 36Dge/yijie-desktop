@@ -900,7 +900,7 @@ describe("FEAT-126 ChatPage", () => {
 
     expect(wrapper.getComponent(ChatTimeline).element).toBe(timelineElement);
     expect(wrapper.find(".chat-turn").exists()).toBe(false);
-    expect(wrapper.text()).toContain("模型推理记录");
+    expect(wrapper.find(".chat-deep-thinking").exists()).toBe(false);
     expect(wrapper.find(".chat-deep-thinking__content").exists()).toBe(false);
     expect(wrapper.text()).toContain("标题检查完成");
     expect(loadReasoning).not.toHaveBeenCalled();
@@ -1305,7 +1305,7 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.text()).toContain("检查标题");
     expect(wrapper.text()).toContain("标题检查完成");
     expect(wrapper.text()).toContain("synthetic-brief.pdf");
-    expect(wrapper.text()).toContain("模型推理记录");
+    expect(wrapper.find(".chat-deep-thinking").exists()).toBe(false);
   });
 
   it("selects through the unified plus entry and permits an attachment-only task", async () => {

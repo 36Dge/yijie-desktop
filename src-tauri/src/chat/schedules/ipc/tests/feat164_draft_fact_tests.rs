@@ -37,11 +37,11 @@ async fn feat164_current_native_writer_can_preview_completed_draft_without_rewri
         let stream=Uuid::now_v7();
         for (i,mut native) in facts.into_iter().enumerate(){
             native["source"]=json!("runtime_notification");native["threadId"]=json!(thread);native["turnId"]=json!(context.runtime_turn_id);native["availability"]=json!("available");
-            let event:NativeEvent=serde_json::from_value(json!({"schema_version":11,"event_id":Uuid::now_v7(),"stream_id":stream,"sequence":i+1,"occurred_at":"2026-10-25T12:00:00Z","task_id":task,"agent_session_id":context.agent_session_id,"codex_thread_id":thread,"event_type":"native.notification","terminal":native["method"]=="turn/completed","payload":{"native":native}})).unwrap();
+            let event:NativeEvent=serde_json::from_value(json!({"schema_version":13,"event_id":Uuid::now_v7(),"stream_id":stream,"sequence":i+1,"occurred_at":"2026-10-25T12:00:00Z","task_id":task,"agent_session_id":context.agent_session_id,"codex_thread_id":thread,"event_type":"native.notification","terminal":native["method"]=="turn/completed","payload":{"native":native}})).unwrap();
             assert!(buffer.observe(&event)?);buffer.view=r.commit_native_view(&context,buffer.view.clone(),Some(&event),now)?;
         }
         let facts:Vec<(String,i64)>=r.connection.prepare("SELECT fact_json,format_version FROM chat_native_facts ORDER BY event_id").unwrap().query_map([],|row|Ok((row.get(0)?,row.get(1)?))).unwrap().collect::<rusqlite::Result<_>>().unwrap();
-        assert_eq!(facts.len(),2);assert!(facts.iter().all(|(_,format)|*format==4));
+        assert_eq!(facts.len(),2);assert!(facts.iter().all(|(_,format)|*format==6));
         Ok(facts)
     }).await.unwrap();
     for _ in 0..2 {

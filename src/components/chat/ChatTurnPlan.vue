@@ -9,6 +9,7 @@ import YjIcon from "../yijie/YjIcon.vue";
 
 const props = defineProps<{
   plan: ConversationTimelinePlanViewModel;
+  ended?: boolean;
 }>();
 
 const expanded = ref(props.plan.defaultExpanded);
@@ -17,6 +18,7 @@ const titleId = `${id}-title`;
 const contentId = `${id}-content`;
 
 const planStatusLabel = computed(() => {
+  if (props.ended && props.plan.steps.some(step => step.status !== "completed")) return "未全部完成";
   if (props.plan.steps.some((step) => step.status === "in_progress")) return "进行中";
   if (props.plan.steps.some((step) => step.status === "unknown")) return "状态未知";
   if (props.plan.steps.every((step) => step.status === "completed")) return "已完成";

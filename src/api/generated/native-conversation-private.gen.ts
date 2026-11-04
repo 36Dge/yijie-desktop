@@ -1,7 +1,7 @@
 /* Generated from native conversation source contracts. Do not edit. */
 
 export interface NativeConversationViewEvent {
-  schemaVersion: 4;
+  schemaVersion: 6;
   contextId: string;
   subscriptionId: string;
   sessionId: string;
@@ -28,6 +28,10 @@ export interface NativeConversationView {
   terminalErrorCode?: string | null;
   ordinal?: number;
   statusSource?: "runtime_notification" | "runtime_read";
+  /**
+   * @maxItems 32
+   */
+  notices?: NativeTraceNotice[];
 }
 export interface NativeDisplayItem {
   item: NativeItem;
@@ -81,6 +85,11 @@ export interface NativeItem {
   toolLabel?: string;
   mcp?: NativeMcpDisplay;
   webSearch?: NativeWebSearchDisplay;
+  /**
+   * @maxItems 64
+   */
+  commandActions?: NativeCommandActionDisplay[];
+  toolDisplay?: NativeToolDisplay;
 }
 /**
  * Display-only native MCP facts. No raw arguments/error/meta/resources/structuredContent and no business field parsing. Native list_mcp_resources/list_mcp_resource_templates may expose a validated resource count and redacted resource names/titles, never resource URIs, cursors or metadata. Empty resource lists are successful real results, not omitted content. Other tools retain their existing display policies. Limits do not change execution status; partial content availability must not suppress a known execution outcome. Host bounds total UTF-8 text at 256KiB and first 32 original content entries. Confidentiality may replace entire lines.
@@ -515,6 +524,23 @@ export interface NativeWebSearchSourceDisplay {
   url: string;
   title?: string;
 }
+/**
+ * Safe projection of the original native command action. Index identifies a display action under its parent Item, not an independent execution.
+ */
+export interface NativeCommandActionDisplay {
+  index: number;
+  kind: "read" | "listFiles" | "search" | "unknown";
+  label?: string;
+  query?: string;
+}
+/**
+ * Safe display labels only. Never tool identity, authority, raw arguments or arbitrary metadata.
+ */
+export interface NativeToolDisplay {
+  provenance: "nativeAppContext" | "registeredTool" | "allowedTitle";
+  sourceLabel?: string;
+  title?: string;
+}
 export interface NativePlanStep {
   step: string;
   status: "pending" | "inProgress" | "completed";
@@ -523,4 +549,13 @@ export interface NativeViewCursor {
   streamId: string;
   sequence: string;
   eventId: string;
+}
+export interface NativeTraceNotice {
+  eventId: string;
+  sequence: string;
+  method: "error" | "warning";
+  code: string;
+  scope: "thread" | "turn";
+  willRetry?: boolean | null;
+  itemId?: string;
 }

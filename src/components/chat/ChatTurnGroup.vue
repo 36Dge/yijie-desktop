@@ -1,36 +1,18 @@
 <script setup lang="ts">
-import { computed, ref, useId, watch } from "vue";
-import { webSearchOccurrences } from "../../domain/web-search-presentation";
-import { activeReasoningIdentity, executionProgressDescriptions, hasReadableProcessContent, isCollapsibleProcessItem, nativeWaitingDescription, observedProgressMessages, processDetailItems, showProcessItem } from "../../domain/conversation-process";
-import type {
-  ConversationTimelineArtifactReferenceContentBlock,
-  ConversationTimelineAttachmentReferenceContentBlock,
-  ConversationTimelineItemViewModel,
-  ConversationTimelineNoticeViewModel,
-  ConversationTimelineProgressViewModel,
-  ConversationTimelineTurnViewModel,
-} from "../../domain/conversation-timeline";
+import { computed, inject, provide, ref, useId, watch } from "vue";
+import type { ConversationTimelineItemViewModel, ConversationTimelineTurnViewModel, ConversationTimelineProgressViewModel, ConversationTimelineNoticeViewModel, ConversationTimelineArtifactReferenceContentBlock, ConversationTimelineAttachmentReferenceContentBlock } from "../../domain/conversation-timeline";
+import type { SelectedChatSkill } from "../../domain/chat-skills";
 import type { YjIconName } from "../../icons/registry";
+import { conversationActivityPresentation, traceCurrentStatus, traceIsLive } from "../../domain/conversation-activity-presentation";
+import { chatTracePresentationKey, createChatTracePresentationStore } from "../../stores/chat-trace-presentation.store";
 import YjIcon from "../yijie/YjIcon.vue";
-import ChatCommandItem, {
-  type ChatApprovalDecisionChange,
-  type ChatApprovalTransientState,
-} from "./ChatCommandItem.vue";
-import { presentSkillMessage, type SelectedChatSkill } from "../../domain/chat-skills";
-import ChatSkillPill from "./ChatSkillPill.vue";
-import ChatSafeContent from "./ChatSafeContent.vue";
-import ChatArchiveActivityDetails from "./ChatArchiveActivityDetails.vue";
-import ChatExecutionProgress from "./ChatExecutionProgress.vue";
-import ChatThinkingIndicator from "./ChatThinkingIndicator.vue";
-import ChatDeepThinking from "./ChatDeepThinking.vue";
-import ChatToolItem from "./ChatToolItem.vue";
-import ChatNativeToolItem from "./ChatNativeToolItem.vue";
-import ChatWebSearchItem from "./ChatWebSearchItem.vue";
+import ChatActivityGroup from "./ChatActivityGroup.vue";
+import ChatActivityRow from "./ChatActivityRow.vue";
 import ChatTurnPlan from "./ChatTurnPlan.vue";
-import ChatTimelineItemShell, {
-  type ChatTimelineDisclosureChange,
-} from "./ChatTimelineItemShell.vue";
-
+import ChatTraceNotices from "./ChatTraceNotices.vue";
+import ChatThinkingIndicator from "./ChatThinkingIndicator.vue";
+import type { ChatTimelineDisclosureChange } from "./ChatTimelineItemShell.vue";
+import type { ChatApprovalDecisionChange, ChatApprovalTransientState } from "./ChatCommandItem.vue";
 const props = withDefaults(defineProps<{
   turn: ConversationTimelineTurnViewModel;
   position: number;
@@ -49,94 +31,48 @@ const props = withDefaults(defineProps<{
   approvalTransients: () => Object.freeze({}),
 });
 
-const processId = `${useId()}-process`;
-const displayItems = computed(() => props.turn.items.filter(item => showProcessItem(item, props.turn)));
-const searchOccurrences = computed(() => webSearchOccurrences(props.turn.items));
-const firstUserMessage = computed(() => props.turn.items.find(item => item.presentation === "user_message")?.identity);
-const skillMessages = computed(() => new Map(props.turn.items
-  .filter(item => item.role === "user" && item.presentation === "user_message")
-  .map(item => [item.identity, presentSkillMessage(item.contentBlocks, props.skillCatalog)])));
-const expansionChoice = ref<boolean | null>(null);
-const observedProgressKeys = computed(() => slots["structured-answer"] || props.turn.source !== "native_observed"
-  ? new Set<string>() : observedProgressMessages(props.turn.items, !["queued", "in_progress", "waiting_approval"].includes(props.turn.domainStatus)));
-const processItems = computed(() => displayItems.value.filter(item =>
-  isCollapsibleProcessItem(item, observedProgressKeys.value.has(item.identity)) && (!item.approval ||
-    !["submitting", "reconciling", "error"].includes(props.approvalTransients[item.approval.approvalRequestId]?.phase ?? "idle"))));
-const processKeys = computed(() => new Set(processItems.value.map(item => item.identity)));
-const detailKeys = computed(() => processDetailItems(processItems.value));
-const executionDescriptions = computed(() => {
-  if (slots["structured-answer"]) return new Map();
-  const webKeys = new Set(props.turn.items.filter(item => item.presentation === "web_search").map(item => item.identity));
-  return new Map([...executionProgressDescriptions(props.turn, processKeys.value, detailKeys.value)]
-    .filter(([identity]) => !webKeys.has(identity)));
-});
-const processPlan = computed(() => props.turn.plan && !props.turn.plan.steps.some(step => step.status === "unknown") ? props.turn.plan : null);
-const hasProcess = computed(() => processItems.value.length > 0 || processPlan.value !== null);
-const answerStarted = computed(() => props.turn.items.some(item =>
-  !processKeys.value.has(item.identity) && (item.presentation === "final_answer" ||
-    (item.presentation === "assistant_unclassified" && ["completed", "failed", "interrupted"].includes(props.turn.domainStatus))) &&
-  item.contentBlocks.some(block => (block.type === "text" || block.type === "code") && block.text.trim().length > 0)));
-const processExpanded = computed(() => expansionChoice.value ??
-  (props.turn.liveObserved === true && ["in_progress", "waiting_approval"].includes(props.turn.domainStatus) && !answerStarted.value));
-const nativeLiveProgress = computed(() => props.turn.source === "native_observed" &&
-  props.turn.statusSource === "runtime_notification" && props.turn.liveObserved && props.turn.progress !== null);
-// An empty started Item is metadata, not the first streamed content. Reasoning
-// counts as output even when its details are folded in the reading layout.
-const hasOutput = computed(() => props.turn.plan !== null || props.turn.items.some(item =>
-  item.presentation !== "user_message" && (
-    item.approval != null || Boolean(item.activityLabel) || item.availability === "unavailable" ||
-    !["reasoning", "commentary", "final_answer", "assistant_unclassified"].includes(item.presentation) ||
-    item.contentBlocks.some(block => block.type === "text" || block.type === "code"
-      ? block.text.trim().length > 0 : true))));
+
+const choices = inject(chatTracePresentationKey, null) ?? createChatTracePresentationStore();
+provide(chatTracePresentationKey, choices);
+const processId = `${useId()}-trace`;
+const attentionIds = computed(() => new Set(props.turn.items.filter(item => item.approval && ["submitting", "reconciling", "error"].includes(props.approvalTransients[item.approval.approvalRequestId]?.phase ?? "idle")).map(item => item.identity)));
+const nodes = computed(() => conversationActivityPresentation(props.turn, attentionIds.value, Boolean(slots["structured-answer"])));
+const hasProcess = computed(() => Boolean(props.turn.plan) || nodes.value.some(node => node.kind === "activity" || node.kind === "message" && node.process));
+const answerStarted = computed(() => props.turn.items.some(item => item.presentation === "final_answer" && item.contentBlocks.some(block => (block.type === "text" || block.type === "code") && block.text.trim())));
+const nativeLiveProgress = computed(() => traceIsLive(props.turn));
+const hasOutput = computed(() => Boolean(props.turn.plan) || props.turn.items.some(item => item.presentation !== "user_message" && (item.approval || item.activityLabel || !["reasoning", "commentary", "final_answer", "assistant_unclassified"].includes(item.presentation) || item.contentBlocks.some(block => (block.type === "text" || block.type === "code") ? block.text.trim().length > 0 : true))));
 const outputObserved = ref(false);
-watch(() => [props.turn.identity, hasOutput.value] as const, ([identity, output], previous) => {
-  outputObserved.value = previous?.[0] === identity ? outputObserved.value || output : output;
-}, { immediate: true, flush: "sync" });
-const preloading = computed(() => nativeLiveProgress.value && props.turn.domainStatus === "in_progress" && !outputObserved.value);
-const awaitingMoreOutput = computed(() => {
-  if (!nativeLiveProgress.value || props.turn.domainStatus !== "in_progress") return false;
-  if (props.turn.items.some(item => item.approval?.status === "pending" ||
-    (item.busy && ["command", "tool", "web_search"].includes(item.presentation)))) return false;
-  const latest = [...props.turn.items].reverse().find(item => item.presentation !== "user_message");
-  if (latest?.kind === "assistant_message" && latest.contentBlocks.some(block =>
-    (block.type === "text" || block.type === "code") && block.text.length > 0)) {
-    return (latest.presentation === "commentary" || observedProgressKeys.value.has(latest.identity)) && latest.domainStatus === "completed";
-  }
-  return !answerStarted.value || latest?.presentation === "reasoning" && latest.busy === true;
+watch(() => [props.turn.identity, hasOutput.value] as const, ([identity, output], previous) => { outputObserved.value = previous?.[0] === identity ? outputObserved.value || output : output; }, {immediate: true, flush: "sync"});
+// Keep the timing row's anchor through an optional metadata refresh. A missing
+// label stays unknown; no earlier live estimate is promoted to final duration.
+const timingObserved = ref(false);
+watch(() => [props.turn.identity, props.timingLabel] as const, ([identity, label], previous) => {
+  timingObserved.value = previous?.[0] === identity ? timingObserved.value || Boolean(label) : Boolean(label);
+}, {immediate: true, flush: "sync"});
+const preloading = computed(() => nativeLiveProgress.value && !outputObserved.value);
+const processExpanded = computed(() => choices.get(props.turn.identity, nativeLiveProgress.value && !answerStarted.value));
+const currentStatus = computed(() => traceCurrentStatus(props.turn));
+const plan = computed(() => props.turn.plan ? {...props.turn.plan, defaultExpanded: false} : null);
+const processControls = computed(() => nodes.value.filter(isProcess).map(node => `${processId}-${encodeURIComponent(node.identity)}`).concat(plan.value ? [`${processId}-plan`] : []).join(" "));
+const entries = computed(() => {
+  const list: (typeof nodes.value[number] | {kind: "timing" | "plan"; identity: string})[] = [...nodes.value];
+  const first = nodes.value.findIndex(node => node.kind !== "message" || node.item.presentation !== "user_message");
+  const index = first < 0 ? list.length : first;
+  list.splice(index, 0, {kind: "timing", identity: `${props.turn.identity}:timing`});
+  if (plan.value) list.splice(index + 1, 0, {kind: "plan", identity: `${props.turn.identity}:plan`});
+  return list;
 });
-const localSubmissionTerminal = computed(() => props.turn.source === "local_submission" &&
-  ["failed", "cancelled"].includes(props.turn.submissionStatus ?? ""));
-const showProgress = computed(() => !preloading.value && !localSubmissionTerminal.value && props.turn.progress && (!nativeLiveProgress.value ||
-  props.turn.domainStatus !== "in_progress" || awaitingMoreOutput.value));
-const processItemId = (item: ConversationTimelineItemViewModel) => `${processId}-${encodeURIComponent(item.identity)}`;
-const processControls = computed(() => [...(processPlan.value ? [`${processId}-plan`] : []), ...processItems.value.map(processItemId),
-  ...[...executionDescriptions.value.keys()].map(identity => `${processId}-execution-${encodeURIComponent(identity)}`)].join(" "));
-watch(() => props.turn.identity, () => { expansionChoice.value = null; });
+function isProcess(node: (typeof nodes.value)[number]) { return node.kind === "activity" || node.kind === "message" && node.process; }
 function toggleProcess() {
-  expansionChoice.value = !processExpanded.value;
-  emit("disclosure-change", { itemIdentity: props.turn.identity, expanded: processExpanded.value });
+  choices.set(props.turn.identity, !processExpanded.value);
+  emit("disclosure-change", {itemIdentity: props.turn.identity, expanded: processExpanded.value});
 }
-function preserveProcessExpansion(item: ConversationTimelineItemViewModel) {
-  if (processKeys.value.has(item.identity) && processExpanded.value) expansionChoice.value = true;
-}
-
-const turnEntries = computed(() => {
-  const entries: { kind: "item" | "timing" | "plan" | "execution"; identity: string; item: ConversationTimelineItemViewModel | null }[] =
-    displayItems.value.flatMap(item => executionDescriptions.value.has(item.identity)
-      ? [{kind: "execution" as const, identity: `${item.identity}:execution`, item}, {kind: "item" as const, identity: item.identity, item}]
-      : [{kind: "item" as const, identity: item.identity, item}]);
-  const firstOutput = entries.findIndex(entry => entry.item?.presentation !== "user_message");
-  const index = firstOutput < 0 ? entries.length : firstOutput;
-  entries.splice(index, 0, { kind: "timing", identity: `${props.turn.identity}:timing`, item: null });
-  if (processPlan.value) entries.splice(index + 1, 0, { kind: "plan", identity: `${props.turn.identity}:plan`, item: null });
-  return entries;
-});
-
+function preserveProcess() { if (processExpanded.value) choices.set(props.turn.identity, true); }
+function forwardDisclosure(change: ChatTimelineDisclosureChange) { preserveProcess(); emit("disclosure-change", change); }
 const emit = defineEmits<{
   "disclosure-change": [change: ChatTimelineDisclosureChange];
   "approval-decision": [change: ChatApprovalDecisionChange];
 }>();
-
 const slots = defineSlots<{
   "structured-answer"(props: { turnId: string }): unknown;
   "legacy-records"(props: {turnId: string}): unknown;
@@ -156,85 +92,6 @@ const slots = defineSlots<{
     language: string | null;
   }): unknown;
 }>();
-
-function itemLabel(item: ConversationTimelineItemViewModel): string {
-  if (observedProgressKeys.value.has(item.identity)) return "模型消息";
-  switch (item.presentation) {
-    case "user_message":
-      return "用户消息";
-    case "commentary":
-      return "处理过程";
-    case "final_answer":
-    case "assistant_unclassified":
-      return "模型回答";
-    case "artifact":
-      return "生成内容";
-    case "reasoning":
-      return "深度思考";
-    case "command":
-      return "命令执行";
-    case "tool":
-      return "工具调用";
-    case "web_search":
-      return "网页活动";
-    case "unknown":
-    default:
-      return "未知内容";
-  }
-}
-
-function itemIcon(item: ConversationTimelineItemViewModel): YjIconName {
-  switch (item.presentation) {
-    case "user_message":
-      return "user";
-    case "final_answer":
-    case "assistant_unclassified":
-      return "assistant";
-    case "commentary":
-      return "pending";
-    case "artifact":
-      return "file";
-    case "reasoning":
-      return "pending";
-    case "command":
-      return "workspace";
-    case "tool":
-      return "skillOperations";
-    case "web_search":
-      return "skillCrossBorderSelection";
-    case "unknown":
-    default:
-      return "warning";
-  }
-}
-
-function itemStatusLabel(item: ConversationTimelineItemViewModel): string {
-  if (item.presentation === "reasoning" && item.reasoning !== null) {
-    switch (item.reasoning?.status) {
-      case "in_progress":
-        return "进行中";
-      case "complete":
-        return "已完成";
-      case "incomplete":
-        return "未完整结束";
-      case "unavailable":
-        return "不可用";
-      case "unknown":
-      default:
-        return "状态未知";
-    }
-  }
-  switch (item.domainStatus) {
-    case "started":
-      return "已开始";
-    case "streaming":
-      return "进行中";
-    case "completed":
-      return "已完成";
-    case "incomplete":
-      return "未完整结束";
-  }
-}
 
 function turnStatusLabel(turn: ConversationTimelineTurnViewModel): string {
   if (turn.diagnostic === "native_format_unsupported") return "历史记录暂不可读";
@@ -325,69 +182,8 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
   return notice.count > 1 ? `${message} 共 ${notice.count} 次。` : message;
 }
 
-function reasoningReasonLabel(item: ConversationTimelineItemViewModel): string | null {
-  switch (item.reasoning?.reasonCode) {
-    case "reasoning_not_emitted":
-      return "本轮未产生可显示的模型推理记录";
-    case "turn_interrupted":
-      return "本轮已中断";
-    case "stream_gap":
-      return "模型推理记录存在流缺口";
-    case "runtime_error":
-      return "运行时错误中断了模型推理记录";
-    case "limit_exceeded":
-      return "模型推理记录超过可用限制";
-    case "protocol_error":
-      return "模型推理记录协议状态异常";
-    case "host_shutdown":
-      return "Host 已停止";
-    case "unknown":
-      return "未提供具体原因";
-    case null:
-    case undefined:
-    default:
-      return null;
-  }
-}
 
-function reasoningStateMessage(item: ConversationTimelineItemViewModel): string | null {
-  if (item.presentation !== "reasoning") return null;
-  if (item.activityLabel) return item.activityLabel;
-  const hasContent = hasReadableProcessContent(item);
-  if (item.busy && !hasContent) return null;
-  if (item.reasoning === null) {
-    if (item.domainStatus === "incomplete") return "模型推理记录未完整结束，已保留可用内容。";
-    if (item.domainStatus === "started" || item.domainStatus === "streaming") {
-      return hasContent ? null : "正在等待过程记录…";
-    }
-    return hasContent ? null : "此过程仅包含状态元数据；详情未进入当前对话投影。";
-  }
-  const reason = reasoningReasonLabel(item);
-  switch (item.reasoning?.status) {
-    case "in_progress":
-      return hasContent ? null : "正在等待模型推理记录…";
-    case "complete":
-      return hasContent ? null : "模型推理记录已完成，但没有可显示的正文。";
-    case "incomplete":
-      return `模型推理记录未完整结束，已保留可用内容${reason ? `；${reason}` : ""}。`;
-    case "unavailable":
-      return `模型推理记录不可用${reason ? `；${reason}` : ""}。`;
-    case "unknown":
-    default:
-      return "模型推理记录状态未知，已保留当前可用内容。";
-  }
-}
-
-function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
-  if (processKeys.value.has(change.itemIdentity) && processExpanded.value) expansionChoice.value = true;
-  emit("disclosure-change", change);
-}
-
-function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
-  emit("approval-decision", change);
-}
 </script>
-
 <template>
   <section
     class="chat-turn-group"
@@ -411,191 +207,44 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
       {{ turnStateMessage(turn) }}
     </p>
 
-    <slot v-if="turn.source === 'legacy_archive'" name="legacy-records" :turn-id="turn.turnId" />
-    <ChatTurnPlan v-if="turn.plan && !processPlan" :key="turn.plan.identity" :plan="turn.plan" />
 
-    <ol v-if="turn.items.length > 0 || timingLabel || hasProcess || preloading" class="chat-turn-group__items" aria-label="本轮对话内容">
-      <template v-for="{ item, kind, identity } in turnEntries" :key="identity">
-        <li v-if="kind === 'timing' && (timingLabel || hasProcess || preloading)" class="chat-turn-group__timing"
-          :class="{ 'chat-turn-group__timing--preloading': preloading }">
-          <Transition name="chat-turn-status" mode="out-in">
-            <span v-if="preloading" key="thinking" class="chat-turn-group__thinking" role="status" aria-live="polite">
-              <ChatThinkingIndicator />
-            </span>
-            <button v-else-if="hasProcess" key="process" class="chat-turn-group__process-toggle" type="button"
-              :aria-label="`${timingLabel || '处理过程'}，${processExpanded ? '收起' : '展开'}本轮处理过程`"
-              :aria-expanded="processExpanded" :aria-controls="processControls" @click="toggleProcess">
-              <span>{{ timingLabel || '处理过程' }}</span>
-              <YjIcon class="chat-turn-group__process-chevron" :name="processExpanded ? 'chevronDown' : 'chevronRight'"
-                size="xs" :stroke-width="1.5" tone="muted" />
-            </button>
-            <span v-else key="timing" aria-label="本轮耗时">{{ timingLabel }}</span>
-          </Transition>
+    <ol v-if="nodes.length || timingObserved || plan || preloading" class="chat-turn-group__items" aria-label="本轮对话内容">
+      <template v-for="node in entries" :key="node.identity">
+        <li v-if="node.kind === 'timing' && (hasProcess || timingObserved || preloading)" class="chat-turn-group__timing">
+          <span v-if="preloading" class="chat-turn-group__thinking" role="status" aria-live="polite"><ChatThinkingIndicator /></span>
+          <button v-else-if="hasProcess" class="chat-turn-group__process-toggle" type="button" :aria-expanded="processExpanded" :aria-controls="processControls" @click="toggleProcess">
+            {{ timingLabel || '处理过程' }}<YjIcon :name="processExpanded ? 'chevronDown' : 'chevronRight'" size="xs" tone="muted" />
+          </button>
+          <span v-else>{{ timingLabel || '耗时待确认' }}</span>
         </li>
-        <li v-else-if="kind === 'plan' && processPlan" v-show="processExpanded" :id="`${processId}-plan`" @focusin="expansionChoice = true" @pointerdown="expansionChoice = true">
-          <ChatTurnPlan :key="processPlan.identity" :plan="processPlan" />
+        <li v-else-if="node.kind === 'plan' && plan" v-show="processExpanded" :id="`${processId}-plan`" @focusin="preserveProcess" @pointerdown="preserveProcess">
+          <ChatTurnPlan :plan="plan" :ended="['completed', 'failed', 'interrupted'].includes(turn.domainStatus)" />
         </li>
-        <li v-else-if="kind === 'execution' && item" v-show="processExpanded"
-          :id="`${processId}-execution-${encodeURIComponent(item.identity)}`" class="chat-turn-group__execution-description">
-          <ChatExecutionProgress :text="executionDescriptions.get(item.identity)!.text" />
-        </li>
-        <li v-else-if="item"
-          :id="processKeys.has(item.identity) ? processItemId(item) : undefined"
-          v-show="item.presentation === 'user_message' || (!preloading && (!processKeys.has(item.identity) || processExpanded))"
-          class="chat-turn-group__item"
-          :class="`chat-turn-group__item--${item.presentation}`"
-          :data-process-item="processKeys.has(item.identity) ? '' : undefined"
-          @focusin="preserveProcessExpansion(item)"
-          @pointerdown="preserveProcessExpansion(item)"
-        >
-          <p v-if="item.presentation === 'commentary'"
-            class="chat-turn-group__progress-source" data-progress-source="model">模型进度</p>
-          <p v-else-if="observedProgressKeys.has(item.identity)"
-            class="chat-turn-group__progress-source" data-message-source="model">模型消息</p>
-          <ChatArchiveActivityDetails v-if="item.archiveV5?.type === 'fileChange'" :item="item.archiveV5" />
-          <ChatDeepThinking v-else-if="item.presentation === 'reasoning'" :item="item"
-            :visible="!preloading && (!processKeys.has(item.identity) || processExpanded)"
-            :live="turn.liveObserved === true && item.busy === true" :state-message="reasoningStateMessage(item)"
-            :thinking="activeReasoningIdentity(turn) === item.identity"
-            @disclosure-change="forwardDisclosure" />
-          <ChatWebSearchItem v-else-if="item.presentation === 'web_search'" :item="item"
-            :search-occurrence="searchOccurrences.get(item.identity) ?? 1" :process-presentation="processKeys.has(item.identity)" @disclosure-change="forwardDisclosure" />
-          <ChatCommandItem
-            v-else-if="item.presentation === 'command' && item.execution?.kind === 'command'"
-            :item="item"
-            :process-presentation="processKeys.has(item.identity)"
-            :execution="item.execution"
-            :approval="item.approval ?? null"
-            :approval-transient="item.approval
-              ? approvalTransients[item.approval.approvalRequestId] ?? null
-              : null"
-            :can-decide-approval="canDecideApprovals"
-            :approval-authority-revision="approvalAuthorityRevision"
-            @disclosure-change="forwardDisclosure"
-            @approval-decision="forwardApprovalDecision"
-          />
-
-          <ChatNativeToolItem
-            v-else-if="item.presentation === 'tool' && item.execution?.kind === 'tool' && 'native' in item.execution"
-            :item="item"
-            :process-presentation="processKeys.has(item.identity)"
-            :execution="item.execution"
-            @disclosure-change="forwardDisclosure"
-          />
-          <ChatToolItem
-            v-else-if="item.presentation === 'tool' && item.execution?.kind === 'tool' && !('native' in item.execution)"
-            :item="item"
-            :process-presentation="processKeys.has(item.identity)"
-            :execution="item.execution"
-            @disclosure-change="forwardDisclosure"
-          />
-
-          <ChatTimelineItemShell
-            v-else
-            :item="item"
-            :label="itemLabel(item)"
-            :status-label="itemStatusLabel(item)"
-            :icon="itemIcon(item)"
-            :collapsible="item.collapsible && !processKeys.has(item.identity)"
-            :process-presentation="processKeys.has(item.identity)"
-            :default-expanded="item.defaultExpanded"
-            @disclosure-change="forwardDisclosure"
-          >
-            <div
-              v-if="item.presentation === 'unknown' || item.presentation === 'command' || item.presentation === 'tool'"
-              class="chat-turn-group__unknown"
-              role="note"
-            >
-              <strong>{{ item.presentation === "unknown" ? "此内容类型暂不支持" : "此执行状态暂不可用" }}</strong>
-              <code>{{ item.presentation === "unknown" ? "unsupported_content" : "unsupported_execution" }}</code>
-            </div>
-
-            <p
-              v-else-if="item.presentation === 'assistant_unclassified' && slots['structured-answer']"
-              class="chat-turn-group__draft-note"
-              role="note"
-            >
-              草案以校验结果为准。
-            </p>
-
-            <slot v-if="(item.presentation === 'final_answer' || item.presentation === 'assistant_unclassified') && slots['structured-answer']" name="structured-answer" :turn-id="turn.turnId" />
-            <ChatSafeContent
-              v-else-if="item.presentation !== 'unknown' && item.presentation !== 'command' && item.presentation !== 'tool' && item.contentBlocks.length > 0"
-              :blocks="skillMessages.get(item.identity)?.blocks ?? item.contentBlocks"
-              :link-target="item.kind === 'assistant_message' ? {sessionId: item.threadId, turnId: item.turnId, itemId: item.itemId} : undefined"
-              :mode="item.presentation === 'user_message' ? 'plain' : item.contentMode"
-              :typography="!processKeys.has(item.identity) && ['final_answer', 'assistant_unclassified'].includes(item.presentation) ? 'answer' : 'compact'"
-              :streaming="item.kind === 'assistant_message' && item.busy === true && (!processKeys.has(item.identity) || processExpanded)"
-              :animate="(!processKeys.has(item.identity) || processExpanded) && !['failed', 'interrupted'].includes(turn.domainStatus)"
-            >
-              <template v-if="(item.identity === firstUserMessage && connectorNames.length) || skillMessages.get(item.identity)?.skills.length" #text-prefix>
-                <span v-if="item.identity === firstUserMessage && connectorNames.length" aria-label="本轮连接器"><span v-for="(name, index) in connectorNames" :key="index" class="chat-turn-group__connector-mention">/ {{ name }}</span></span>
-                <span v-if="skillMessages.get(item.identity)?.skills.length" aria-label="本轮技能"><ChatSkillPill v-for="skill in skillMessages.get(item.identity)!.skills" :key="skill.id" :entry="skill" class="chat-turn-group__skill-mention" /></span>
-              </template>
-              <template
-                v-if="slots['artifact-reference']"
-                #artifact-reference="{ block }"
-              >
-                <slot name="artifact-reference" :item="item" :block="block" />
-              </template>
-              <template
-                v-if="slots['attachment-reference']"
-                #attachment-reference="{ block }"
-              >
-                <slot name="attachment-reference" :item="item" :block="block" />
-              </template>
-              <template
-                v-if="item.copyPolicy === 'text_and_code' && slots['code-actions']"
-                #code-actions="{ codeIdentity, text, language }"
-              >
-                <slot
-                  name="code-actions"
-                  :item="item"
-                  :code-identity="codeIdentity"
-                  :text="text"
-                  :language="language"
-                />
-              </template>
-            </ChatSafeContent>
-
-            <template
-              v-if="!((item.presentation === 'final_answer' || item.presentation === 'assistant_unclassified') && slots['structured-answer']) && item.presentation !== 'command' && item.presentation !== 'tool' && item.copyPolicy === 'text_and_code' && (item.kind !== 'assistant_message' || item.domainStatus === 'completed') && slots['item-actions']"
-              #actions
-            >
-              <slot name="item-actions" :item="item" />
+        <li v-else-if="node.kind === 'activity' || node.kind === 'message' || node.kind === 'attention'" v-show="node.kind === 'attention' || node.kind === 'message' && node.item.presentation === 'user_message' || !preloading && (!isProcess(node) || processExpanded)" :id="`${processId}-${encodeURIComponent(node.identity)}`" :class="`chat-turn-group__item--${node.kind === 'activity' ? 'activity' : node.item.presentation}`" class="chat-turn-group__item" :data-process-item="isProcess(node) ? '' : undefined" @focusin="isProcess(node) && preserveProcess()" @pointerdown="isProcess(node) && preserveProcess()">
+          <ChatActivityGroup v-if="node.kind === 'activity'" :group="node.group" :live="nativeLiveProgress" :visible="processExpanded" @disclosure-change="forwardDisclosure">
+            <template #item="{ item, entry, visible }">
+              <ChatActivityRow :item="item" :activity-entry="entry" :turn="turn" process-presentation :visible="visible" :can-decide-approvals="canDecideApprovals" :approval-authority-revision="approvalAuthorityRevision" :approval-transients="approvalTransients" @disclosure-change="forwardDisclosure" @approval-decision="emit('approval-decision', $event)" />
             </template>
-          </ChatTimelineItemShell>
-          <ChatArchiveActivityDetails v-if="item.archiveV5 && item.archiveV5.type !== 'fileChange'" :item="item.archiveV5" />
+          </ChatActivityGroup>
+          <ChatActivityRow v-else :item="node.item" :turn="turn" :answer-candidate="node.answerCandidate" :process-presentation="node.process" :visible="!isProcess(node) || processExpanded" :skill-catalog="skillCatalog" :connector-names="connectorNames" :can-decide-approvals="canDecideApprovals" :approval-authority-revision="approvalAuthorityRevision" :approval-transients="approvalTransients" @disclosure-change="forwardDisclosure" @approval-decision="emit('approval-decision', $event)">
+            <template v-if="slots['structured-answer']" #structured-answer="slotProps"><slot name="structured-answer" v-bind="slotProps" /></template>
+<template v-if="slots['legacy-records']" #legacy-records="slotProps"><slot name="legacy-records" v-bind="slotProps" /></template>
+<template v-if="slots['artifact-reference']" #artifact-reference="slotProps"><slot name="artifact-reference" v-bind="slotProps" /></template>
+<template v-if="slots['attachment-reference']" #attachment-reference="slotProps"><slot name="attachment-reference" v-bind="slotProps" /></template>
+<template v-if="slots['item-actions']" #item-actions="slotProps"><slot name="item-actions" v-bind="slotProps" /></template>
+<template v-if="slots['code-actions']" #code-actions="slotProps"><slot name="code-actions" v-bind="slotProps" /></template>
+          </ChatActivityRow>
         </li>
       </template>
     </ol>
-
-    <div v-if="showProgress && turn.progress && turn.diagnostic !== 'native_format_unsupported'" class="chat-turn-group__progress" role="status" aria-live="polite" aria-atomic="true">
-      <ChatExecutionProgress v-if="awaitingMoreOutput" :text="nativeWaitingDescription(turn)" />
-      <span v-else>{{ progressLabel(turn.progress) }}</span>
-    </div>
-
-    <ul v-if="turn.notices.length > 0" class="chat-turn-group__notices" aria-label="本轮通知">
-      <li
-        v-for="notice in turn.notices"
-        :key="notice.identity"
-        class="chat-turn-group__notice"
-        :class="`chat-turn-group__notice--${notice.severity}`"
-      >
-        <div class="chat-turn-group__notice-body" role="note">
-          <YjIcon
-            name="warning"
-            size="sm"
-            :tone="notice.severity === 'error' ? 'error' : 'warning'"
-          />
-          <span>{{ noticeMessage(notice) }}</span>
-          <code>{{ notice.code }}</code>
-        </div>
-      </li>
+    <p v-if="currentStatus && !preloading" class="chat-turn-group__progress" role="status" aria-live="polite"><ChatThinkingIndicator :label="currentStatus" :active="nativeLiveProgress" /></p>
+    <p v-else-if="turn.progress && turn.source === 'local_submission' && !['failed', 'cancelled'].includes(turn.submissionStatus ?? '')" class="chat-turn-group__progress" role="status">{{ progressLabel(turn.progress) }}</p>
+    <ChatTraceNotices v-if="turn.traceNotices" :notices="turn.traceNotices" />
+    <ul v-if="turn.notices.length" class="chat-turn-group__notices" aria-label="本轮通知">
+      <li v-for="notice in turn.notices" :key="notice.identity" class="chat-turn-group__notice"><div role="note">{{ noticeMessage(notice) }}<code>{{ notice.code }}</code></div></li>
     </ul>
   </section>
 </template>
-
 <style scoped>
 .chat-turn-group__skill-mention { margin-inline-end: var(--yj-space-2); }
 .chat-turn-group__connector-mention { color: var(--yj-color-connector-mention); margin-inline-end: var(--yj-space-2); overflow-wrap: anywhere; }

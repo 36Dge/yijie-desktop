@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { activityItemTitle } from "../../domain/conversation-activity-summary";
 import { browserChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
 import ChatCopyAction from "./ChatCopyAction.vue";
 import type { ConversationNativeToolExecution } from "../../domain/conversation-view";
@@ -46,14 +47,14 @@ const diagnosticLabels = {
 <template>
   <ChatTimelineItemShell
     :process-presentation="processPresentation"
-    :item="item" label="工具调用" :status-label="status" icon="skillOperations"
+    :item="item" :label="activityItemTitle(item)" :status-label="status" icon="skillOperations"
     :status-icon="item.busy ? 'pending' : execution.status === 'completed' ? 'check' : 'warning'"
     :status-tone="item.busy ? 'primary' : execution.status === 'completed' ? 'success' : 'muted'"
     collapsible :default-expanded="processPresentation ? false : item.busy"
     @disclosure-change="emit('disclosure-change', $event)"
   >
     <div class="native-tool" :aria-busy="item.busy">
-      <strong>{{ identity }}</strong>
+      <strong>{{ native.toolDisplay?.sourceLabel || identity }}</strong>
       <p v-if="mcp?.server === 'sorftime'" class="native-tool__source">这是旧版 Sorftime 工具记录，仅供查看。新调用请从连接器页面配置并在聊天中选择 Sorftime。</p>
       <p class="native-tool__source">{{ execution.native.source === 'native_observed' ? '已观察到的原生记录' : '原生历史读取' }}</p>
       <p v-if="item.activityLabel" role="note">{{ item.activityLabel }}</p>

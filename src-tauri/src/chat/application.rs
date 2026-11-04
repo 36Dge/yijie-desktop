@@ -960,7 +960,6 @@ impl ConversationApplication {
             .local_submissions(session_id, turn_ids.clone())
             .await?;
         let mut views = Vec::new();
-        let mut archived_views_v5 = Vec::new();
         let mut bytes = 0_usize;
         let mut remaining_turn_ids = Vec::new();
         let mut record_diagnostics = Vec::new();
@@ -977,14 +976,12 @@ impl ConversationApplication {
                 break;
             }
             bytes += size;
-            archived_views_v5.extend(candidates.archived_views_v5.unwrap_or_default());
             views.extend(candidates.views);
             record_diagnostics.extend(candidates.record_diagnostics);
         }
         Ok(
             super::native_conversation_generated::NativeConversationHistory {
                 record_diagnostics: Some(record_diagnostics),
-                archived_views_v5: Some(archived_views_v5),
                 submissions,
                 views,
                 remaining_turn_ids,
@@ -4941,11 +4938,11 @@ mod tests {
                     let sequence=index+1;
                     let mut n=serde_json::json!({"source":"runtime_notification","method":method,"threadId":context.codex_thread_id,"turnId":native_turn,"availability":"available"});
                     for (k,v) in payload.as_object().unwrap() {n[k]=v.clone();}
-                    let event=serde_json::json!({"schema_version":11,"event_id":Uuid::now_v7(),"stream_id":stream,"sequence":sequence,"occurred_at":"2026-10-17T00:00:00Z","task_id":context.task_id,"agent_session_id":host_id,"codex_thread_id":context.codex_thread_id,"turn_id":native_turn,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":n}});
+                    let event=serde_json::json!({"schema_version":13,"event_id":Uuid::now_v7(),"stream_id":stream,"sequence":sequence,"occurred_at":"2026-10-17T00:00:00Z","task_id":context.task_id,"agent_session_id":host_id,"codex_thread_id":context.codex_thread_id,"turn_id":native_turn,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":n}});
                     let message=format!("id: {stream}:{sequence}\nevent: native.notification\ndata: {event}\n\n");
                     if method=="turn/completed" {end.push_str(&message);} else {start.push_str(&message);}
                 }
-                let headers=format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nX-Accel-Buffering: no\r\nX-Yijie-Event-Schema-Version: 11\r\nX-Yijie-Event-Stream-ID: {stream}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",start.len()+end.len());
+                let headers=format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nX-Accel-Buffering: no\r\nX-Yijie-Event-Schema-Version: 13\r\nX-Yijie-Event-Stream-ID: {stream}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",start.len()+end.len());
                 responses.insert(host_id.to_string(), (headers + &start, end));
             }
             let token_directory = root.join("host");
@@ -4985,7 +4982,7 @@ mod tests {
                     }
                     let id = responses
                         .keys()
-                        .find(|id| request.starts_with(&format!("GET /v11/agent-sessions/{id}/")))
+                        .find(|id| request.starts_with(&format!("GET /v13/agent-sessions/{id}/")))
                         .unwrap()
                         .clone();
                     let (start, end) = responses.remove(&id).unwrap();
@@ -5068,7 +5065,7 @@ mod tests {
             .unwrap();
         let stream_id = Uuid::now_v7();
         let event = |sequence, method: &str, status: &str| {
-            let e = serde_json::json!({"schema_version":11,"event_id":Uuid::now_v7(),"stream_id":stream_id,"sequence":sequence,"occurred_at":"2026-09-09T00:00:00Z","task_id":context.task_id,"agent_session_id":agent_session_id,"codex_thread_id":context.codex_thread_id,"turn_id":runtime_turn_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":{"source":"runtime_notification","method":method,"threadId":context.codex_thread_id,"turnId":runtime_turn_id,"availability":"available","turn":{"id":runtime_turn_id,"status":status,"items":[],"itemsComplete":false}}}});
+            let e = serde_json::json!({"schema_version":13,"event_id":Uuid::now_v7(),"stream_id":stream_id,"sequence":sequence,"occurred_at":"2026-09-09T00:00:00Z","task_id":context.task_id,"agent_session_id":agent_session_id,"codex_thread_id":context.codex_thread_id,"turn_id":runtime_turn_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":{"source":"runtime_notification","method":method,"threadId":context.codex_thread_id,"turnId":runtime_turn_id,"availability":"available","turn":{"id":runtime_turn_id,"status":status,"items":[],"itemsComplete":false}}}});
             format!("id: {stream_id}:{sequence}\nevent: native.notification\ndata: {e}\n\n")
         };
         let started = event(1, "turn/started", "inProgress");
@@ -5095,8 +5092,8 @@ mod tests {
             let (mut sse, _) = listener.accept().await.unwrap();
             assert!(read_request(&mut sse)
                 .await
-                .starts_with("GET /v11/agent-sessions/"));
-            let headers=format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nX-Accel-Buffering: no\r\nX-Yijie-Event-Schema-Version: 11\r\nX-Yijie-Event-Stream-ID: {stream_id}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",started.len()+ended.len());
+                .starts_with("GET /v13/agent-sessions/"));
+            let headers=format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nX-Accel-Buffering: no\r\nX-Yijie-Event-Schema-Version: 13\r\nX-Yijie-Event-Stream-ID: {stream_id}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",started.len()+ended.len());
             sse.write_all(format!("{headers}{started}").as_bytes())
                 .await
                 .unwrap();
@@ -5197,7 +5194,7 @@ mod tests {
             ("turn/completed",serde_json::json!({"turn":{"id":runtime_turn_id,"status":"failed","errorCode":"usageLimitExceeded","items":[],"itemsComplete":false}})),
         ].into_iter().enumerate(){
             let sequence=index+1;let mut n=serde_json::json!({"source":"runtime_notification","method":method,"threadId":context.codex_thread_id,"turnId":runtime_turn_id,"availability":"available"});for(k,v)in payload.as_object().unwrap(){n[k]=v.clone();}
-            let event=serde_json::json!({"schema_version":11,"event_id":Uuid::now_v7(),"stream_id":stream_id,"sequence":sequence,"occurred_at":"2026-09-08T00:00:00Z","task_id":context.task_id,"agent_session_id":agent_session_id,"codex_thread_id":context.codex_thread_id,"turn_id":runtime_turn_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":n}});
+            let event=serde_json::json!({"schema_version":13,"event_id":Uuid::now_v7(),"stream_id":stream_id,"sequence":sequence,"occurred_at":"2026-09-08T00:00:00Z","task_id":context.task_id,"agent_session_id":agent_session_id,"codex_thread_id":context.codex_thread_id,"turn_id":runtime_turn_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":n}});
             sse.push_str(&format!("id: {stream_id}:{sequence}\nevent: native.notification\ndata: {event}\n\n"));
         }
         let token_directory = root.join("host");
@@ -5214,7 +5211,7 @@ mod tests {
                     ("Content-Type", "text/event-stream"),
                     ("Cache-Control", "no-store"),
                     ("X-Accel-Buffering", "no"),
-                    ("X-Yijie-Event-Schema-Version", "11"),
+                    ("X-Yijie-Event-Schema-Version", "13"),
                     ("X-Yijie-Event-Stream-ID", &stream_id.to_string()),
                 ],
                 &sse,
@@ -5256,7 +5253,7 @@ mod tests {
         let requests = server.await.unwrap();
         assert_eq!(requests.len(), 2);
         assert!(requests[1].starts_with(&format!(
-            "GET /v11/agent-sessions/{agent_session_id}/events HTTP/1.1"
+            "GET /v13/agent-sessions/{agent_session_id}/events HTTP/1.1"
         )));
         assert!(requests.iter().all(|r| !r.starts_with("POST ")));
         drop(application);
@@ -5286,7 +5283,7 @@ mod tests {
         let token_path = token_directory.join("api-token");
         fs::write(&token_path, TOKEN).unwrap();
         fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
-        let snapshot = serde_json::json!({"schema_version":4,"source":"runtime_read","thread_id":context.codex_thread_id,"availability":"partial","turns":[{"id":runtime_turn_id,"status":"completed","itemsComplete":false,"items":[{"id":"item-0","type":"agentMessage","text":"recovered by Codex","phase":"final_answer","availability":"partial"}]}]});
+        let snapshot = serde_json::json!({"schema_version":6,"source":"runtime_read","thread_id":context.codex_thread_id,"availability":"partial","turns":[{"id":runtime_turn_id,"status":"completed","itemsComplete":false,"items":[{"id":"item-0","type":"agentMessage","text":"recovered by Codex","phase":"final_answer","availability":"partial"}]}]});
         let (port, server) = serve_http(vec![
             ready_response(CURRENT),
             json_response("200 OK", &snapshot.to_string()),
@@ -5327,7 +5324,7 @@ mod tests {
         let requests = server.await.unwrap();
         assert_eq!(requests.len(), 2);
         assert!(requests[1].starts_with(&format!(
-            "GET /v4/agent-sessions/{agent_session_id}/native-thread HTTP/1.1"
+            "GET /v6/agent-sessions/{agent_session_id}/native-thread HTTP/1.1"
         )));
         assert!(requests.iter().all(|r| !r.starts_with("POST ")));
         drop(application);

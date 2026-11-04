@@ -55,7 +55,7 @@ describe("first-content loading feedback", () => {
     await vi.advanceTimersByTimeAsync(3000);
     expect(wrapper.get(".chat-thinking").isVisible()).toBe(true);
     expect(wrapper.find(".chat-turn-group__details-control").exists()).toBe(false);
-    expect(wrapper.get(".chat-turn-group__item--reasoning").isVisible()).toBe(false);
+    expect(wrapper.find(".chat-turn-group__item--reasoning").exists()).toBe(false);
     expect(read).toHaveBeenCalledTimes(1);
 
     native.value = view([user, { ...emptyReasoning, item: { ...emptyReasoning.item, summary: ["先核对店铺信息。"] } }]);
@@ -71,7 +71,7 @@ describe("first-content loading feedback", () => {
       item: { id: "answer", type: "agentMessage", phase: "final_answer", text: "可以先尝小笼。", availability: "available" } };
     native.value = view([...native.value.items, answer]);
     await flushPromises();
-    expect(wrapper.get('.chat-turn-group__process-toggle').attributes("aria-expanded")).toBe("false");
+    expect(wrapper.find('.chat-turn-group__process-toggle').exists()).toBe(false);
     native.value = view(native.value.items.map(item => ({ ...item, lastMethod: "item/completed" })));
     await flushPromises();
     expect(row.textContent).toBe("已处理 4s"); // Item completion does not complete the Turn.

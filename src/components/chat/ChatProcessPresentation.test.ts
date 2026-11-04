@@ -58,7 +58,7 @@ describe("native process reading layout", () => {
     const searches = wrapper.findAll('.chat-web-search');
     expect(searches).toHaveLength(2);
     expect(searches[0]!.get('button').text()).toBe('网页搜索新丰小吃 · 推荐分店、必点小吃、分店人气');
-    expect(searches[1]!.get('button').text()).toBe('再次搜索新丰小吃 · 推荐分店、必点小吃、分店人气');
+    expect(searches[1]!.get('button').text()).toBe('网页搜索新丰小吃 · 推荐分店、必点小吃、分店人气');
     for (const search of searches) await search.get('button').trigger('click');
     expect(searches[0]!.get('a').attributes('href')).toBe('https://example.org/first');
     expect(searches[1]!.get('a').attributes('href')).toBe('https://example.org/second');
@@ -76,36 +76,27 @@ describe("native process reading layout", () => {
     expect(search.text()).not.toContain("信息不完整");
     view.items[1]!.item.availability="unavailable";
     await wrapper.setProps({turn:turn(view)});
-    await search.get("button").trigger("click");
-    expect(search.get('[role="note"]').text()).toContain("内容暂不可用");
+    const unavailable=wrapper.get(".chat-turn-group__item--web_search");
+    await unavailable.get("button").trigger("click");
+    expect(unavailable.get('[role="note"]').text()).toContain("内容暂不可用");
     wrapper.unmount();
   });
 
   it("shows search and progress naturally, keeps empty commands and duplicate summaries in inspectable details", async () => {
     const view=native(), before=JSON.stringify(view);
     const wrapper=mount(ChatTurnGroup,{attachTo:document.body,props:{turn:turn(view),position:1,timingLabel:"已完成 72s"}});
-    const nodes=wrapper.findAll(".chat-turn-group__item");
-    expect(nodes).toHaveLength(8);
-    expect(nodes[7]!.isVisible()).toBe(true);
-    expect(nodes[5]!.isVisible()).toBe(false);
-    expect(wrapper.find(".chat-turn-group__unknown").exists()).toBe(false);
+    expect(wrapper.findAll(".chat-activity-group")).toHaveLength(2);
+    expect(wrapper.findAll(".chat-turn-group__item--assistant_unclassified")[0]!.isVisible()).toBe(false);
+    expect(wrapper.findAll(".chat-turn-group__item--assistant_unclassified")[1]!.isVisible()).toBe(true);
     await wrapper.get(".chat-turn-group__timing button").trigger("click");
-    expect(nodes[1]!.isVisible()).toBe(true);
-    expect(nodes[1]!.text()).toContain("网页搜索");
-    expect(nodes[6]!.text()).toContain("阅读网页");
-    expect(nodes[5]!.isVisible()).toBe(true);
-    expect(nodes[5]!.get("article").classes()).toContain("chat-timeline-item-shell--process-inline");
-    expect(nodes[2]!.isVisible()).toBe(true);
-    expect(nodes[2]!.get(".chat-deep-thinking__viewport").isVisible()).toBe(false);
-    expect(nodes[3]!.isVisible()).toBe(true);
-    expect(wrapper.find(".chat-turn-group__details-control").exists()).toBe(false);
-    expect(nodes[4]!.get("button").text()).toBe("深度思考");
-    expect(nodes[4]!.get("button").attributes("aria-expanded")).toBe("false");
-    await nodes[4]!.get("button").trigger("click");
-    expect(nodes[4]!.text()).toContain("先核对两地公开资料。");
-    await nodes[3]!.get("button").trigger("click");
-    expect(nodes[3]!.text()).toContain("命令已结束，无可显示输出。");
-    expect(nodes[3]!.text()).toContain("0 毫秒");
+    for (const group of wrapper.findAll(".chat-activity-group__toggle")) await group.trigger("click");
+    expect(wrapper.findAll("[data-activity-item]")).toHaveLength(3);
+    expect(wrapper.findAll(".chat-deep-thinking")).toHaveLength(0);
+    expect(view.items.filter(entry => entry.item.type === "reasoning")).toHaveLength(2);
+    const command=wrapper.get(".chat-turn-group__item--command");
+    await command.get("button").trigger("click");
+    expect(command.text()).toContain("命令已结束，无可显示输出。");
+    expect(command.text()).toContain("0 毫秒");
     expect(wrapper.text()).not.toContain("未提供原始模型推理正文");
     expect(JSON.stringify(view)).toBe(before);
     expect(turn(view).items[5]!.assistantPhase).toBe("unknown");
@@ -115,8 +106,8 @@ describe("native process reading layout", () => {
   it("keeps old unsupported records available in details without claiming they were searches", async () => {
     const view=native();view.items=[record({id:"old",type:"unknown",availability:"unavailable"},0),view.items[7]!];
     const wrapper=mount(ChatTurnGroup,{attachTo:document.body,props:{turn:turn(view),position:1}});
-    expect(wrapper.get(".chat-turn-group__item--unknown").isVisible()).toBe(false);
-    await wrapper.get(".chat-turn-group__timing button").trigger("click");
+    expect(wrapper.get(".chat-turn-group__item--unknown").isVisible()).toBe(true);
+    expect(wrapper.find(".chat-turn-group__process-toggle").exists()).toBe(false);
     expect(wrapper.find(".chat-turn-group__details-control").exists()).toBe(false);
     expect(wrapper.get(".chat-turn-group__item--unknown").isVisible()).toBe(true);
     expect(wrapper.text()).toContain("unsupported_content");
@@ -157,12 +148,12 @@ describe("native process reading layout", () => {
     view.items.push(record({id:"later",type:"webSearch",webSearch:{action:"findInPage",queries:[],pattern:"收入"},availability:"available"},6));
     await wrapper.setProps({turn:projected()});
     expect(wrapper.get(".chat-turn-group__timing button").attributes("aria-expanded")).toBe("false");
-    expect(wrapper.findAll(".chat-turn-group__item--assistant_unclassified")[0]!.isVisible()).toBe(false);
+    expect(wrapper.findAll(".chat-turn-group__item--assistant_unclassified")[0]!.isVisible()).toBe(true);
     expect(view.items[5]!.item.phase).toBeUndefined();
     wrapper.unmount();
   });
 
-  it("keeps repeated summaries individually collapsed without a nested detail group", async () => {
+  it("retains repeated reasoning facts without adding activity rows", async () => {
     const view=native();view.status="inProgress";view.terminalObserved=false;
     view.items=view.items.slice(0,5);view.items[4]!.lastMethod="item/started";
     const projected=()=>selectConversationTimeline(composeConversationView(snapshot,[view]),"session",undefined,{protectApprovalProcessContent:false,liveTurnId:"turn"})!.turns[0]!;
@@ -170,10 +161,9 @@ describe("native process reading layout", () => {
     expect(wrapper.find(".chat-turn-group__details-control").exists()).toBe(false);
     view.items[4]!.lastMethod="item/completed";
     await wrapper.setProps({turn:projected()});
-    const duplicate=wrapper.findAll(".chat-turn-group__item--reasoning")[1]!;
-    expect(duplicate.get("button").attributes("aria-expanded")).toBe("false");
-    await duplicate.get("button").trigger("click");
-    expect(duplicate.text()).toContain("先核对两地公开资料。");
+    expect(wrapper.findAll(".chat-turn-group__item--reasoning")).toHaveLength(0);
+    expect(projected().items.filter(item => item.presentation === "reasoning")).toHaveLength(2);
+    expect(view.items[4]!.item.summary).toEqual(["先核对两地公开资料。"]);
     wrapper.unmount();
   });
 
@@ -227,11 +217,11 @@ describe("model and runtime progress have distinct provenance", () => {
     view.items = [view.items[0]!, record({id:'comment', type:'agentMessage', phase:'commentary', text:'我会先核对两地资料。', availability:'available'}, 1), view.items[1]!, view.items[7]!];
     const wrapper = mount(ChatTurnGroup, {attachTo: document.body, props: {turn: turn(view), position: 1}});
     await wrapper.get('.chat-turn-group__timing button').trigger('click');
-    expect(wrapper.get('[data-progress-source="model"]').text()).toBe('模型进度');
+    expect(wrapper.get('.chat-turn-group__item--commentary article').attributes('aria-label')).toBe('处理过程');
     expect(wrapper.get('.chat-turn-group__item--commentary .chat-safe-content').text()).toBe('我会先核对两地资料。');
     const children = [...wrapper.get('.chat-turn-group__items').element.children];
     const model = children.findIndex(node => node.classList.contains('chat-turn-group__item--commentary'));
-    const web = children.findIndex(node => node.classList.contains('chat-turn-group__item--web_search'));
+    const web = children.findIndex(node => node.classList.contains('chat-turn-group__item--activity'));
     expect(model).toBeLessThan(web);
     expect(wrapper.find('.chat-turn-group__execution-description').exists()).toBe(false);
     wrapper.unmount();
@@ -245,7 +235,7 @@ describe("model and runtime progress have distinct provenance", () => {
     await wrapper.get('.chat-turn-group__timing button').trigger('click');
     const message = wrapper.findAll('.chat-turn-group__item--assistant_unclassified')[0]!;
     expect(message.isVisible()).toBe(true);
-    expect(message.get('[data-message-source="model"]').text()).toBe('模型消息');
+    expect(message.get('article').attributes('aria-label')).toBe('模型消息');
     expect(wrapper.find('[data-progress-source="model"]').exists()).toBe(false);
     expect(message.get('.chat-text-link').text()).toBe('统计资料');
     expect(message.getComponent(ChatTextLink).props('destination')).toBe('https://example.org/statistics/2025');

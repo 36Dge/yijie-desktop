@@ -7,8 +7,10 @@ import {readArchiveAuthority,archiveDefinitions} from "./native-display-archive-
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const require=createRequire(path.join(root,"../yijie-contracts/package.json"));
 const {compile}=require("json-schema-to-typescript");
-const publicSpec=JSON.parse(await fs.readFile(path.join(root,"src-tauri/contracts/native-conversation-v4.json"),"utf8"));
-const privateSpec=JSON.parse(await fs.readFile(path.join(root,"src-tauri/schemas/chat-native-conversation-v4.schema.json"),"utf8"));
+const publicSpec=JSON.parse(await fs.readFile(path.join(root,"src-tauri/contracts/native-conversation-v6.json"),"utf8"));
+const fourthPublic=JSON.parse(await fs.readFile(path.join(root,"src-tauri/contracts/native-conversation-v4.json"),"utf8"));
+const privateSpec=JSON.parse(await fs.readFile(path.join(root,"src-tauri/schemas/chat-native-conversation-v6.schema.json"),"utf8"));
+const fourthPrivate=JSON.parse(await fs.readFile(path.join(root,"src-tauri/schemas/chat-native-conversation-v4.schema.json"),"utf8"));
 const previousPublic=JSON.parse(await fs.readFile(path.join(root,"src-tauri/contracts/native-conversation-v2.json"),"utf8"));
 const previousPrivate=JSON.parse(await fs.readFile(path.join(root,"src-tauri/schemas/chat-native-conversation-v2.schema.json"),"utf8"));
 const legacyPublic=JSON.parse(await fs.readFile(path.join(root,"src-tauri/contracts/native-conversation.json"),"utf8"));
@@ -17,9 +19,9 @@ const thirdPublic=JSON.parse(await fs.readFile(path.join(root,"src-tauri/contrac
 const thirdPrivate=JSON.parse(await fs.readFile(path.join(root,"src-tauri/schemas/chat-native-conversation-v3.schema.json"),"utf8"));
 const permissionSpec=JSON.parse(await fs.readFile(path.join(root,"src-tauri/contracts/runtime-permissions-v2.json"),"utf8"));
 const archive=await readArchiveAuthority(root);
-const archivedSchemas=archiveDefinitions(publicSpec,privateSpec,archive);
-const readHistory=JSON.parse(await fs.readFile(path.join(root,"src-tauri/schemas/chat-native-history-v5.schema.json"),"utf8"));
-const schemas={...publicSpec.components.schemas,...privateSpec.definitions,...readHistory.definitions,...archivedSchemas,McpApprovalScope:permissionSpec.components.schemas.McpApprovalScope,McpPermissionScopeResult:permissionSpec.components.schemas.McpPermissionScopeResult};
+const archivedSchemas=archiveDefinitions(fourthPublic,fourthPrivate,archive);
+const readHistory=JSON.parse(await fs.readFile(path.join(root,"src-tauri/schemas/chat-native-history-v6.schema.json"),"utf8"));
+const schemas={...publicSpec.components.schemas,...privateSpec.definitions,...readHistory.definitions,McpApprovalScope:permissionSpec.components.schemas.McpApprovalScope,McpPermissionScopeResult:permissionSpec.components.schemas.McpPermissionScopeResult};
 const snake=name=>name.replace(/([a-z0-9])([A-Z])/g,"$1_$2").toLowerCase();
 const pascal=name=>name.replace(/(^|[_-])([a-z])/g,(_,a,b)=>b.toUpperCase());
 const definitions=[];
@@ -79,9 +81,9 @@ const thirdFormatted=spawnSync("rustfmt",["--edition","2021"],{input:`// Generat
 if(thirdFormatted.status!==0)throw new Error(thirdFormatted.stderr||"v3 rustfmt failed");
 const archiveResolved={...jsonSchema(archivedSchemas.ArchiveV5NativeConversationView),definitions:jsonSchema(archivedSchemas)};
 const savedAjv=new Ajv({strict:false,code:{source:true,esm:true},formats:{int32:true,int64:true,uuid:/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/}});
-for(const [version,pub,priv] of [[1,legacyPublic,legacyPrivate],[2,previousPublic,previousPrivate],[3,thirdPublic,thirdPrivate],[4,publicSpec,privateSpec]]){const defs=jsonSchema({...pub.components.schemas,...priv.definitions});savedAjv.addSchema({...defs.NativeConversationView,definitions:defs},"saved"+version);}
+for(const [version,pub,priv] of [[1,legacyPublic,legacyPrivate],[2,previousPublic,previousPrivate],[3,thirdPublic,thirdPrivate],[4,fourthPublic,fourthPrivate],[6,publicSpec,privateSpec]]){const defs=jsonSchema({...pub.components.schemas,...priv.definitions});savedAjv.addSchema({...defs.NativeConversationView,definitions:defs},"saved"+version);}
 savedAjv.addSchema(archiveResolved,"saved5");
-const savedValidation='/* Generated saved-format validators; do not edit. */\nimport ucs2lengthModule from "ajv/dist/runtime/ucs2length.js";\nconst ucs2length=typeof ucs2lengthModule === "function"?ucs2lengthModule:ucs2lengthModule.default;\n'+standalone(savedAjv,Object.fromEntries([1,2,3,4,5].map(n=>["validateSavedV"+n,"saved"+n]))).replaceAll('require("ajv/dist/runtime/ucs2length").default',"ucs2length");
+const savedValidation='/* Generated saved-format validators; do not edit. */\nimport ucs2lengthModule from "ajv/dist/runtime/ucs2length.js";\nconst ucs2length=typeof ucs2lengthModule === "function"?ucs2lengthModule:ucs2lengthModule.default;\n'+standalone(savedAjv,Object.fromEntries([1,2,3,4,5,6].map(n=>["validateSavedV"+n,"saved"+n]))).replaceAll('require("ajv/dist/runtime/ucs2length").default',"ucs2length");
 const outputs=[
  ["src-tauri/schemas/chat-native-archive-v5-resolved.schema.json",JSON.stringify(archiveResolved,null,2)+"\n"],
  ["scripts/generated/native-saved-views-validator.gen.mjs",savedValidation],

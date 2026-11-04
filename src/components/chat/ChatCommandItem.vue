@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { activityItemTitle } from "../../domain/conversation-activity-summary";
+import type { ConversationActivityEntry } from "../../domain/conversation-activity-entry";
 import { computed } from "vue";
 import { browserChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
 import type { ConversationApproval } from "../../domain/conversation-approval";
@@ -45,6 +47,7 @@ export type ChatApprovalDecisionChange = Readonly<{
 
 const props = withDefaults(defineProps<{
   item: ConversationTimelineItemViewModel;
+  activityEntry?: ConversationActivityEntry;
   processPresentation?: boolean;
   execution: ConversationCommandExecution;
   approval?: ConversationApproval | null;
@@ -64,6 +67,7 @@ const emit = defineEmits<{
 }>();
 
 const native = computed(() => "native" in props.execution ? props.execution.native : null);
+const displayedActions = computed(() => native.value?.item.commandActions?.filter(action => props.activityEntry?.actionIndex == null || action.index === props.activityEntry.actionIndex) ?? []);
 const legacy = computed(() => "native" in props.execution ? null : props.execution);
 const commandSummary = computed(() => native.value
   ? native.value.item.commandLabel ?? "命令信息不可用"
@@ -301,9 +305,9 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
   <ChatTimelineItemShell
     :process-presentation="processPresentation"
     :item="item"
-    :label="processPresentation ? (execution.status === 'completed' ? '运行了命令' : '命令执行') : '命令执行'"
+    :label="activityEntry?.title ?? activityItemTitle(item)"
     :status-label="statusPresentation.label"
-    icon="workspace"
+    icon="terminal"
     :status-icon="statusPresentation.icon"
     :status-tone="statusPresentation.tone"
     :collapsible="!approvalNeedsAttention"
@@ -329,6 +333,12 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
         @decision="forwardApprovalDecision"
       />
 
+      <p v-if="activityEntry && (native?.item.commandActions?.length ?? 0) > 1">以下状态和输出属于同一次命令调用。</p>
+      <ul v-if="displayedActions.length" aria-label="原生命令动作">
+        <li v-for="action in displayedActions" :key="action.index">
+          {{ {read: '读取文件', listFiles: '查看目录', search: '搜索文件', unknown: '运行命令'}[action.kind] }}<span v-if="action.label"> · {{ action.label }}</span><span v-if="action.query"> · {{ action.query }}</span>
+        </li>
+      </ul>
       <dl class="chat-command-item__facts">
         <div>
           <dt>安全摘要</dt>
@@ -345,6 +355,10 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
         <div v-if="exitCode !== null">
           <dt>退出码</dt>
           <dd>{{ exitCode }}</dd>
+        </div>
+        <div v-else-if="native && execution.status === 'completed'">
+          <dt>执行结果</dt>
+          <dd>退出码未提供，执行结果未确认。</dd>
         </div>
       </dl>
 

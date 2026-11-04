@@ -41,8 +41,15 @@ export function isCollapsibleProcessItem(item: ConversationTimelineItemViewModel
 }
 
 /** Reading layout only: never rewrite a phase, lifecycle, Item, or saved view. */
-export function observedProgressMessages(items: readonly ConversationTimelineItemViewModel[], terminal = false): ReadonlySet<string> {
+export function tailCommentaryCandidate(items: readonly ConversationTimelineItemViewModel[]): string | null {
+  const last = items[items.length - 1];
+  return last?.presentation === "commentary" && last.contentBlocks.some(block =>
+    (block.type === "text" || block.type === "code") && block.text.trim()) ? last.identity : null;
+}
+
+export function observedProgressMessages(items: readonly ConversationTimelineItemViewModel[]): ReadonlySet<string> {
   const result = new Set<string>();
+  const candidate = tailCommentaryCandidate(items);
   let continuation = false;
   let laterAnswer = false;
   for (let i = items.length - 1; i >= 0; i--) {
@@ -52,11 +59,12 @@ export function observedProgressMessages(items: readonly ConversationTimelineIte
     // User input and explicit final answers are barriers, not inferred progress.
     if (item.presentation === "user_message") { continuation = false; laterAnswer = false; }
     else if (item.presentation === "final_answer") { continuation = false; laterAnswer ||= readable; }
-    else if (["web_search", "command", "tool", "reasoning"].includes(item.presentation)) continuation = true;
+    else if (item.identity === candidate) laterAnswer ||= readable;
+    else if (["web_search", "command", "tool"].includes(item.presentation)) continuation = true;
     else if (item.presentation === "assistant_unclassified") {
-      // A terminal Turn must keep its last unclassified answer readable, even
-      // when the provider emits trailing work with no subsequent answer.
-      if (continuation && (!terminal || laterAnswer) && item.domainStatus === "completed") result.add(item.identity);
+      // Protect the last readable answer during live work as well as history.
+      // Reasoning alone is not evidence of another public progress message.
+      if (continuation && laterAnswer && item.domainStatus === "completed") result.add(item.identity);
       laterAnswer ||= readable;
     }
   }

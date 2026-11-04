@@ -12,7 +12,7 @@ export type AnswerVote = "like" | "dislike" | null;
 
 export function isCompletedAnswer(item: ConversationTimelineItemViewModel, turn: ConversationTimelineTurnViewModel): boolean {
   return turn.domainStatus === "completed" && item.domainStatus === "completed" && item.kind === "assistant_message" &&
-    ["final_answer", "assistant_unclassified"].includes(item.presentation) && !observedProgressMessages(turn.items, true).has(item.identity);
+    ["final_answer", "assistant_unclassified"].includes(item.presentation) && !observedProgressMessages(turn.items).has(item.identity);
 }
 export function answerModelBadge(profileId: string | null | undefined): {label: string; icon: "modelKimi" | "modelMiniMax" | "assistant"} {
   const definition = [...currentModels, ...legacyModels].find(model => model.profile_id === profileId);

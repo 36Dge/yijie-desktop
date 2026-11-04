@@ -390,22 +390,12 @@ pub(super) fn receipt(
         status: "accepted".into(),
     })
 }
-// Read each supported persisted fact through its declared version. Reading never
-// rewrites old facts, and a future writer requires an explicit compatibility review.
+// Fresh conversations persist only format6; old facts are retired, not upgraded.
 fn decode_draft_notification(raw: &str, format: i64) -> Result<NativeNotification, Error> {
-    fn upgrade<T: serde::de::DeserializeOwned + serde::Serialize>(
-        raw: &str,
-    ) -> Result<NativeNotification, Error> {
-        let old: T = serde_json::from_str(raw).map_err(|_| P::DraftSourceInvalid)?;
-        serde_json::from_value(serde_json::to_value(old).map_err(|_| P::DraftSourceInvalid)?)
-            .map_err(|_| P::DraftSourceInvalid.into())
+    if format != crate::chat::native_conversation_storage::NATIVE_WRITE_FORMAT {
+        return Err(P::DraftSourceInvalid.into());
     }
-    match format {
-        2 => upgrade::<crate::chat::native_conversation_v2_generated::NativeNotification>(raw),
-        3 => upgrade::<crate::chat::native_conversation_v3_generated::NativeNotification>(raw),
-        4 => serde_json::from_str(raw).map_err(|_| P::DraftSourceInvalid.into()),
-        _ => Err(P::DraftSourceInvalid.into()),
-    }
+    serde_json::from_str(raw).map_err(|_| P::DraftSourceInvalid.into())
 }
 
 fn preview(db: &Connection, scope: &ChatScope, id: &str, n: i64) -> Result<Value, Error> {
@@ -436,7 +426,7 @@ fn preview(db: &Connection, scope: &ChatScope, id: &str, n: i64) -> Result<Value
         return Ok(unavailable());
     }
     let unknown: bool = sql(db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM chat_native_facts WHERE turn_id=?1 AND format_version NOT IN (2,3,4))",
+        "SELECT EXISTS(SELECT 1 FROM chat_native_facts WHERE turn_id=?1 AND format_version != 6)",
         [&turn],
         |r| r.get(0),
     ))?;
@@ -446,7 +436,7 @@ fn preview(db: &Connection, scope: &ChatScope, id: &str, n: i64) -> Result<Value
     let mut completed = false;
     let mut final_item = None;
     for (raw, format) in facts {
-        if !matches!(format, 2..=4) {
+        if format != crate::chat::native_conversation_storage::NATIVE_WRITE_FORMAT {
             return Ok(unavailable());
         }
         let fact = decode_draft_notification(&raw, format)?;
@@ -646,15 +636,13 @@ mod feat164_fact_reader_tests {
     fn feat164_draft_fact_versions_are_explicit_and_read_only() {
         let raw=json!({"source":"runtime_notification","method":"item/completed","threadId":"ordinary-thread","turnId":"ordinary-turn","itemId":"ordinary-item","availability":"available","item":{"id":"ordinary-item","type":"agentMessage","text":"ordinary completed draft","phase":"final_answer","availability":"available"}}).to_string();
         let original = raw.clone();
-        for version in [2, 3, 4] {
-            let decoded = decode_draft_notification(&raw, version).unwrap();
-            assert_eq!(
-                decoded.item.unwrap().text.as_deref(),
-                Some("ordinary completed draft")
-            );
-            assert_eq!(raw, original);
-        }
-        for unsupported in [1, 5] {
+        let decoded = decode_draft_notification(&raw, 6).unwrap();
+        assert_eq!(
+            decoded.item.unwrap().text.as_deref(),
+            Some("ordinary completed draft")
+        );
+        assert_eq!(raw, original);
+        for unsupported in [1, 2, 3, 4, 5, 7] {
             assert!(decode_draft_notification(&raw, unsupported).is_err());
         }
     }

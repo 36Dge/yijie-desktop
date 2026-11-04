@@ -17,12 +17,14 @@ function view(): NativeConversationView {
 const turn = (value: NativeConversationView) => selectConversationTimeline(composeConversationView({threads:[{threadId:"session",status:"ready"}],turns:[],items:[]},[value]),"session",undefined,{protectApprovalProcessContent:false,liveTurnId:"turn"})!.turns[0]!;
 
 describe("answer completion reading layout", () => {
-  it("omits only empty ended thinking and preserves saved records and the real tool result", async () => {
+  it("omits ordinary reasoning rows and preserves saved records and the real tool result", async () => {
     const value=view(), original=JSON.stringify(value);
     const wrapper=mount(ChatTurnGroup,{props:{turn:turn(value),position:1}});
     await wrapper.get('.chat-turn-group__process-toggle').trigger('click');
-    expect(wrapper.findAll('.chat-deep-thinking')).toHaveLength(1);
-    expect(wrapper.get('.chat-execution-progress').text()).toContain('已完成资源检查');
+    expect(wrapper.findAll('.chat-deep-thinking')).toHaveLength(0);
+    expect(value.items.filter(entry => entry.item.type === 'reasoning')).toHaveLength(2);
+    expect(wrapper.find('.chat-activity-group__toggle').exists()).toBe(false);
+    expect(wrapper.findAll('[data-activity-item]')).toHaveLength(1);
     await wrapper.get('.chat-turn-group__item--tool button').trigger('click');
     expect(wrapper.get('.native-tool').text()).toContain('未发现可用资源');
     expect(wrapper.text()).not.toContain('结果内容已省略');
@@ -32,8 +34,9 @@ describe("answer completion reading layout", () => {
   it("keeps the live empty waiting state, then removes it when its item or turn ends", async () => {
     const value=view();value.items=[value.items[0]!];value.status='inProgress';value.terminalObserved=false;value.items[0]!.lastMethod='item/started';
     const wrapper=mount(ChatTurnGroup,{props:{turn:turn(value),position:1}});
-    expect(wrapper.find('.chat-deep-thinking').exists()).toBe(true);
-    expect(wrapper.text()).toContain('正在等待思考内容');
+    expect(wrapper.find('.chat-deep-thinking').exists()).toBe(false);
+    expect(wrapper.findAll('[role="status"]')).toHaveLength(1);
+    expect(wrapper.text()).toContain('正在思考');
     value.status='completed';value.terminalObserved=true;
     await wrapper.setProps({turn:turn(value)});
     expect(wrapper.find('.chat-deep-thinking').exists()).toBe(false);
@@ -44,7 +47,8 @@ describe("answer completion reading layout", () => {
     const value=view();const tool=value.items[1]!.item;tool.availability='partial';tool.mcp!.resultKind='omitted';tool.mcp!.texts=[];tool.mcp!.diagnostics=['result_unavailable'];
     const wrapper=mount(ChatTurnGroup,{props:{turn:turn(value),position:1}});
     await wrapper.get('.chat-turn-group__process-toggle').trigger('click');
-    expect(wrapper.get('.chat-execution-progress').text()).toContain('已完成资源检查');
+    expect(wrapper.find('.chat-activity-group__toggle').exists()).toBe(false);
+    expect(wrapper.get('.chat-turn-group__item--tool').isVisible()).toBe(true);
     tool.status='failed';await wrapper.setProps({turn:turn(value)});
     expect(wrapper.find('.chat-execution-progress').exists()).toBe(false);
     wrapper.unmount();

@@ -18,6 +18,7 @@ const props = withDefaults(defineProps<{
   statusTone?: "default" | "muted" | "primary" | "success" | "warning" | "error";
   collapsible?: boolean;
   processPresentation?: boolean;
+  answerCandidate?: boolean;
   defaultExpanded?: boolean;
 }>(), {
   statusTone: "muted",
@@ -40,14 +41,14 @@ const expanded = computed(() => expansionChoice.value ?? props.defaultExpanded);
 const plainProcess = computed(() => props.processPresentation &&
   ["commentary", "reasoning", "assistant_unclassified"].includes(props.item.presentation));
 const availabilityInDetails = computed(() => props.collapsible && props.processPresentation &&
-  props.item.presentation === "web_search" && props.item.domainStatus === "completed" &&
+  ["web_search", "command", "tool"].includes(props.item.presentation) &&
   props.item.availability === "partial" && !props.item.activityLabel && !props.item.approval);
 const id = useId();
 const titleId = `${id}-title`;
 const statusId = `${id}-status`;
 const contentId = `${id}-content`;
 const busy = computed(() => props.item.busy === true);
-const isAnswer = computed(() => !props.processPresentation && (props.item.presentation === "final_answer" ||
+const isAnswer = computed(() => !props.processPresentation && (props.answerCandidate || props.item.presentation === "final_answer" ||
   props.item.presentation === "assistant_unclassified"));
 const hideNormalAnswerStatus = computed(() => isAnswer.value &&
   (props.item.domainStatus === "completed" || busy.value) && !props.item.activityLabel);
@@ -95,7 +96,7 @@ function toggle(): void {
       >
         <span class="chat-timeline-item-shell__identity">
           <YjIcon :name="icon" size="sm" :tone="iconTone" />
-          <strong :id="titleId">{{ label }}</strong>
+          <strong :id="titleId" :title="label">{{ label }}</strong>
         </span>
         <span :id="statusId" class="chat-timeline-item-shell__status">
           <YjIcon
@@ -358,9 +359,15 @@ function toggle(): void {
 }
 .chat-timeline-item-shell--process-inline .chat-timeline-item-shell__disclosure {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   padding: var(--yj-space-1) 0;
   color: var(--yj-color-text-secondary);
+}
+.chat-timeline-item-shell--process-inline .chat-timeline-item-shell__identity {
+  flex: 1 1 0;
+}
+.chat-timeline-item-shell--process-inline .chat-timeline-item-shell__status {
+  flex: 0 1 auto;
 }
 .chat-timeline-item-shell--process-inline .chat-timeline-item-shell__identity strong {
   font-weight: var(--yj-font-weight-regular);

@@ -36,6 +36,8 @@ fn omit_display_content(item: &mut NativeItem) {
     item.command_label = None;
     item.cwd_label = None;
     item.web_search = None;
+    item.command_actions = None;
+    item.tool_display = None;
     item.availability = "partial".into();
     if let Some(mcp) = &mut item.mcp {
         if !mcp.texts.is_empty() {
@@ -102,6 +104,7 @@ impl NativeDisplayBuffer {
             status_source: None,
             terminal_observed: false,
             items: vec![],
+            notices: None,
             plan: None,
             explanation: None,
             diagnostic: None,
@@ -131,7 +134,7 @@ impl NativeDisplayBuffer {
     /// Transport ordering is checked exactly once here. It never changes the
     /// native execution status and never requests or retries a model operation.
     pub fn observe(&mut self, event: &NativeEvent) -> Result<bool, ChatError> {
-        if !matches!(event.schema_version, 7 | 8 | 10 | 11)
+        if event.schema_version != 13
             || event.event_type != "native.notification"
             || event.task_id != self.context.task_id.to_string()
             || event.agent_session_id != self.context.agent_session_id.to_string()
@@ -175,7 +178,12 @@ impl NativeDisplayBuffer {
             return Ok(true);
         }
         if n.source == "projection_notice" {
-            self.mark_unavailable(n.code.as_deref().unwrap_or("projection_unavailable"));
+            // Command chunks are deliberately withheld until the complete output
+            // can be sanitized. This is not a loss of lifecycle/stream authority.
+            // In particular it must not replace a real stream-gap diagnostic.
+            if n.code.as_deref() != Some("command_output_pending_final") {
+                self.mark_unavailable(n.code.as_deref().unwrap_or("projection_unavailable"));
+            }
             return Ok(true);
         }
         if n.source != "runtime_notification" {
@@ -330,7 +338,30 @@ impl NativeDisplayBuffer {
                 }
             }
             "error" | "warning" => {
-                self.view.diagnostic = n.code.clone();
+                let notices = self.view.notices.get_or_insert_with(Vec::new);
+                if !notices
+                    .iter()
+                    .any(|notice| notice.event_id == event.event_id)
+                {
+                    if notices.len() == 32 {
+                        notices.remove(0);
+                        self.view.availability = "partial".into();
+                    }
+                    notices.push(super::native_conversation_generated::NativeTraceNotice {
+                        event_id: event.event_id.clone(),
+                        sequence: event.sequence.to_string(),
+                        method: n.method.clone(),
+                        code: n.code.clone().unwrap_or_else(|| "runtime_notice".into()),
+                        scope: if n.turn_id.is_some() {
+                            "turn"
+                        } else {
+                            "thread"
+                        }
+                        .into(),
+                        will_retry: n.will_retry,
+                        item_id: n.item_id.clone(),
+                    });
+                }
             }
             _ => self.mark_unavailable("unsupported_notification"),
         }
@@ -353,7 +384,7 @@ pub(crate) fn run_r8_native_display_probe() -> Result<u64, ChatError> {
         cursor: None,
     };
     let mut buffer = NativeDisplayBuffer::new(context.clone(), None)?;
-    let mut event:NativeEvent=serde_json::from_value(serde_json::json!({"schema_version":7,"event_id":Uuid::from_u128(101),"stream_id":Uuid::from_u128(100),"sequence":1,"occurred_at":"2026-09-08T00:00:00Z","task_id":context.task_id,"agent_session_id":context.agent_session_id,"codex_thread_id":context.codex_thread_id,"event_type":"native.notification","terminal":false,"payload":{"native":{"source":"runtime_notification","method":"item/started","threadId":context.codex_thread_id,"turnId":context.runtime_turn_id,"availability":"available","item":{"id":"display-probe","type":"agentMessage","text":"","phase":"final_answer","availability":"available"}}}})).map_err(|_|ChatError::InvalidInput)?;
+    let mut event:NativeEvent=serde_json::from_value(serde_json::json!({"schema_version":13,"event_id":Uuid::from_u128(101),"stream_id":Uuid::from_u128(100),"sequence":1,"occurred_at":"2026-09-08T00:00:00Z","task_id":context.task_id,"agent_session_id":context.agent_session_id,"codex_thread_id":context.codex_thread_id,"event_type":"native.notification","terminal":false,"payload":{"native":{"source":"runtime_notification","method":"item/started","threadId":context.codex_thread_id,"turnId":context.runtime_turn_id,"availability":"available","item":{"id":"display-probe","type":"agentMessage","text":"","phase":"final_answer","availability":"available"}}}})).map_err(|_|ChatError::InvalidInput)?;
     buffer.observe(&event)?;
     event.payload.native.method = "item/agentMessage/delta".into();
     event.payload.native.item = None;
@@ -397,8 +428,32 @@ mod tests {
         for (k, v) in payload.as_object().unwrap() {
             n[k] = v.clone()
         }
-        serde_json::from_value(serde_json::json!({"schema_version":7,"event_id":Uuid::from_u128(100+sequence as u128),"stream_id":Uuid::from_u128(99),"sequence":sequence,"occurred_at":"2026-09-08T00:00:00Z","task_id":c.task_id,"agent_session_id":c.agent_session_id,"codex_thread_id":c.codex_thread_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":n}})).unwrap()
+        serde_json::from_value(serde_json::json!({"schema_version":13,"event_id":Uuid::from_u128(100+sequence as u128),"stream_id":Uuid::from_u128(99),"sequence":sequence,"occurred_at":"2026-09-08T00:00:00Z","task_id":c.task_id,"agent_session_id":c.agent_session_id,"codex_thread_id":c.codex_thread_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":n}})).unwrap()
     }
+    #[test]
+    fn native_output_policy_notice_keeps_subsequent_lifecycle_authoritative() {
+        let mut b = NativeDisplayBuffer::new(context(), None).unwrap();
+        b.observe(&event(1,"turn/started",serde_json::json!({"turn":{"id":context().runtime_turn_id,"status":"inProgress","items":[],"itemsComplete":false}}))).unwrap();
+        b.observe(&event(2,"item/started",serde_json::json!({"item":{"id":"command","type":"commandExecution","status":"inProgress","availability":"available"}}))).unwrap();
+        b.observe(&event(3,"projection/error",serde_json::json!({"source":"projection_notice","code":"command_output_pending_final","itemId":"command","availability":"partial"}))).unwrap();
+        b.observe(&event(4,"item/completed",serde_json::json!({"item":{"id":"command","type":"commandExecution","status":"completed","exitCode":0,"outputText":"ordinary output","availability":"available"}}))).unwrap();
+        b.observe(&event(5,"item/started",serde_json::json!({"item":{"id":"tool","type":"mcpToolCall","status":"inProgress","availability":"partial"}}))).unwrap();
+        assert_eq!(b.view.diagnostic, None);
+        assert_eq!(b.view.status.as_deref(), Some("inProgress"));
+        assert!(!b.view.terminal_observed);
+        assert_eq!(b.view.items.len(), 2);
+        assert_eq!(b.view.items[1].item.status.as_deref(), Some("inProgress"));
+        assert_eq!(
+            b.view.items[0].item.output_text.as_deref(),
+            Some("ordinary output")
+        );
+        // A pre-existing historical continuity diagnostic is never healed by
+        // receiving a non-fatal content-policy notification.
+        b.view.diagnostic = Some("stream_gap".into());
+        b.observe(&event(6,"projection/error",serde_json::json!({"source":"projection_notice","code":"command_output_pending_final","itemId":"command"}))).unwrap();
+        assert_eq!(b.view.diagnostic.as_deref(), Some("stream_gap"));
+    }
+
     #[test]
     fn feat144_native_tool_replacement_keeps_new_status_at_display_capacity() {
         let mut buffer = NativeDisplayBuffer::new(context(), None).unwrap();
@@ -407,14 +462,14 @@ mod tests {
         }
         let item = |status: &str, text: String| serde_json::json!({"item":{"id":"native-tool","type":"mcpToolCall","availability":"available","status":status,"mcp":{"server":"sorftime","tool":"product_detail","resultKind":"text","texts":[{"index":2,"text":text}],"diagnostics":[]}}});
         let mut started = event(16, "item/started", item("inProgress", String::new()));
-        started.schema_version = 8;
+        started.schema_version = 13;
         buffer.observe(&started).unwrap();
         let mut completed = event(
             17,
             "item/completed",
             item("completed", "b".repeat(256 * 1024)),
         );
-        completed.schema_version = 8;
+        completed.schema_version = 13;
         buffer.observe(&completed).unwrap();
         let observed = buffer
             .view
@@ -428,7 +483,7 @@ mod tests {
         assert!(observed.item.mcp.as_ref().unwrap().texts.is_empty());
         assert!(serde_json::to_vec(&buffer.view).unwrap().len() <= MAX_VIEW_BYTES);
         let mut empty = event(18, "item/completed", item("completed", String::new()));
-        empty.schema_version = 8;
+        empty.schema_version = 13;
         buffer.observe(&empty).unwrap();
         let observed = buffer
             .view
@@ -439,6 +494,41 @@ mod tests {
         assert_eq!(observed.item.mcp.as_ref().unwrap().texts[0].index, 2);
         assert_eq!(observed.item.mcp.as_ref().unwrap().texts[0].text, "");
         assert!(observed.item.mcp.as_ref().unwrap().diagnostics.is_empty());
+    }
+
+    #[test]
+    fn native_trace_retry_intent_and_notice_scope_do_not_end_the_turn() {
+        let mut buffer = NativeDisplayBuffer::new(context(), None).unwrap();
+        for (sequence, value) in [
+            (1, serde_json::json!(true)),
+            (2, serde_json::json!(false)),
+            (3, serde_json::Value::Null),
+        ] {
+            let notice = event(
+                sequence,
+                "error",
+                serde_json::json!({"code":"transport_error","willRetry":value}),
+            );
+            buffer.observe(&notice).unwrap();
+            assert!(!buffer.view.terminal_observed);
+        }
+        let mut notice = event(4, "warning", serde_json::json!({"code":"runtime_warning"}));
+        notice.payload.native.turn_id = None;
+        buffer.observe(&notice).unwrap();
+        assert_eq!(
+            buffer
+                .view
+                .notices
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|n| n.will_retry)
+                .collect::<Vec<_>>(),
+            vec![Some(true), Some(false), None, None]
+        );
+        assert_eq!(buffer.view.notices.as_ref().unwrap()[3].scope, "thread");
+        assert!(!buffer.observe(&notice).unwrap());
+        assert_eq!(buffer.view.notices.as_ref().unwrap().len(), 4);
     }
 
     #[test]

@@ -734,7 +734,7 @@ export function createChatClient(transport: ChatClientTransport = productionTran
       return run("chat_cancel_request_v1", envelope.request, parseCancelledResponse);
     },
     async loadNativeHistory(contextId, sessionId, turnIds, signal) {
-      return runRead("chat_load_native_history_v4", contextId, {sessionId, turnIds}, value => {
+      return runRead("chat_load_native_history_v6", contextId, {sessionId, turnIds}, value => {
         if (typeof value !== "object" || value === null || !("schemaVersion" in value) || value.schemaVersion !== 1 || !("data" in value) || !validateNativeHistory(value.data)) {
           throw new ChatClientError({schemaVersion: 1, code: "chat_protocol_error", retryable: false, recovery: "resync"});
         }
@@ -742,7 +742,7 @@ export function createChatClient(transport: ChatClientTransport = productionTran
       }, signal);
     },
     async onNativeView(handler, onInvalid) {
-      return transport.listen("chat:native-view:v4", payload => {
+      return transport.listen("chat:native-view:v6", payload => {
         if (validateNativeViewEvent(payload) && payload.view.sessionId === payload.sessionId) handler(payload);
         else onInvalid?.(invalidEventScope(payload));
       });

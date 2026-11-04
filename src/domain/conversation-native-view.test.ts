@@ -53,10 +53,10 @@ describe("FEAT-132 readonly native view",()=>{
  it("renders final values directly without prefix comparison",()=>{const view=composeConversationView(legacy,[{...native,items:[{...native.items[0]!,item:{...native.items[0]!.item,text:"completely revised final"}}]}]);expect(Object.values(view.items)[0]?.contentBlocks).toEqual([{type:"text",blockIndex:0,text:"completely revised final"}]);});
  it("keeps legacy IDs and archive provenance when no native facts exist",()=>{const view=composeConversationView(legacy,[]);expect(Object.values(view.items)[0]?.itemId).toBe("old-display");expect(Object.values(view.turns)[0]?.source).toBe("legacy_archive");});
  it("marks queued submission failure separately from native execution",()=>{const view=composeConversationView(legacy,[],[{turnId:"local-turn",operationId:"operation",status:"failed"}]);expect(Object.values(view.turns)[0]).toMatchObject({source:"local_submission",submissionStatus:"failed",status:"queued",terminalStatus:null});});
- it("accepts current v4 IPC while rejecting legacy envelopes, future versions and unknown status",()=>{
+ it("accepts current v6 IPC while rejecting legacy envelopes, future versions and unknown status",()=>{
    // Stored v3 records have a separate Rust decoder; they are not v3 IPC events.
    // The generated type makes a future protocol upgrade expose this fixture drift.
-   const event={schemaVersion:4,contextId:"c",subscriptionId:"s",sessionId:native.sessionId,view:native} satisfies NativeConversationViewEvent;
+   const event={schemaVersion:6,contextId:"c",subscriptionId:"s",sessionId:native.sessionId,view:native} satisfies NativeConversationViewEvent;
    expect(validateNativeViewEvent(event)).toBe(true);
    expect(validateNativeViewEvent({...event,schemaVersion:3})).toBe(false);
    expect(validateNativeViewEvent({...event,schemaVersion:5})).toBe(false);
@@ -70,20 +70,8 @@ describe("FEAT164 saved archive compatibility", () => {
   const view=composeConversationView(legacy,[],[{turnId:"local-turn",operationId:"accepted-operation",status:"submitted"}],[{sessionId:"local-session",turnId:"local-turn",formatVersion:6,code:"format_unsupported"}]);
   expect(selectConversationTurn(view,"local-session","local-turn")).toMatchObject({source:"legacy_archive",status:"failed",terminalStatus:"failed",availability:"unavailable",diagnostic:"native_format_unsupported"});
  });
- it("attaches full typed saved details only to the same whole projected view", () => {
-  const base={...native,items:[{ordinal:0,lastMethod:"item/completed" as const,item:{id:"file",type:"unknown" as const,status:"completed" as const,availability:"available" as const}}]};
-  const archive={...base,items:[{...base.items[0]!,item:{...base.items[0]!.item,type:"fileChange" as const,fileChange:{changes:[{index:0,kind:"add" as const,pathLabel:"report.md",diffText:"Saved report\n",addedLines:1,removedLines:0}]}}}]};
-  const input=JSON.stringify(archive);
-  expect(validateNativeHistory({views:[base],archivedViewsV5:[archive],submissions:[],remainingTurnIds:[],historyAvailability:"partial"})).toBe(true);
-  const view=composeConversationView(legacy,[base],[],[],[],[archive]);
-  expect(Object.values(view.items)[0]?.archiveV5?.fileChange?.changes[0]?.diffText).toBe("Saved report\n");
-  expect(selectConversationTurn(view,"local-session","local-turn")?.status).toBe("failed");
-  expect(JSON.stringify(archive)).toBe(input);
-  const later=composeConversationView(legacy,[{...base,revision:"3"}],[],[],[],[archive]);
-  expect(Object.values(later.items)[0]?.archiveV5).toBeUndefined();
-  for (const changed of [{...base,source:"native_rebuilt" as const},{...base,status:"completed" as const},{...base,terminalObserved:false}]) {
-   expect(Object.values(composeConversationView(legacy,[changed],[],[],[],[archive]).items)[0]?.archiveV5).toBeUndefined();
-  }
+ it("rejects retired archive companions on the v6 history interface", () => {
+  expect(validateNativeHistory({views:[native],archivedViewsV5:[],submissions:[],remainingTurnIds:[],historyAvailability:"partial"})).toBe(false);
  });
 });
 

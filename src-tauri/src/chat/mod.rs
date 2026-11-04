@@ -2014,13 +2014,10 @@ mod tests {
         assert!(artifacts_v3_transfer_enabled(Some("true")));
     }
 }
-mod native_archive;
+// FEAT-167: old native record readers are retired; fresh sessions write format6.
 pub mod native_conversation;
 pub mod native_conversation_generated;
-pub mod native_conversation_legacy_generated;
 mod native_conversation_storage;
-pub mod native_conversation_v2_generated;
-pub mod native_conversation_v3_generated;
 
 pub(crate) mod turn_model_generated;
 mod turn_timing;

@@ -559,7 +559,7 @@ class ReplayTransport implements ChatClientTransport {
     if (
       channel !== CHAT_EVENT_CHANNEL &&
       channel !== CHAT_CONTROL_PLANE_EVENT_CHANNEL &&
-      channel !== "chat:native-view:v4" &&
+      channel !== "chat:native-view:v6" &&
       channel !== CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL
     ) {
       throw new Error(`feat131-replay-listen-unknown:${channel}`);
@@ -660,9 +660,9 @@ class ReplayTransport implements ChatClientTransport {
         if (!snapshot) throw new Error("feat131-replay-snapshot-exhausted");
         return response(2, request.requestId, snapshot);
       }
-      case "chat_load_native_history_v4": {
+      case "chat_load_native_history_v6": {
         const request = requestEnvelope(arguments_, 1, this.fixture.ids.contextId);
-        return response(1, request.requestId, { views: [], submissions: [], remainingTurnIds: [], historyAvailability: "unavailable", recordDiagnostics: [], archivedViewsV5: [] });
+        return response(1, request.requestId, { views: [], submissions: [], remainingTurnIds: [], historyAvailability: "unavailable", recordDiagnostics: [] });
       }
       case "chat_get_session_purpose_v1": {
         const request = requestEnvelope(arguments_, 1, this.fixture.ids.contextId);

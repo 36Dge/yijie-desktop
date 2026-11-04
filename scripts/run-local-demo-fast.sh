@@ -40,6 +40,8 @@ image_generation_enabled="true"
 stable_api_only="false"
 packaged_app="false"
 development_app="false"
+development_ui_bundle="${YIJIE_DEVELOPMENT_UI_BUNDLE:-false}"
+[[ "$development_ui_bundle" == "false" || "$development_ui_bundle" == "true" ]] || fail "invalid development UI bundle selector"
 expert_profile="daily"
 reopen_app="false"
 feat134_environment=()
@@ -55,6 +57,7 @@ if [[ "${1:-}" == "--development" ]]; then
 elif [[ "${YIJIE_DEVELOPMENT_CLIENT:-false}" != "false" ]]; then
   fail "development requires its explicit canonical selector"
 fi
+[[ "$development_ui_bundle" == "false" || "$development_app" == "true" ]] || fail "UI bundle requires the canonical development entry"
 # The ordinary packaged entry keeps the existing stable-only branch intact.
 if [[ "$#" -ge 1 && "$1" == "--packaged" ]]; then
   [[ "$development_app" == "false" ]] || fail "development and packaged modes cannot be combined"
@@ -491,7 +494,7 @@ fi
 cd "$desktop_root"
 node scripts/check-native-conversation.mjs --require-committed
 node scripts/check-native-mcp.mjs --require-committed
-node scripts/check-native-process.mjs --candidate
+node scripts/check-native-process.mjs --require-committed
 YIJIE_DESKTOP_CONTRACTS_DIR="$workspace_root/yijie-contracts" \
 YIJIE_DESKTOP_AGENT_HOST_DIR="$host_root" \
   node scripts/check-agent-host-v4-contract.mjs
@@ -560,7 +563,16 @@ if [[ "$workflow_requested" == "true" && "$prepare_only" != "true" && "$migrate_
 fi
 
 if [[ "$development_app" == "true" ]]; then
-  launch_command=(node scripts/run-workflow-dev.mjs)
+  if [[ "$development_ui_bundle" == "true" ]]; then
+    # Explicitly requested local UI qualification. Standard Tauri build output;
+    # same daily Homes and full feature/permission bootstrap, no published bundle.
+    pnpm tauri:build:demo-fast --features kimi-k31-pro-candidate "${workflow_tauri_config[@]+"${workflow_tauri_config[@]}"}" "${experts_tauri_config[@]+"${experts_tauri_config[@]}"}"
+    bundle_binary="$CARGO_TARGET_DIR/debug/bundle/macos/易界 AI.app/Contents/MacOS/yijie-desktop"
+    [[ -x "$bundle_binary" && ! -L "$bundle_binary" ]] || fail "development UI bundle is missing"
+    launch_command=("$bundle_binary")
+  else
+    launch_command=(node scripts/run-workflow-dev.mjs)
+  fi
 elif [[ "$stable_api_only" == "true" ]]; then
   pnpm tauri:build:demo-fast:stable
   bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/易界 AI FEAT-131.app/Contents/MacOS/yijie-desktop"
@@ -624,7 +636,11 @@ fi
 # Daily readiness is checked only after the exact bundle receipt, never repaired.
 if [[ "$development_app" == "true" ]]; then
   python3 -B "$desktop_root/scripts/development-client.py" ready
-  printf 'Fixed development client: live frontend, original daily data, incremental native build.\n'
+  if [[ "$development_ui_bundle" == "true" ]]; then
+    printf 'Local UI qualification: standard debug bundle, original daily Homes, no published application overwritten.\n'
+  else
+    printf 'Fixed development client: live frontend, original daily data, incremental native build.\n'
+  fi
 elif [[ "$kimi_k31_daily" == "true" && "$prepare_only" != "true" ]]; then
   if [[ "$migrate_daily_k3" != "true" && "$workflow_requested" == "true" ]]; then
     python3 -B "$desktop_root/scripts/feat164-daily-deployment.py" ready --stage "$daily_stage" --desktop-root "$desktop_root"

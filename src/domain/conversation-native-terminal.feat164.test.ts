@@ -6,7 +6,7 @@ import { composeConversationView, selectConversationTurn, type ConversationSnaps
 it.each(["failed", "completed", "interrupted"] as const)("FEAT-164 preserves native read terminal %s with empty content", (status) => {
   const snapshot: ConversationSnapshot = {threads:[{threadId:"local-session",status:"ready"}],turns:[{threadId:"local-session",turnId:"local-turn",ordinal:0,status:"completed",terminalStatus:"completed"}],items:[]};
   const read: NativeConversationView = {sessionId:"local-session",turnId:"local-turn",runtimeThreadId:"runtime-thread",runtimeTurnId:"runtime-turn",source:"native_observed",statusSource:"runtime_read",revision:"2",availability:"available",status,terminalObserved:true,items:[]};
-  const event = {schemaVersion:4,contextId:"c",subscriptionId:"s",sessionId:read.sessionId,view:read};
+  const event = {schemaVersion:6,contextId:"c",subscriptionId:"s",sessionId:read.sessionId,view:read};
   expect(validateNativeViewEvent(event)).toBe(true);
   expect(validateNativeViewEvent({...event,schemaVersion:5})).toBe(false);
   expect(validateNativeHistory({views:[read],submissions:[],remainingTurnIds:[],historyAvailability:"partial"})).toBe(true);

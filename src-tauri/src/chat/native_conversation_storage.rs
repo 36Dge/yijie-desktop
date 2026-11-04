@@ -8,42 +8,17 @@ use uuid::Uuid;
 
 // Explicit versioned writer. Old readers retain their format-unsupported guard;
 // existing records are decoded in place and are never migrated on read.
-pub const NATIVE_WRITE_FORMAT: i64 = 4;
-const NATIVE_READ_FORMAT: i64 = 5;
+pub const NATIVE_WRITE_FORMAT: i64 = 6;
+const NATIVE_READ_FORMAT: i64 = 6;
 
 pub(crate) fn decode_native_view(
     json: &str,
     format: i64,
 ) -> Result<NativeConversationView, ChatError> {
-    match format {
-        1 => {
-            let old: super::native_conversation_legacy_generated::NativeConversationView =
-                serde_json::from_str(json).map_err(|_| ChatError::DatabaseUnavailable)?;
-            serde_json::from_value(
-                serde_json::to_value(old).map_err(|_| ChatError::DatabaseUnavailable)?,
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)
-        }
-        2 => {
-            let old: super::native_conversation_v2_generated::NativeConversationView =
-                serde_json::from_str(json).map_err(|_| ChatError::DatabaseUnavailable)?;
-            serde_json::from_value(
-                serde_json::to_value(old).map_err(|_| ChatError::DatabaseUnavailable)?,
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)
-        }
-        3 => {
-            let old: super::native_conversation_v3_generated::NativeConversationView =
-                serde_json::from_str(json).map_err(|_| ChatError::DatabaseUnavailable)?;
-            serde_json::from_value(
-                serde_json::to_value(old).map_err(|_| ChatError::DatabaseUnavailable)?,
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)
-        }
-        4 => serde_json::from_str(json).map_err(|_| ChatError::DatabaseUnavailable),
-        5 => super::native_archive::decode_v5(json).map(|(view, _)| view),
-        _ => Err(ChatError::DatabaseUnavailable),
+    if format != NATIVE_READ_FORMAT {
+        return Err(ChatError::DatabaseUnavailable);
     }
+    serde_json::from_str(json).map_err(|_| ChatError::DatabaseUnavailable)
 }
 
 impl ChatRepository {
@@ -95,7 +70,6 @@ impl ChatRepository {
         let mut result = NativeViewRecords {
             views: Vec::new(),
             record_diagnostics: Vec::new(),
-            archived_views_v5: Some(Vec::new()),
         };
         for id in turn_ids {
             let row: Option<(String, i64)> = self.connection.query_row(
@@ -103,7 +77,7 @@ impl ChatRepository {
                 params![session_id.to_string(), id.to_string()], |r| Ok((r.get(0)?, r.get(1)?)))
                 .optional().map_err(|_| ChatError::DatabaseUnavailable)?;
             if let Some((json, version)) = row {
-                if version > NATIVE_READ_FORMAT {
+                if version != NATIVE_READ_FORMAT {
                     result.record_diagnostics.push(NativeRecordDiagnostic {
                         session_id: session_id.to_string(),
                         turn_id: id.to_string(),
@@ -112,17 +86,7 @@ impl ChatRepository {
                     });
                     continue;
                 }
-                let view = if version == 5 {
-                    let (view, archive) = super::native_archive::decode_v5(&json)?;
-                    result
-                        .archived_views_v5
-                        .as_mut()
-                        .ok_or(ChatError::DatabaseUnavailable)?
-                        .push(archive);
-                    view
-                } else {
-                    decode_native_view(&json, version)?
-                };
+                let view = decode_native_view(&json, version)?;
                 if view.session_id != session_id.to_string() || view.turn_id != id.to_string() {
                     return Err(ChatError::ConversationConflict);
                 }
@@ -189,7 +153,6 @@ impl ChatRepository {
         let records = self.native_view_records(session_id, turn_ids)?;
         let mut views = records.views;
         let record_diagnostics = records.record_diagnostics;
-        let archived_views_v5 = records.archived_views_v5;
         for view in &mut views {
             let rebuilt = snapshot
                 .filter(|s| s.thread_id == view.runtime_thread_id)
@@ -267,6 +230,7 @@ impl ChatRepository {
                             .collect()
                     })
                     .unwrap_or_default(),
+                notices: None,
                 plan: None,
                 explanation: None,
                 diagnostic: Some("native_history_partial".into()),
@@ -293,7 +257,6 @@ impl ChatRepository {
         Ok(NativeViewRecords {
             views,
             record_diagnostics,
-            archived_views_v5,
         })
     }
 
@@ -326,7 +289,7 @@ impl ChatRepository {
             )
             .optional()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if revision_row.is_some_and(|(_, v)| v > NATIVE_WRITE_FORMAT) {
+        if revision_row.is_some_and(|(_, v)| v != NATIVE_WRITE_FORMAT) {
             return Err(ChatError::ConversationConflict);
         }
         let revision = revision_row.map(|(r, _)| r);
@@ -403,13 +366,10 @@ impl ChatRepository {
             )
             .optional()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if revision_row.is_some_and(|(_, v)| v > NATIVE_WRITE_FORMAT) {
+        if revision_row.is_some_and(|(_, v)| v != NATIVE_WRITE_FORMAT) {
             return Err(ChatError::ConversationConflict);
         }
-        if NATIVE_WRITE_FORMAT == 1
-            && (view.items.iter().any(|i| i.item.mcp.is_some())
-                || event.is_some_and(|e| e.schema_version != 7))
-        {
+        if event.is_some_and(|e| e.schema_version != 13) {
             return Err(ChatError::ConversationConflict);
         }
         let revision = revision_row.map(|(r, _)| r);
@@ -425,7 +385,8 @@ impl ChatRepository {
             let n = &event.payload.native;
             if n.source == "runtime_notification"
                 && n.thread_id == runtime_thread
-                && n.turn_id.as_deref() == Some(runtime_turn.as_str())
+                && (n.turn_id.as_deref() == Some(runtime_turn.as_str())
+                    || (n.turn_id.is_none() && matches!(n.method.as_str(), "error" | "warning")))
                 && matches!(
                     n.method.as_str(),
                     "item/started"
@@ -433,6 +394,8 @@ impl ChatRepository {
                         | "turn/started"
                         | "turn/completed"
                         | "turn/plan/updated"
+                        | "error"
+                        | "warning"
                 )
             {
                 let fact = serde_json::to_string(n).map_err(|_| ChatError::DatabaseUnavailable)?;
@@ -489,7 +452,7 @@ mod source_reader_tests {
     use super::*;
 
     #[test]
-    fn native_sources_read_v3_and_v4_without_rewriting_history() {
+    fn native_trace_v6_reads_only_current_format() {
         let mut value = serde_json::json!({
             "sessionId":"session","turnId":"turn","runtimeThreadId":"runtime","runtimeTurnId":"runtime-turn",
             "source":"native_observed","revision":"1","availability":"available","status":"completed",
@@ -497,17 +460,12 @@ mod source_reader_tests {
             "items":[{"ordinal":0,"lastMethod":"item/completed","item":{"id":"search","type":"webSearch","availability":"available","webSearch":{"action":"search","queries":["annual statistics"]}}}]
         });
         let old_json = value.to_string();
-        let old = decode_native_view(&old_json, 3).unwrap();
-        assert!(old.items[0]
-            .item
-            .web_search
-            .as_ref()
-            .unwrap()
-            .sources
-            .is_none());
+        for format in 1..=5 {
+            assert!(decode_native_view(&old_json, format).is_err());
+        }
         value["items"][0]["item"]["webSearch"]["sources"] = serde_json::json!([{"url":"https://example.org/statistics/2025","title":"Annual statistics"}]);
         let new_json = value.to_string();
-        let new = decode_native_view(&new_json, 4).unwrap();
+        let new = decode_native_view(&new_json, 6).unwrap();
         assert_eq!(
             new.items[0]
                 .item
@@ -521,7 +479,7 @@ mod source_reader_tests {
             "https://example.org/statistics/2025"
         );
         assert!(decode_native_view(&new_json, 3).is_err());
-        assert!(decode_native_view(&new_json, 6).is_err());
+        assert!(decode_native_view(&new_json, 7).is_err());
         assert!(!old_json.contains("sources"));
     }
 }

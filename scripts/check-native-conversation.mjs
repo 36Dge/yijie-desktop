@@ -15,7 +15,7 @@ for (const file of ["src/stores/chat.store.ts", "src/api/chat-conversation-adapt
 assert.doesNotMatch(source("src/vite-env.d.ts") + source("src/pages/chat/ChatPage.vue"), /LEGACY_CHAT_TIMELINE_ROLLBACK/);
 assert.match(source("src-tauri/src/chat/application.rs"), /open_native_event_stream/);
 assert.match(source("src-tauri/src/chat/host_bridge.rs"), /native-thread/);
-assert.match(source("src-tauri/src/lib.rs"), /chat_load_native_history_v1/);
+assert.match(source("src-tauri/src/lib.rs"), /chat_load_native_history_v6/);
 assert.match(source("src-tauri/src/chat/migrations.rs"), /0014_chat_native_conversation/);
 const committed = existsSync(path.join(root, "contracts/native-conversation.lock.json"));
 const manifest = JSON.parse(source(`contracts/native-conversation.${committed ? "lock" : "candidate"}.json`));

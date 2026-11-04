@@ -279,7 +279,7 @@ async fn finish_with_phase(
   facts.push(json!({"method":"turn/completed","turn":{"id":context.runtime_turn_id,"status":status,"items":[],"itemsComplete":false}}));
   let stream=Uuid::now_v7();
   for (i,mut native)in facts.into_iter().enumerate(){native["source"]=json!("runtime_notification");native["threadId"]=json!(thread);native["turnId"]=json!(context.runtime_turn_id);native["availability"]=json!("available");
-   let event:NativeEvent=serde_json::from_value(json!({"schema_version":7,"event_id":Uuid::now_v7(),"stream_id":stream,"sequence":i+1,"occurred_at":"2026-09-19T00:00:00Z","task_id":task,"agent_session_id":context.agent_session_id,"codex_thread_id":thread,"event_type":"native.notification","terminal":native["method"]=="turn/completed","payload":{"native":native}})).unwrap();
+   let event:NativeEvent=serde_json::from_value(json!({"schema_version":13,"event_id":Uuid::now_v7(),"stream_id":stream,"sequence":i+1,"occurred_at":"2026-09-19T00:00:00Z","task_id":task,"agent_session_id":context.agent_session_id,"codex_thread_id":thread,"event_type":"native.notification","terminal":native["method"]=="turn/completed","payload":{"native":native}})).unwrap();
    assert!(buffer.observe(&event)?);buffer.view=r.commit_native_view(&context,buffer.view.clone(),Some(&event),n)?;
   }
   // View is partial because the turn's complete item inventory is unavailable.

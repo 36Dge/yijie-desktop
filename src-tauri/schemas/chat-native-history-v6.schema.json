@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Native trace v6 read response; old archive formats retired",
+  "definitions": {
+    "NativeConversationHistory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "views",
+        "historyAvailability",
+        "submissions",
+        "remainingTurnIds"
+      ],
+      "properties": {
+        "views": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NativeConversationView"
+          },
+          "maxItems": 50
+        },
+        "historyAvailability": {
+          "type": "string",
+          "enum": [
+            "partial",
+            "unavailable"
+          ]
+        },
+        "submissions": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/definitions/LocalSubmissionView"
+          }
+        },
+        "remainingTurnIds": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string"
+          }
+        },
+        "recordDiagnostics": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/definitions/NativeRecordDiagnostic"
+          }
+        }
+      }
+    },
+    "NativeViewRecords": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "views",
+        "recordDiagnostics"
+      ],
+      "properties": {
+        "views": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/definitions/NativeConversationView"
+          }
+        },
+        "recordDiagnostics": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/definitions/NativeRecordDiagnostic"
+          }
+        }
+      }
+    }
+  }
+}

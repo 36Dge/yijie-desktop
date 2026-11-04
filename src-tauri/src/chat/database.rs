@@ -11494,13 +11494,13 @@ mod tests {
         for (k, v) in payload.as_object().unwrap() {
             native[k] = v.clone();
         }
-        serde_json::from_value(serde_json::json!({"schema_version":7,"event_id":Uuid::from_u128(100+sequence as u128),"stream_id":Uuid::from_u128(90),"sequence":sequence,"occurred_at":"2026-09-08T00:00:00Z","task_id":context.task_id,"agent_session_id":context.agent_session_id,"codex_thread_id":context.codex_thread_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":native}})).unwrap()
+        serde_json::from_value(serde_json::json!({"schema_version":13,"event_id":Uuid::from_u128(100+sequence as u128),"stream_id":Uuid::from_u128(90),"sequence":sequence,"occurred_at":"2026-09-08T00:00:00Z","task_id":context.task_id,"agent_session_id":context.agent_session_id,"codex_thread_id":context.codex_thread_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":native}})).unwrap()
     }
 
     #[test]
-    fn feat144_native_formats_preserve_history_and_block_unsupported_recovery() {
+    fn feat167_native_format6_only_survives_normal_reopen() {
         use crate::chat::native_conversation::NativeDisplayBuffer;
-        let root = std::env::temp_dir().join(format!("feat144-reader-{}", Uuid::now_v7()));
+        let root = std::env::temp_dir().join(format!("feat167-reader-{}", Uuid::now_v7()));
         fs::create_dir(&root).unwrap();
         let owner = scope();
         let mut repo = open_repository_for_scope(&root, 45, owner.clone());
@@ -11510,124 +11510,76 @@ mod tests {
             .unwrap();
         bind_and_accept_first_turn(&mut repo, &pending, unix_seconds().unwrap());
         let context = repo.active_turn_context(pending.session_id).unwrap();
-        let mut view = NativeDisplayBuffer::new(context.clone(), None)
-            .unwrap()
-            .view;
-        view.revision = "1".into();
-        let old_json = serde_json::to_string(&view).unwrap();
-        repo.connection.execute("INSERT INTO chat_native_views(turn_id,session_id,source,revision,view_json) VALUES(?1,?2,'native_observed',1,?3)",params![pending.turn_id.to_string(),pending.session_id.to_string(),old_json]).unwrap();
-        assert_eq!(
-            repo.native_views(pending.session_id, &[pending.turn_id])
-                .unwrap(),
-            vec![view.clone()]
+        let mut buffer = NativeDisplayBuffer::new(context.clone(), None).unwrap();
+        let event = native_test_event(
+            &context,
+            1,
+            "item/completed",
+            serde_json::json!({"item":{"id":"command","type":"commandExecution","status":"completed","availability":"available","commandActions":[{"index":0,"kind":"read","label":"README.md"}],"exitCode":0}}),
         );
-        let version: i64 = repo
-            .connection
-            .query_row("SELECT format_version FROM chat_native_views", [], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        assert_eq!(version, 1);
-
-        let mut next = view.clone();
-        next.items.push(serde_json::from_value(serde_json::json!({"ordinal":0,"lastMethod":"item/completed","item":{"id":"native-mcp","type":"mcpToolCall","status":"completed","availability":"available","mcp":{"server":"sorftime","tool":"product_detail","resultKind":"text","texts":[{"index":1,"text":""},{"index":3,"text":"普通商品资料"}],"diagnostics":[]}}})).unwrap());
-        let next_json = serde_json::to_string(&next).unwrap();
-        repo.connection
-            .execute(
-                "UPDATE chat_native_views SET view_json=?1,format_version=2",
-                [&next_json],
-            )
+        buffer.observe(&event).unwrap();
+        let view = repo
+            .commit_native_view(&context, buffer.view, Some(&event), unix_seconds().unwrap())
             .unwrap();
         assert_eq!(
-            repo.native_views(pending.session_id, &[pending.turn_id])
+            repo.connection
+                .query_row("SELECT format_version FROM chat_native_views", [], |r| r
+                    .get::<_, i64>(0))
                 .unwrap(),
-            vec![next]
+            6
         );
         drop(repo);
-        let mut repo = open_repository_for_scope(&root, 45, owner);
-        assert_eq!(
-            repo.native_views(pending.session_id, &[pending.turn_id])
-                .unwrap()[0]
-                .items[0]
-                .item
-                .mcp
-                .as_ref()
-                .unwrap()
-                .texts[0]
-                .index,
-            1
-        );
-        // A known saved display format keeps every archive-only detail while
-        // the current writer remains unable to replace it with format 4.
-        let mut archived: serde_json::Value = serde_json::from_str(&next_json).unwrap();
-        archived["items"].as_array_mut().unwrap().push(serde_json::json!({"ordinal":1,"lastMethod":"item/completed","item":{"id":"saved-file","type":"fileChange","status":"completed","availability":"available","fileChange":{"changes":[{"index":0,"kind":"add","pathLabel":"report.md","diffText":"Saved report\n","addedLines":1,"removedLines":0}]}}}));
-        let archived_json = archived.to_string();
-        repo.connection
-            .execute(
-                "UPDATE chat_native_views SET view_json=?1,format_version=5",
-                [&archived_json],
-            )
-            .unwrap();
+        let repo = open_repository_for_scope(&root, 45, owner);
         let records = repo
             .native_view_records(pending.session_id, &[pending.turn_id])
             .unwrap();
         assert!(records.record_diagnostics.is_empty());
-        assert_eq!(records.views[0].items[1].item.kind, "unknown");
-        assert_eq!(
-            records.archived_views_v5.unwrap()[0].items[1]
-                .item
-                .file_change
-                .as_ref()
-                .unwrap()
-                .changes[0]
-                .diff_text
-                .as_deref(),
-            Some("Saved report\n")
-        );
-        assert!(repo
-            .commit_native_view(&context, view.clone(), None, unix_seconds().unwrap())
-            .is_err());
-        let retained: (String, i64) = repo
+        assert_eq!(records.views, vec![view]);
+        let saved_before: String = repo
             .connection
             .query_row(
-                "SELECT view_json,format_version FROM chat_native_views",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                "SELECT view_json FROM chat_native_views WHERE turn_id=?1",
+                [pending.turn_id.to_string()],
+                |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(retained, (archived_json.clone(), 5));
-
-        // An ordinary future-format record is retained, not interpreted as a
-        // missing snapshot or an invitation to reconstruct it from native history.
-        repo.connection
-            .execute("UPDATE chat_native_views SET format_version=6", [])
+        let facts_before: i64 = repo
+            .connection
+            .query_row("SELECT COUNT(*) FROM chat_native_facts", [], |row| {
+                row.get(0)
+            })
             .unwrap();
-        let records = repo
-            .native_recovery_records(pending.session_id, &[pending.turn_id], None, true)
+        repo.native_view_records(pending.session_id, &[pending.turn_id])
             .unwrap();
-        assert!(records.views.is_empty());
-        assert_eq!(records.record_diagnostics.len(), 1);
+        let saved_after: String = repo
+            .connection
+            .query_row(
+                "SELECT view_json FROM chat_native_views WHERE turn_id=?1",
+                [pending.turn_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let facts_after: i64 = repo
+            .connection
+            .query_row("SELECT COUNT(*) FROM chat_native_facts", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
         assert_eq!(
-            records.record_diagnostics[0].turn_id,
-            pending.turn_id.to_string()
+            saved_before, saved_after,
+            "reading format6 must not backfill or rewrite existing records"
         );
-        assert_eq!(records.record_diagnostics[0].format_version, 6);
-        assert!(repo
-            .native_views(pending.session_id, &[pending.turn_id])
-            .is_err());
-        assert!(repo
-            .commit_native_view(&context, view, None, unix_seconds().unwrap())
-            .is_err());
-        let retained: String = repo
-            .connection
-            .query_row("SELECT view_json FROM chat_native_views", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(retained, archived_json);
-        let fact_count: i64 = repo
-            .connection
-            .query_row("SELECT COUNT(*) FROM chat_native_facts", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(fact_count, 0);
+        assert_eq!(facts_before, facts_after);
+        assert_eq!(
+            records.views[0].items[0]
+                .item
+                .command_actions
+                .as_ref()
+                .unwrap()[0]
+                .label
+                .as_deref(),
+            Some("README.md")
+        );
         drop(repo);
         fs::remove_dir_all(root).unwrap();
     }
@@ -11708,7 +11660,7 @@ mod tests {
             .all(|m| m.content.is_empty()));
         drop(repo);
         let mut reopened = open_repository_for_scope(&root, 45, owner.clone());
-        let cold:NativeThreadSnapshot=serde_json::from_value(serde_json::json!({"schema_version":1,"source":"runtime_read","thread_id":context.codex_thread_id,"availability":"partial","turns":[{"id":context.runtime_turn_id,"status":"completed","itemsComplete":false,"items":[{"id":"item-0","type":"agentMessage","text":"cold answer","availability":"partial"}]}]})).unwrap();
+        let cold:NativeThreadSnapshot=serde_json::from_value(serde_json::json!({"schema_version":6,"source":"runtime_read","thread_id":context.codex_thread_id,"availability":"partial","turns":[{"id":context.runtime_turn_id,"status":"completed","itemsComplete":false,"items":[{"id":"item-0","type":"agentMessage","text":"cold answer","availability":"partial"}]}]})).unwrap();
         let views = reopened
             .native_recovery_views(pending.session_id, &[pending.turn_id], Some(&cold), true)
             .unwrap();
@@ -11759,7 +11711,7 @@ mod tests {
             .unwrap();
         bind_and_accept_first_turn(&mut repo, &pending, unix_seconds().unwrap());
         let c = repo.active_turn_context(pending.session_id).unwrap();
-        let cold:NativeThreadSnapshot=serde_json::from_value(serde_json::json!({"schema_version":1,"source":"runtime_read","thread_id":c.codex_thread_id,"availability":"partial","turns":[{"id":c.runtime_turn_id,"status":"completed","itemsComplete":false,"items":[{"id":"item-0","type":"agentMessage","text":"cold answer","availability":"partial"}]}]})).unwrap();
+        let cold:NativeThreadSnapshot=serde_json::from_value(serde_json::json!({"schema_version":6,"source":"runtime_read","thread_id":c.codex_thread_id,"availability":"partial","turns":[{"id":c.runtime_turn_id,"status":"completed","itemsComplete":false,"items":[{"id":"item-0","type":"agentMessage","text":"cold answer","availability":"partial"}]}]})).unwrap();
         let views = repo
             .native_recovery_views(pending.session_id, &[pending.turn_id], Some(&cold), true)
             .unwrap();
@@ -11866,7 +11818,7 @@ mod tests {
             .commit_native_view(&c, b.view, Some(&start), unix_seconds().unwrap())
             .unwrap();
         let revision = b.view.revision.clone();
-        let cold:NativeThreadSnapshot=serde_json::from_value(serde_json::json!({"schema_version":1,"source":"runtime_read","thread_id":c.codex_thread_id,"availability":"partial","turns":[{"id":c.runtime_turn_id,"status":"completed","itemsComplete":false,"items":[]}]})).unwrap();
+        let cold:NativeThreadSnapshot=serde_json::from_value(serde_json::json!({"schema_version":6,"source":"runtime_read","thread_id":c.codex_thread_id,"availability":"partial","turns":[{"id":c.runtime_turn_id,"status":"completed","itemsComplete":false,"items":[]}]})).unwrap();
         let views = repo
             .native_recovery_views(pending.session_id, &[pending.turn_id], Some(&cold), false)
             .unwrap();
@@ -12003,6 +11955,31 @@ mod tests {
             .unwrap();
         assert_eq!(web.last_method, "item/completed");
         assert_eq!(web.item.kind, "webSearch");
+        assert!(
+            buffer.view.diagnostic.is_none(),
+            "normal output policy is not a transport discontinuity"
+        );
+        let command = buffer
+            .view
+            .items
+            .iter()
+            .find(|entry| entry.item.id == "host-command")
+            .unwrap();
+        assert_eq!(
+            command.item.command_label.as_deref(),
+            Some("python3 --version；tail -n 5 README.md")
+        );
+        assert_eq!(command.item.command_actions.as_ref().unwrap().len(), 2);
+        let tool = buffer
+            .view
+            .items
+            .iter()
+            .find(|entry| entry.item.id == "host-tool")
+            .unwrap();
+        assert_eq!(
+            tool.item.tool_display.as_ref().unwrap().title.as_deref(),
+            Some("查看公开资料")
+        );
         assert_eq!(
             web.item.web_search.as_ref().unwrap().queries,
             vec!["城市产业", "生活成本"]
@@ -12060,6 +12037,9 @@ mod tests {
             views[0].diagnostic.as_deref(),
             Some("history_source_conflict")
         );
+        if let Ok(output) = std::env::var("YIJIE_FEAT132_TEST_VIEW_OUTPUT") {
+            fs::write(output, serde_json::to_vec(&views[0]).unwrap()).unwrap();
+        }
         drop(reopened);
         fs::remove_dir_all(root).unwrap();
     }

@@ -123,28 +123,6 @@ pub async fn chat_web_source_v1(
                         .is_some_and(|sources| sources.iter().any(|s| s.url == target.url))
                 }
         })
-    }) || history.archived_views_v5.as_ref().is_some_and(|views| {
-        views.iter().any(|view| {
-            view.items.iter().any(|entry| {
-                entry.item.id == target.item_id
-                    && if matches!(request.payload.action, Action::OpenMessageLink) {
-                        message_contains_link(
-                            &entry.item.kind,
-                            entry.item.text.as_deref(),
-                            entry.item.summary.as_deref(),
-                            entry.item.content.as_deref(),
-                            &target.url,
-                        )
-                    } else {
-                        entry
-                            .item
-                            .web_search
-                            .as_ref()
-                            .and_then(|s| s.sources.as_ref())
-                            .is_some_and(|sources| sources.iter().any(|s| s.url == target.url))
-                    }
-            })
-        })
     });
     if !supplied {
         return Err(invalid());

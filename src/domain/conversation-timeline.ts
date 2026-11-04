@@ -1,3 +1,4 @@
+import { traceDiagnosticBlocksLive } from "./conversation-trace-liveness";
 import {
 selectConversationApprovalForCommand,
 type ConversationApproval,
@@ -154,7 +155,6 @@ export type ConversationTimelinePlanViewModel = Readonly<{
 }>;
 
 export type ConversationTimelineItemViewModel = Readonly<{
-  archiveV5?: ConversationItem["archiveV5"];
   webSearch?: ConversationItem["webSearch"];
   identity: string;
   threadId: string;
@@ -182,6 +182,8 @@ export type ConversationTimelineItemViewModel = Readonly<{
 }>;
 
 export type ConversationTimelineTurnViewModel = Readonly<{
+  traceSequence?: string;
+  traceNotices?: ConversationTurn["traceNotices"];
   diagnostic?: ConversationTurn["diagnostic"];
   liveObserved?: boolean;
   source?: ConversationTurn["source"];
@@ -487,17 +489,17 @@ function projectItem(
 
   const unfinished = item.status === "started" || item.status === "streaming";
   const nativeLive = policy?.liveTurnId === turn.turnId && turn.source === "native_observed" &&
-    turn.statusSource === "runtime_notification" && turn.status === "in_progress" && turn.availability !== "unavailable" && !turn.diagnostic;
+    turn.statusSource === "runtime_notification" && turn.status === "in_progress" && turn.availability !== "unavailable" && !traceDiagnosticBlocksLive(turn.diagnostic);
   const nativeExecutionActive = item.execution !== null && "native" in item.execution
     ? item.execution.native.item.status === "inProgress" : true;
-  const busy = unfinished && nativeLive && nativeExecutionActive && item.availability === "available";
+  const busy = unfinished && nativeLive && nativeExecutionActive && item.availability !== "unavailable";
   const ended = ["completed", "failed", "interrupted"].includes(turn.status);
   const activityLabel = unfinished && !busy
     ? ended ? "本轮已结束，未观察到该项结束记录" : "仅有已观察记录，当前进度待确认"
     : undefined;
   return Object.freeze({
     identity,
-    busy, activityLabel, availability: item.availability, archiveV5: item.archiveV5,
+    busy, activityLabel, availability: item.availability,
     ...(item.webSearch ? {webSearch: item.webSearch} : {}),
     threadId: item.threadId,
     turnId: item.turnId,
@@ -685,6 +687,7 @@ function projectTurn(
     plan: projectPlan(turn, policy),
     progress: projectProgress(turn, policy),
     notices: projectNotices(turn),
+    traceNotices: turn.traceNotices, traceSequence: turn.traceSequence,
     items: Object.freeze(relatedItems(state, turn)
       .map((item) => projectItem(item, turn, approvalState, policy))),
   });

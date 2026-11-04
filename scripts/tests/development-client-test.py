@@ -2,6 +2,8 @@
 import importlib.util
 from pathlib import Path
 import unittest
+import json
+import tempfile
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("development", Path(__file__).resolve().parents[1] / "development-client.py")
@@ -17,6 +19,23 @@ class DevelopmentClientTest(unittest.TestCase):
         self.assertEqual(selected["runtime"], root / ".local/demo-fast/codex-home")
         self.assertEqual(selected["native"], Path("/Users/owner/Library/Application Support/com.yijie.ai/demo-fast-v1"))
         self.assertEqual(selected, development.paths(root, Path("/Users/owner")))
+
+    def test_v6_receipt_allows_only_the_fixed_fresh_home(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve() / "yijie-desktop"
+            root.mkdir()
+            (root / ".git").mkdir()
+            selected = development.paths(root, Path(folder).resolve() / "user")
+            for key in ("native", "host", "runtime", "output"):
+                selected[key].mkdir(mode=0o700, parents=True)
+            (selected["native"] / "secrets").mkdir()
+            (selected["native"] / "secrets/chat-sqlcipher-v1.secret").write_text("ordinary-fixture-key")
+            with patch.object(development, "stopped"):
+                with self.assertRaises(ValueError):
+                    development.check(root, Path(folder).resolve() / "user")
+                (selected["output"] / "trace-v6-reset.json").write_text(json.dumps({"schemaVersion": 1, "nativeFormat": 6, "sseVersion": 13, "ipcVersion": 6}))
+                self.assertEqual(development.check(root, Path(folder).resolve() / "user"), selected)
+                self.assertFalse((selected["native"] / "chat/conversations.db").exists())
 
     def test_environment_does_not_reuse_packaged_or_observation_overrides(self):
         root = Path("/workspace/yijie-desktop")

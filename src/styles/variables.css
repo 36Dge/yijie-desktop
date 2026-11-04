@@ -222,6 +222,7 @@
   --yj-z-preview-notice: 3;
   --yj-layout-chat-column-max: 880px;
   --yj-layout-chat-composer-max: 880px;
+  --yj-layout-chat-activity-max-height: 320px;
   --yj-layout-chat-search-max-height: 150px;
   --yj-layout-chat-thinking-max-height: 240px;
   --yj-layout-chat-link-tooltip-max-width: 480px;

@@ -21,7 +21,6 @@ type ConversationThreadStatus,
 type ConversationTurnSnapshot,
 } from "../../domain/conversation-view";
 import ChatTimeline from "./ChatTimeline.vue";
-import ChatDeepThinking from "./ChatDeepThinking.vue";
 import ChatTimelineItemShell from "./ChatTimelineItemShell.vue";
 
 const THREAD_ID = "thread-demo";
@@ -303,7 +302,7 @@ describe("ChatTimeline", () => {
     const commandItem = timeline.turns[0]!.items[0]!;
     const toolItem = timeline.turns[0]!.items[1]!;
     const wrapper = mount(ChatTimeline, { props: { timeline } });
-    const items = wrapper.findAll(".chat-turn-group__item");
+    const items = wrapper.findAll("[data-activity-item]");
 
     expect(items.map((entry) => entry.classes().find((name) =>
       name.startsWith("chat-turn-group__item--"))))
@@ -410,7 +409,9 @@ describe("ChatTimeline", () => {
           status: "ready",
           expiresAt: 2_000_000_000,
         }],
-      }, message("turn-main", "reasoning", 1, "reasoning", "过程".repeat(161))],
+      }, message("turn-main", "reasoning", 1, "reasoning", "过程".repeat(161)),
+        {...message("turn-main", "commentary", 2, "assistant_message", "公开阶段说明"), agentMessagePhase: "commentary"},
+        message("turn-main", "context-after-stage", 3, "reasoning", "后续处理记录")],
     });
     const artifactItem = timeline.turns[0]!.items[0]!;
     const reasoningItem = timeline.turns[0]!.items[1]!;
@@ -443,9 +444,7 @@ describe("ChatTimeline", () => {
     expect(wrapper.findAll(".action-artifact-item")).toHaveLength(1);
     expect(wrapper.findAll(".action-reasoning")).toHaveLength(0);
 
-    const reasoningShell = wrapper.findAllComponents(ChatDeepThinking)
-      .find((shell) => shell.props("item").itemId === "reasoning");
-    if (reasoningShell === undefined) throw new Error("fixture_missing_reasoning");
+    expect(wrapper.find(".chat-deep-thinking").exists()).toBe(false);
     await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
     await wrapper.vm.$nextTick();
     expect(wrapper.emitted("disclosure-change")?.[0]?.[0]).toEqual({
@@ -500,8 +499,10 @@ describe("ChatTimeline", () => {
     const timeline = projectedTimeline({
       turns: [completedTurn("turn-a", 0), completedTurn("turn-b", 1)],
       items: [
-        message("turn-a", "reasoning-a", 0, "reasoning", "A".repeat(321)),
-        message("turn-b", "reasoning-b", 0, "reasoning", "B".repeat(321)),
+        {...message("turn-a", "commentary-a", 0, "assistant_message", "A".repeat(321)), agentMessagePhase: "commentary"},
+        {...message("turn-b", "commentary-b", 0, "assistant_message", "B".repeat(321)), agentMessagePhase: "commentary"},
+        message("turn-a", "context-a", 1, "reasoning", "后续处理"),
+        message("turn-b", "context-b", 1, "reasoning", "后续处理"),
       ],
     });
     const wrapper = mount(ChatTimeline, {
@@ -513,7 +514,7 @@ describe("ChatTimeline", () => {
     });
 
     function disclosureFor(itemId: string): HTMLButtonElement {
-      const shell = wrapper.findAllComponents(ChatDeepThinking)
+      const shell = wrapper.findAllComponents(ChatTimelineItemShell)
         .find((candidate) => candidate.props("item").itemId === itemId);
       const disclosure = shell?.element.closest(".chat-turn-group")?.querySelector(
         ".chat-turn-group__process-toggle",
@@ -524,10 +525,10 @@ describe("ChatTimeline", () => {
       return disclosure;
     }
 
-    disclosureFor("reasoning-a").click();
+    disclosureFor("commentary-a").click();
     await wrapper.vm.$nextTick();
-    expect(disclosureFor("reasoning-a").getAttribute("aria-expanded")).toBe("true");
-    expect(disclosureFor("reasoning-b").getAttribute("aria-expanded")).toBe("false");
+    expect(disclosureFor("commentary-a").getAttribute("aria-expanded")).toBe("true");
+    expect(disclosureFor("commentary-b").getAttribute("aria-expanded")).toBe("false");
 
     await wrapper.setProps({
       timeline: deepFreeze({
@@ -537,10 +538,10 @@ describe("ChatTimeline", () => {
     });
     const reorderedTurns = wrapper.findAll(".chat-timeline__turn");
     expect(reorderedTurns).toHaveLength(2);
-    expect(wrapper.findAllComponents(ChatDeepThinking)
-      .map((shell) => shell.props("item").itemId)).toEqual(["reasoning-b", "reasoning-a"]);
-    expect(disclosureFor("reasoning-a").getAttribute("aria-expanded")).toBe("true");
-    expect(disclosureFor("reasoning-b").getAttribute("aria-expanded")).toBe("false");
+    expect(wrapper.findAllComponents(ChatTimelineItemShell)
+      .map((shell) => shell.props("item").itemId)).toEqual(["commentary-b", "commentary-a"]);
+    expect(disclosureFor("commentary-a").getAttribute("aria-expanded")).toBe("true");
+    expect(disclosureFor("commentary-b").getAttribute("aria-expanded")).toBe("false");
   });
 
   it("renders the known runtime notice without presenting it as an unknown diagnosis", () => {
@@ -583,7 +584,7 @@ describe("ChatTimeline", () => {
     wrapper.unmount();
 
     const source = readFileSync("src/components/chat/ChatTimeline.vue", "utf8");
-    expect(source).not.toMatch(/ChatPage|conversation-view|store|adapter|wire|\/api\/|@tauri-apps|fetch\(|invoke\(|router|client/i);
+    expect(source).not.toMatch(/ChatPage|conversation-view|useChatStore|chat\.store|adapter|wire|\/api\/|@tauri-apps|fetch\(|invoke\(|router|client/i);
     expect(source).not.toMatch(/#[0-9a-f]{3,8}\b/i);
     expect(source).toContain("ConversationTimelineViewModel");
     expect(source).toContain("ChatTurnGroup");

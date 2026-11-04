@@ -4,6 +4,7 @@ Private deployment interface v2. Routine dependency startup and normal cleanup;
 no package generation, backup, migration, approval issuance or model dispatch.
 """
 import argparse
+import json
 import importlib.util
 import os
 from pathlib import Path
@@ -40,10 +41,17 @@ def check(root=ROOT, home=None):
     home = home or Path.home()
     primary.require(root.resolve(strict=True) == root and (root / ".git").is_dir(), "原主工作目录不可用。")
     selected = paths(root, home)
-    # Existing data only. Never silently select a blank candidate Home.
+    # Original Homes only. A fresh DB requires the explicit v6 reset receipt.
     for key in ("native", "host", "runtime"):
         primary.directory(selected[key])
-    for relative in ("chat/conversations.db", "secrets/chat-sqlcipher-v1.secret"):
+    database = selected["native"] / "chat/conversations.db"
+    receipt = selected["output"] / "trace-v6-reset.json"
+    primary.require(receipt.is_file() and receipt.resolve(strict=True) == receipt,
+                    "缺少已授权的新格式重置记录，未创建空白数据库。")
+    data = json.loads(receipt.read_text())
+    primary.require(data.get("schemaVersion") == 1 and data.get("nativeFormat") == 6 and data.get("sseVersion") == 13 and data.get("ipcVersion") == 6,
+                    "新格式重置记录不可用。")
+    for relative in (("chat/conversations.db",) if database.exists() else ()) + ("secrets/chat-sqlcipher-v1.secret",):
         file = selected["native"] / relative
         primary.require(file.is_file() and file.resolve(strict=True) == file, "原客户端数据或密钥文件不可用。")
     stopped(root)
@@ -91,9 +99,11 @@ def environment(root, environ):
             "CARGO_TARGET_DIR": str(selected["target"]), "YIJIE_WORKER_TARGET_DIR": str(selected["worker_target"])}
 
 
-def start():
+def start(bundle_for_ui=False):
     selected = check()
     env = environment(ROOT, os.environ)
+    if bundle_for_ui:
+        env["YIJIE_DEVELOPMENT_UI_BUNDLE"] = "true"
     cache = build_cache.discover(ROOT, env)
     env.update(build_cache.validate(ROOT, cache))
     for folder in (ROOT / ".local", selected["output"], selected["output"] / "bin"):
@@ -122,7 +132,7 @@ def start():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["start", "check", "ready"], default="start", nargs="?")
+    parser.add_argument("action", choices=["start", "start-ui", "check", "ready"], default="start", nargs="?")
     args = parser.parse_args()
     if args.action == "check":
         check()
@@ -132,7 +142,7 @@ def main():
         workflow_ready()
         print("Existing authenticated workflow is ready.")
         return 0
-    return start()
+    return start(bundle_for_ui=args.action == "start-ui")
 
 
 if __name__ == "__main__":
