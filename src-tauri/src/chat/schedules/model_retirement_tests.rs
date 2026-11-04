@@ -129,7 +129,10 @@ fn feat164_plan_retirement_before_dispatch() {
     let n = chrono::Utc::now().timestamp();
     let a = ScheduleAuthority::local(n).unwrap();
     let mut r = open(&t);
-    assert_eq!(r.schema_version().unwrap(), 41);
+    assert_eq!(
+        r.schema_version().unwrap(),
+        crate::chat::migrations::SELECTED_SKILLS_SCHEMA_VERSION
+    );
     let mut minimax_request = request(Some(PlanDefinitionModelProfile::MinimaxM3HighV1));
     let normal = r.save_schedule(minimax_request.clone(), n).unwrap();
     let legacy = r.save_schedule(request(None), n).unwrap();
