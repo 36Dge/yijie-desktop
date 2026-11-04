@@ -20,7 +20,7 @@
     },
     {
       "path": "compatibility/market-selection/wire.schema.json",
-      "sha256": "c52a7aad175983c522dc58f98bf0bd6df49c1b7df099bb84c9c3a1b99b03ffb2"
+      "sha256": "7651ee4d674c4fd23a7045ac6a80e77d96d1998c6cb873a47d03c850fab2b514"
     },
     {
       "path": "jsonschema/chat/model-selection-v1.schema.json",
@@ -36,7 +36,7 @@
     },
     {
       "path": "openapi/agent-host/agent-host.yaml",
-      "sha256": "655e1a91c26d9da2bf98e680f50e67670e2340427c929c215e63e00806f61ab5"
+      "sha256": "3a869bb3656bc6ce84f570c324078e0b23fbbdf6872803c448c736561c873541"
     },
     {
       "path": "compatibility/market-provider/wire.schema.json",

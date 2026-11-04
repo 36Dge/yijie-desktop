@@ -385,14 +385,6 @@
       },
       "description": "Ordered selections frozen with the user turn. IDs must be unique across the entire turn. Absence preserves legacy behavior. Native Skill inputs own instruction loading and per-turn deduplication. Consumers send only after the new source pin is admitted."
     },
-    "ToolProfile": {
-      "type": "string",
-      "enum": [
-        "full",
-        "light"
-      ],
-      "description": "Explicit new-chat tool configuration. Omission means full. Light maps only\nto native features.multi_agent=false and features.goals=false; it does not\nchange sandbox, approvals, selected connectors, models or token budgets.\nThe selection is immutable for the session, including resume and model\nchanges. Existing sessions retain full. Expert and scheduled-draft tasks\ncannot select light. Providers without this capability reject light.\n"
-    },
     "Revision": {
       "type": "integer",
       "minimum": 1,

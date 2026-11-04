@@ -1,5 +1,4 @@
 import { expertNativeClient, ExpertClientError } from "../api/expert-native-client";
-import { chatModelClient } from "../api/chat-model-client";
 import { useChatExpertsStore } from "./chat-experts.store";
 import { expertDisplay } from "../test/expert-fixture";
 import type { NativeSubmissionResult } from "../domain/experts-v2.generated";
@@ -1033,19 +1032,6 @@ describe("chat view-model store", () => {
     const blocks = create.mock.calls[0]![2];
     expect(blocks).toEqual([{ type: "text", text: "$same-name\n\n普通问题", skills: refs }]);
     expect(blocks[0]?.type === "text" && blocks[0].skills).not.toBe(refs);
-    await store.dispose();
-  });
-
-  it("sends an explicit light new-chat profile through the existing model submission", async () => {
-    const { client } = fakeClient();
-    const store = createStore(client); await store.bind(TENANT);
-    const submit=vi.spyOn(chatModelClient,"submit").mockImplementation(async (_ctx,_project,_session,_blocks,operationId)=>({sessionId:SESSION_A,turnId:TURN_A,operationId}));
-    const intent={profileId:"minimax-m3-high-v1" as const,expectedRevision:0};
-    const result=await store.createSessionWithResult(null,"普通问题",intent,undefined,undefined,undefined,"light");
-    expect(result.status).toBe("local_durable_accepted");
-    expect(submit).toHaveBeenCalledOnce();
-    expect(submit.mock.calls[0]?.[6]).toBe("light");
-    expect(submit.mock.calls[0]?.[3]).toEqual([{type:"text",text:"普通问题"}]);
     await store.dispose();
   });
 

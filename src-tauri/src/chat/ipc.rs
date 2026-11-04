@@ -10233,18 +10233,11 @@ struct ModelSelectionPayload {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ModelSubmissionPayload {
-    #[serde(default, deserialize_with = "optional_tool_profile")]
-    tool_profile: Option<super::tool_profiles::ToolProfile>,
     project_id: Option<Uuid>,
     session_id: Option<Uuid>,
     content_blocks: Vec<TurnContentBlockPayload>,
     intent: super::models::ModelIntent,
     operation_id: Uuid,
-}
-fn optional_tool_profile<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<super::tool_profiles::ToolProfile>, D::Error> {
-    super::tool_profiles::ToolProfile::deserialize(deserializer).map(Some)
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -10377,7 +10370,7 @@ pub async fn chat_model_submit_v1(
             request.payload.session_id,
             blocks,
             request.payload.operation_id,
-            (request.payload.intent, request.payload.tool_profile),
+            request.payload.intent,
         )
         .await
         .map_err(|e| map_chat_error(e, Some(request.request_id)))?;

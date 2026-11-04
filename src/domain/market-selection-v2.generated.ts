@@ -20,8 +20,7 @@ export type HttpsSchemasYijieAiChatMarketSelectionV2 =
   | ErrorCode
   | Error
   | SelectedSkillRef
-  | SelectedSkills
-  | ToolProfile;
+  | SelectedSkills;
 export type CanonicalId = string;
 export type Revision = number;
 /**
@@ -44,16 +43,6 @@ export type Selection = SelectionRef[];
  */
 export type SelectedSkills = SelectedSkillRef[];
 export type ContentBlock = TextInput | FileInput | ImageInput;
-/**
- * Explicit new-chat tool configuration. Omission means full. Light maps only
- * to native features.multi_agent=false and features.goals=false; it does not
- * change sandbox, approvals, selected connectors, models or token budgets.
- * The selection is immutable for the session, including resume and model
- * changes. Existing sessions retain full. Expert and scheduled-draft tasks
- * cannot select light. Providers without this capability reject light.
- *
- */
-export type ToolProfile = "full" | "light";
 export type ErrorCode =
   | "invalid_request"
   | "context_invalid"
@@ -113,7 +102,6 @@ export interface SubmitPayload {
   contentBlocks: ContentBlock[];
   intent: ModelIntent;
   selection: Selection;
-  toolProfile?: ToolProfile;
 }
 /**
  * Native-only durable immutable snapshot. Freeze inside the same transaction as the outbox using its actual turnOperationId. selection must be sorted by installationId ASCII, contain unique installation identities and match selectionDigest. Receipt replay reads this original snapshot, never current UI/catalog. No credentials or execution capability.

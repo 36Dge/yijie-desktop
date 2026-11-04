@@ -33,7 +33,6 @@ import { PREVIEW_SHOPS, SHOP_PREVIEW_TIMING } from "../../domain/chat-shop-previ
 import ChatWorkspaceControl from "../../components/chat/ChatWorkspaceControl.vue";
 import { chatWorkspaceClient } from "../../api/chat-workspace-client";
 import ChatModelControl from "../../components/chat/ChatModelControl.vue";
-import ChatToolProfileControl from "../../components/chat/ChatToolProfileControl.vue";
 import { chatModelClient, chatModelsEnabled, kimiK31Candidate } from "../../api/chat-model-client";
 import { modelDefinitions } from "../../domain/chat-models.generated";
 import ChatTimeline from "../../components/chat/ChatTimeline.vue";
@@ -546,23 +545,6 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.getComponent(ChatModelControl).props("profile")).toBe("kimi-k3-1-pro-max-v1");
     expect(select).not.toHaveBeenCalled();
     wrapper.unmount();
-  });
-
-  it.skipIf(!chatModelsEnabled || !kimiK31Candidate)("new chats default to full and only explicit light choice enters the submission", async () => {
-    vi.stubEnv("VITE_YIJIE_LIGHT_CHAT_ENABLED","true");
-    const {modelDefinitions:current}=await import("../../domain/chat-models-v2.generated");
-    vi.spyOn(chatModelClient,"catalog").mockResolvedValue({schema_version:2,default_profile:"kimi-k3-1-pro-max-v1",models:current.map(profile=>({profile,available:true,reason:"ready"}))});
-    const {wrapper,store,pinia}=await mountPage("/chat");
-    const drafts=useChatComposerDraftStore(pinia);
-    expect(drafts.newToolProfile).toBe("full");
-    const control=wrapper.getComponent(ChatToolProfileControl);
-    control.vm.$emit("update:modelValue","light");await flushPromises();
-    expect(drafts.newToolProfile).toBe("light");
-    const submit=vi.spyOn(store,"createSessionWithResult").mockResolvedValue(acceptedSubmission());
-    await wrapper.get("textarea").setValue("普通问题");
-    await wrapper.getComponent(ChatComposer).vm.$emit("submit");await flushPromises();
-    expect(submit).toHaveBeenCalledOnce();expect(submit.mock.calls[0]?.[6]).toBe("light");
-    expect(drafts.newToolProfile).toBe("full");wrapper.unmount();
   });
 
   it("shows stale terminal tasks as local read-only history without a protocol error", async () => {

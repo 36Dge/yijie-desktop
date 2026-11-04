@@ -163,8 +163,6 @@ struct StartSessionRequest<'a> {
     #[serde(flatten)]
     trace: &'a HostTrace,
     cwd: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tool_profile: Option<super::tool_profiles::ToolProfile>,
 }
 
 #[derive(Serialize)]
@@ -586,21 +584,6 @@ impl HostBridge {
         cwd: &Path,
         trace: &HostTrace,
     ) -> Result<HostSession, HostBridgeError> {
-        self.start_session_with_tool_profile(task_id, cwd, trace, None)
-            .await
-    }
-
-    pub(crate) async fn start_session_with_tool_profile(
-        &self,
-        task_id: Uuid,
-        cwd: &Path,
-        trace: &HostTrace,
-        tool_profile: Option<super::tool_profiles::ToolProfile>,
-    ) -> Result<HostSession, HostBridgeError> {
-        if tool_profile.is_some() && (!super::models::v2_enabled() || self.model_profile.is_none())
-        {
-            return Err(configuration_error());
-        }
         require_non_nil(task_id)?;
         validate_trace(trace)?;
         if !cwd.is_absolute() {
@@ -614,11 +597,7 @@ impl HostBridge {
             .send_json(
                 Method::POST,
                 &format!("/v1/tasks/{task_id}/agent-sessions"),
-                &StartSessionRequest {
-                    trace,
-                    cwd,
-                    tool_profile,
-                },
+                &StartSessionRequest { trace, cwd },
             )
             .await?;
         parse_session_response_for_model(

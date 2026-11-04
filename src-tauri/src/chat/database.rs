@@ -916,7 +916,8 @@ impl ChatRepository {
                 migrations::PLAN_RETIREMENT_SCHEMA_VERSION,
                 migrations::ARTIFACT_FILES_SCHEMA_VERSION,
                 migrations::SELECTED_SKILLS_SCHEMA_VERSION,
-                migrations::TOOL_PROFILES_SCHEMA_VERSION,
+                migrations::RETIRED_TOOL_PROFILE_SCHEMA_VERSION,
+                migrations::TOOL_PROFILE_RETIREMENT_SCHEMA_VERSION,
             ]
             .contains(&version)
             {
@@ -1024,7 +1025,7 @@ impl ChatRepository {
         if super::models::v2_enabled() {
             migrations::migrate_to_target(
                 &mut connection,
-                migrations::TOOL_PROFILES_SCHEMA_VERSION,
+                migrations::TOOL_PROFILE_RETIREMENT_SCHEMA_VERSION,
             )?;
         }
         protect_database_files(&database_path)?;
@@ -9110,6 +9111,72 @@ fn persist_new_task_permission(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[cfg(feature = "kimi-k31-pro-candidate")]
+    fn retired_tool_preference_is_removed_without_changing_chat_history() {
+        let root = std::env::temp_dir().join(format!("retired-preference-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let owner = scope();
+        let mut repository = open_repository_for_scope(&root, 79, owner.clone());
+        let project = register_synthetic_project(&mut repository, &root);
+        let pending = repository
+            .create_session_and_enqueue_multimodal(
+                project,
+                &[DraftContentBlock::Text("Original ordinary message".into())],
+                Uuid::now_v7(),
+                7,
+            )
+            .unwrap();
+        let message = repository
+            .load_history(pending.session_id, None, Some(20))
+            .unwrap()
+            .turns[0]
+            .messages[0]
+            .message_id;
+        let digest = stored_content_block_digest(&repository.connection, message).unwrap();
+        migrations::migrate_to_target(
+            &mut repository.connection,
+            migrations::RETIRED_TOOL_PROFILE_SCHEMA_VERSION,
+        )
+        .unwrap();
+        repository
+            .connection
+            .execute(
+                "INSERT INTO chat_session_tool_profiles(session_id,tool_profile) VALUES(?1,'light')",
+                [pending.session_id.to_string()],
+            )
+            .unwrap();
+        migrations::migrate_to_target(
+            &mut repository.connection,
+            migrations::TOOL_PROFILE_RETIREMENT_SCHEMA_VERSION,
+        )
+        .unwrap();
+        let exists: bool = repository
+            .connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='chat_session_tool_profiles')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!exists);
+        assert_eq!(
+            stored_content_block_digest(&repository.connection, message).unwrap(),
+            digest
+        );
+        drop(repository);
+        let reopened = open_repository_for_scope(&root, 79, owner);
+        assert_eq!(
+            reopened.schema_version().unwrap(),
+            migrations::TOOL_PROFILE_RETIREMENT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            stored_content_block_digest(&reopened.connection, message).unwrap(),
+            digest
+        );
+        drop(reopened);
+        fs::remove_dir_all(root).unwrap();
+    }
     use super::*;
 
     use std::os::unix::fs::symlink;

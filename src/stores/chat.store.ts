@@ -3,7 +3,7 @@ import { measureChatRender } from "../domain/chat-render-performance";
 import { useChatExpertsStore, type ExpertTurnIntent } from "./chat-experts.store";
 import { ExpertClientError } from "../api/expert-native-client";
 import { marketHostNativeClient, MarketChatError } from "../api/market-host-native-client";
-import type { SelectionRef, SelectedSkillRef, ToolProfile } from "../domain/market-selection-v2.generated";
+import type { SelectionRef, SelectedSkillRef } from "../domain/market-selection-v2.generated";
 import { chatModelClient, executionModelIntent, type ModelIntent } from "../api/chat-model-client";
 import { chatWorkspaceClient } from "../api/chat-workspace-client";
 import type { WorkspaceCreation } from "../domain/chat-workspace";
@@ -551,9 +551,8 @@ export function createChatStoreDefinition(
       modelIntent?: ModelIntent,
       marketSelection?: readonly SelectionRef[],
       expertIntent?: ExpertTurnIntent,
-      toolProfile?: ToolProfile,
     ): string {
-      return JSON.stringify({ kind, targetId, input: input.trim(), blocks, modelIntent, marketSelection, expertIntent, toolProfile });
+      return JSON.stringify({ kind, targetId, input: input.trim(), blocks, modelIntent, marketSelection, expertIntent });
     }
 
     function clearSubmissionAttempt(): void {
@@ -3741,13 +3740,12 @@ export function createChatStoreDefinition(
 
     async function submitMarket(contextId: string, projectId: string | null, sessionId: string | null,
       contentBlocks: readonly ChatTurnContentBlock[], operationId: string, intent: ModelIntent | undefined,
-      selection: readonly SelectionRef[], toolProfile?: ToolProfile) {
+      selection: readonly SelectionRef[]) {
       const compatibleIntent = intent && executionModelIntent(intent);
       if (!compatibleIntent) throw new MarketChatError("model_unavailable");
       const result = await marketHostNativeClient.submit(contextId, {
         operationId, projectId, ...(sessionId ? { sessionId } : {}), contentBlocks: copyTurnContentBlocks(contentBlocks), intent: compatibleIntent,
         selection: [...selection],
-        ...(toolProfile ? { toolProfile } : {}),
       });
       // This is local durability only. The existing queued projection and
       // Coordinator stream establish actual Runtime acceptance later.
@@ -3761,7 +3759,6 @@ export function createChatStoreDefinition(
       marketSelection?: readonly SelectionRef[],
       expertIntent?: ExpertTurnIntent,
       selectedSkills?: readonly SelectedSkillRef[],
-      toolProfile?: ToolProfile,
     ): Promise<ChatSubmissionResult> {
       const bound = context.value;
       if (
@@ -3769,7 +3766,6 @@ export function createChatStoreDefinition(
         !hasAction("create_session") || !hasAction("use_project")
       ) return CHAT_SUBMISSION_NOT_ACCEPTED;
       const expertState = useChatExpertsStore();
-      if (toolProfile && (!modelIntent || expertIntent !== undefined)) return CHAT_SUBMISSION_NOT_ACCEPTED;
       const knownBinding = selectedSessionId.value ? expertState.bindings[selectedSessionId.value] : null;
       if (!expertIntent && (expertState.submissions[selectedSessionId.value ?? "new"] || knownBinding?.managed || knownBinding?.expert || (knownBinding?.bindingRevision ?? 0) > 0)) throw new ExpertClientError("binding_unavailable");
       const originalExpert = expertIntent ? expertState.submissions.new : undefined;
@@ -3778,7 +3774,7 @@ export function createChatStoreDefinition(
       const submissionToken = beginSubmission();
       if (submissionToken === null) return CHAT_SUBMISSION_NOT_ACCEPTED;
       try {
-        const attemptKey = submissionKey("create", projectId, input, blocks, modelIntent, marketSelection, expertIntent, toolProfile);
+        const attemptKey = submissionKey("create", projectId, input, blocks, modelIntent, marketSelection, expertIntent);
         const attemptAuthorityEpoch = authorityEpoch;
         const attemptSelectionEpoch = selectionEpoch;
         const attemptDraftEpoch = draftEpoch;
@@ -3811,16 +3807,16 @@ export function createChatStoreDefinition(
         const currentBlocks = originalExpert?.submission.contentBlocks ?? turnContentBlocks(input, selectedSkills);
         if (
           currentBlocks === null ||
-          submissionKey("create", projectId, input, currentBlocks, modelIntent, marketSelection, expertIntent, toolProfile) !== attemptKey
+          submissionKey("create", projectId, input, currentBlocks, modelIntent, marketSelection, expertIntent) !== attemptKey
         ) return CHAT_SUBMISSION_NOT_ACCEPTED;
         const attemptOperationId = (expertIntent ? useChatExpertsStore().submissions[selectedSessionId.value ?? "new"]?.submission.operationId : undefined) ?? submissionOperation(attemptKey);
         if (!markSubmissionDispatching(submissionToken)) return CHAT_SUBMISSION_NOT_ACCEPTED;
         const created = expertIntent !== undefined
           ? await submitExpert(bound.contextId, projectId, null, currentBlocks, attemptOperationId, modelIntent, marketSelection ?? [], expertIntent)
           : marketSelection !== undefined
-          ? await submitMarket(bound.contextId, projectId, null, currentBlocks, attemptOperationId, modelIntent, marketSelection, toolProfile)
+          ? await submitMarket(bound.contextId, projectId, null, currentBlocks, attemptOperationId, modelIntent, marketSelection)
           : modelIntent
-          ? toolProfile ? await chatModelClient.submit(bound.contextId, projectId, null, currentBlocks, attemptOperationId, modelIntent, toolProfile) : await chatModelClient.submit(bound.contextId, projectId, null, currentBlocks, attemptOperationId, modelIntent)
+          ? await chatModelClient.submit(bound.contextId, projectId, null, currentBlocks, attemptOperationId, modelIntent)
           : streamingV4Enabled || draftAttachments.value.length > 0 || (selectedSkills?.length ?? 0) > 0
           ? await client.createSessionV2(bound.contextId, projectId, currentBlocks, attemptOperationId)
           : await client.createSession(bound.contextId, projectId, input, attemptOperationId);
@@ -3828,7 +3824,7 @@ export function createChatStoreDefinition(
         if (
           !isCurrentCreateAuthority() ||
           settledBlocks === null ||
-          submissionKey("create", projectId, input, settledBlocks, modelIntent, marketSelection, expertIntent, toolProfile) !== attemptKey
+          submissionKey("create", projectId, input, settledBlocks, modelIntent, marketSelection, expertIntent) !== attemptKey
         ) return CHAT_SUBMISSION_NOT_ACCEPTED;
         if (created.operationId !== attemptOperationId) {
           throw new ChatClientError({

@@ -2035,7 +2035,6 @@ pub(crate) mod models_generated;
 #[allow(dead_code)]
 #[path = "models_v2_generated.rs"]
 pub(crate) mod models_generated;
-pub(crate) mod tool_profiles;
 
 pub mod artifact_media;
 #[allow(dead_code)] // Shared generated tool DTOs are consumed by the Host adapter.

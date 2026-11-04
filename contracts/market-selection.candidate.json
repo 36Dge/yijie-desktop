@@ -8,7 +8,7 @@
   "sources": [
     {
       "path": "compatibility/market-selection/wire.schema.json",
-      "sha256": "c52a7aad175983c522dc58f98bf0bd6df49c1b7df099bb84c9c3a1b99b03ffb2"
+      "sha256": "7651ee4d674c4fd23a7045ac6a80e77d96d1998c6cb873a47d03c850fab2b514"
     },
     {
       "path": "compatibility/market-selection/native-ipc.json",
@@ -24,11 +24,11 @@
     },
     {
       "path": "openapi/agent-host/agent-host.yaml",
-      "sha256": "655e1a91c26d9da2bf98e680f50e67670e2340427c929c215e63e00806f61ab5"
+      "sha256": "3a869bb3656bc6ce84f570c324078e0b23fbbdf6872803c448c736561c873541"
     },
     {
       "path": "scripts/market-selection-source.mjs",
-      "sha256": "3d6ac690bcec202cbe6511faa5d57577b63d66e5aa9b06d8e8711facea44fa6c"
+      "sha256": "b95218e43d0287dde7b22b08dd69e5c4010950f9552dadd66b753d1b05507d1d"
     },
     {
       "path": "scripts/generate-market-selection.mjs",
@@ -46,19 +46,19 @@
   "generated": [
     {
       "path": "sdks/rust/market-selection/types.gen.rs",
-      "sha256": "fc9c890270d862a42f448401e023fd32934b6f634184e63eeda2319a0ed89711"
+      "sha256": "46f54b763cf9acf4e9271def9b0c5ce7423698fa02c2e28aaaf855b9053b2315"
     },
     {
       "path": "sdks/typescript/src/domain/market-selection.generated.ts",
-      "sha256": "080c3499b9ae09f06c839522077f99647172f8c87ff3afdc55bf637fe329c427"
+      "sha256": "14efc98753a03abc58feb2f3215204f7825ac87136c83a8e125302c010d5805d"
     },
     {
       "path": "sdks/typescript/src/api/generated/market-selection-validator.gen.js",
-      "sha256": "09c546d7a2424900a9495cf804913034a0f23d5e79e6a620010f8d6f4b2b0bdb"
+      "sha256": "eac5bb0420d226a8e03374e6dfdc2ff14f8f6f3c6325f9d7bb3371de924db99a"
     },
     {
       "path": "sdks/jsonschema/market-selection.schema.json",
-      "sha256": "0ef0e8675896de77a1b3d7fd304ac93c40a6e1894c1e467da2f6bcd80afb1105"
+      "sha256": "4674fa88049d37e1c553204b4f90da24d12b3d91b90479bbd591be7670873b3a"
     },
     {
       "path": "sdks/go/market-selection/digest.gen.go",
@@ -66,7 +66,7 @@
     },
     {
       "path": "sdks/typescript/src/api/generated/market-selection-validator.gen.d.ts",
-      "sha256": "4783bb023f76a87584b8ad7fee5599c9ba07396711ca6531ea4cc0318851c30e"
+      "sha256": "8372aee8920b553fc29b52feb5c66de85c043d4c8e06ad50a0a4e31f66681f0d"
     },
     {
       "path": "fixtures/market-selection/digest-vectors.json",

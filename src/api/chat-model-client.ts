@@ -1,6 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ToolProfile } from "../domain/chat-tool-profile";
-import { validateToolProfile } from "./generated/market-selection-v2-validator.gen.js";
 import { modelDefinitions as legacyDefinitions, type Catalog as LegacyCatalog, type ProfileId as LegacyProfileId } from "../domain/chat-models.generated";
 import { modelDefinitions as currentDefinitions, type Catalog as CurrentCatalog, type ProfileId as CurrentProfileId } from "../domain/chat-models-v2.generated";
 export const kimiK31Candidate = import.meta.env.VITE_YIJIE_KIMI_K31_PRO_CANDIDATE === "true";
@@ -29,16 +27,15 @@ export function legacyModelIntent(intent: ModelIntent): { profileId: LegacyProfi
  const profileId = legacyProfile(intent.profileId);
  return profileId ? { profileId, expectedRevision: intent.expectedRevision } : undefined;
 }
-export interface ModelState { readonly toolProfile?: ToolProfile; readonly profileId: ProfileId | null; readonly revision: number; readonly state: "ready" | "switching" | "unknown"; readonly pending?: Readonly<{operationId:string;profileId:ProfileId;expectedRevision:number;recoveryAvailable?:boolean}> | null }
+export interface ModelState { readonly profileId: ProfileId | null; readonly revision: number; readonly state: "ready" | "switching" | "unknown"; readonly pending?: Readonly<{operationId:string;profileId:ProfileId;expectedRevision:number;recoveryAvailable?:boolean}> | null }
 export const chatModelsEnabled = import.meta.env.VITE_YIJIE_CHAT_MODELS_ENABLED === "true";
 function record(v: unknown): Record<string, unknown> { if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("模型响应暂不可用"); return v as Record<string, unknown>; }
 export function parseModelState(raw: unknown): ModelState {
  const v=record(raw);
- if(v.toolProfile!==undefined && !validateToolProfile(v.toolProfile))throw new Error("工具模式暂不可用");
  if ((v.profileId !== null && !knownDefinitions.some(p=>p.profile_id===v.profileId)) || !Number.isSafeInteger(v.revision) || (v.revision as number)<0 || !["ready","switching","unknown"].includes(v.state as string)) throw new Error("模型状态暂不可用");
  let pending:ModelState["pending"]=null;
  if(v.pending!==undefined&&v.pending!==null){const p=record(v.pending);if(typeof p.operationId!=="string"||!/^[0-9a-f-]{36}$/.test(p.operationId)||!knownDefinitions.some(d=>d.profile_id===p.profileId)||!Number.isSafeInteger(p.expectedRevision)||(p.expectedRevision as number)<0)throw new Error("模型操作暂不可用");if(p.recoveryAvailable!==undefined&&typeof p.recoveryAvailable!=="boolean")throw new Error("模型恢复状态暂不可用");pending={operationId:p.operationId,profileId:p.profileId as ProfileId,expectedRevision:p.expectedRevision as number,...(p.recoveryAvailable===undefined?{}:{recoveryAvailable:p.recoveryAvailable as boolean})};}
- return {profileId:v.profileId as ProfileId|null,revision:v.revision as number,state:v.state as ModelState["state"],pending,...(v.toolProfile===undefined?{}:{toolProfile:v.toolProfile as ToolProfile})};
+ return {profileId:v.profileId as ProfileId|null,revision:v.revision as number,state:v.state as ModelState["state"],pending};
 }
 export function parseModelCatalog(raw: unknown): Catalog {
  const v=record(raw);
@@ -62,7 +59,7 @@ export const chatModelClient={
  async state(context:string,sessionId:string){const r=record(await call("chat_model_state_v1",context,{sessionId}));return parseModelState(r.data);},
  async select(context:string,sessionId:string,intent:ModelIntent,operationId:string){const r=record(await call("chat_select_model_v1",context,{sessionId,intent,operationId}));return parseModelState(r.data);},
  async recover(context:string,sessionId:string,intent:ModelIntent,operationId:string){const r=record(await call("chat_recover_model_v2",context,{sessionId,intent,operationId}));return parseModelState(r.data);},
- async submit(context:string,projectId:string|null,sessionId:string|null,contentBlocks:readonly ChatTurnContentBlock[],operationId:string,intent:ModelIntent,toolProfile?:ToolProfile):Promise<ChatCreatedTurn>{
-  return parseCreatedTurnResponse(await call("chat_model_submit_v1",context,{projectId,sessionId,contentBlocks,operationId,intent,...(toolProfile?{toolProfile}:{})}));
+ async submit(context:string,projectId:string|null,sessionId:string|null,contentBlocks:readonly ChatTurnContentBlock[],operationId:string,intent:ModelIntent):Promise<ChatCreatedTurn>{
+  return parseCreatedTurnResponse(await call("chat_model_submit_v1",context,{projectId,sessionId,contentBlocks,operationId,intent}));
  },
 };

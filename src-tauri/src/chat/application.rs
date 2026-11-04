@@ -2034,12 +2034,7 @@ impl ConversationApplication {
             host.start_draft_session(public_task_id, draft.workspace)
                 .await
         } else {
-            let tool_profile = self
-                .database
-                .call(move |r| r.model_operation_tool_profile(operation))
-                .await?;
-            host.start_session_with_tool_profile(public_task_id, &directory, &trace, tool_profile)
-                .await
+            host.start_session(public_task_id, &directory, &trace).await
         };
         if host.is_schedule_admitted() {
             let code = match &result {
@@ -5710,19 +5705,12 @@ impl AuthorizedConversationApplication {
         session: Option<Uuid>,
         blocks: Vec<DraftContentBlock>,
         op: Uuid,
-        intent: (
-            super::models::ModelIntent,
-            Option<super::tool_profiles::ToolProfile>,
-        ),
+        intent: super::models::ModelIntent,
     ) -> Result<super::models::ModelSubmission, ChatError> {
-        let (intent, tool_profile) = intent;
         if !super::models::enabled() {
             return Err(ChatError::OrchestrationUnavailable);
         }
         if let Some(session) = session {
-            if tool_profile.is_some() {
-                return Err(ChatError::InvalidInput);
-            }
             self.authorize(context, ChatAction::SubmitTurn)?;
             let turn = self
                 .application
@@ -5743,16 +5731,7 @@ impl AuthorizedConversationApplication {
                 .map_err(|_| ChatError::ScopeDenied)?;
             self.application
                 .database
-                .call(move |r| {
-                    r.create_model_session_with_tool_profile(
-                        project,
-                        blocks,
-                        op,
-                        revision,
-                        intent,
-                        tool_profile,
-                    )
-                })
+                .call(move |r| r.create_model_session(project, blocks, op, revision, intent))
                 .await
                 .map(|r| super::models::ModelSubmission {
                     session_id: r.session_id,

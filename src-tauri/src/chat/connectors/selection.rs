@@ -341,18 +341,6 @@ impl ChatRepository {
                 .map_err(|_| ChatError::OrchestrationUnavailable)?;
         }
         let blocks = blocks(&payload)?;
-        #[cfg(feature = "kimi-k31-pro-candidate")]
-        let tool_profile = payload.tool_profile;
-        #[cfg(not(feature = "kimi-k31-pro-candidate"))]
-        let tool_profile = None;
-        if payload.session_id.is_some() && tool_profile.is_some() {
-            return Err(ChatError::InvalidInput);
-        }
-        if crate::chat::tool_profiles::normalized(tool_profile).is_some()
-            && expert.is_some_and(|(request, _)| request.expert.is_some())
-        {
-            return Err(ChatError::InvalidInput);
-        }
         crate::chat::database::validate_draft_blocks(&blocks)?;
         if authorization_revision == 0
             || (payload.session_id.is_none() && payload.intent.expected_revision != 0)
@@ -399,11 +387,6 @@ impl ChatRepository {
         }
         require_unused_operation(&tx, &payload.operation_id)?;
         if let Some((request, resolved)) = expert {
-            if let Some(session) = &payload.session_id {
-                if crate::chat::tool_profiles::read(&tx, &self.scope, id(session)?)?.is_some() {
-                    return Err(ChatError::InvalidInput);
-                }
-            }
             expert_store::admit_submission(&tx, &self.scope, request, resolved)
                 .map_err(expert_storage_error)?;
         } else if let Some(session) = &payload.session_id {
@@ -449,9 +432,6 @@ impl ChatRepository {
                 expected_revision: payload.intent.expected_revision,
             },
         )?;
-        if create_operation.is_some() {
-            crate::chat::tool_profiles::bind_new(&tx, &self.scope, session, tool_profile, true)?;
-        }
         let snapshot = wire::freeze_selection(turn_operation.to_string(), payload.selection)
             .map_err(invalid)?;
         let receipt = wire::SubmissionReceipt {

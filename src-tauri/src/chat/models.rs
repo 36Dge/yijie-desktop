@@ -84,8 +84,6 @@ pub struct ModelIntent {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelState {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_profile: Option<super::tool_profiles::ToolProfile>,
     pub profile_id: Option<String>,
     pub revision: i64,
     pub state: String,
@@ -191,7 +189,6 @@ impl ChatRepository {
     pub(super) fn model_state(&self, session: Uuid) -> Result<ModelState, ChatError> {
         self.require_model_storage()?;
         self.agent_session_id_for_session_optional_model(session)?;
-        let tool_profile = self.session_tool_profile(session)?;
         let state = self
             .connection
             .query_row(
@@ -199,7 +196,6 @@ impl ChatRepository {
                 [session.to_string()],
                 |r| {
                     Ok(ModelState {
-                        tool_profile,
                         profile_id: Some(r.get(0)?),
                         revision: r.get(1)?,
                         state: r.get(2)?,
@@ -213,7 +209,6 @@ impl ChatRepository {
             .optional()
             .map_err(db_error)?
             .unwrap_or(ModelState {
-                tool_profile,
                 profile_id: None,
                 revision: 0,
                 state: "unknown".into(),
@@ -268,7 +263,6 @@ impl ChatRepository {
         }
         Ok(value)
     }
-    #[cfg(test)]
     pub(super) fn create_model_session(
         &mut self,
         project: Option<Uuid>,
@@ -276,18 +270,6 @@ impl ChatRepository {
         op: Uuid,
         revision: u64,
         intent: ModelIntent,
-    ) -> Result<PendingConversation, ChatError> {
-        self.create_model_session_with_tool_profile(project, blocks, op, revision, intent, None)
-    }
-
-    pub(super) fn create_model_session_with_tool_profile(
-        &mut self,
-        project: Option<Uuid>,
-        blocks: Vec<DraftContentBlock>,
-        op: Uuid,
-        revision: u64,
-        intent: ModelIntent,
-        tool_profile: Option<super::tool_profiles::ToolProfile>,
     ) -> Result<PendingConversation, ChatError> {
         self.require_model_storage()?;
         super::database::validate_draft_blocks(&blocks)?;
@@ -327,7 +309,6 @@ impl ChatRepository {
         tx.execute("INSERT INTO chat_model_selections(session_id,profile_id,revision,state) VALUES(?1,?2,1,'ready') ON CONFLICT(session_id) DO NOTHING",params![result.session_id.to_string(),profile_id(intent.profile_id)]).map_err(db_error)?;
         freeze(&tx, result.create_operation_id, result.session_id, &intent)?;
         freeze(&tx, result.turn_operation_id, result.session_id, &intent)?;
-        super::tool_profiles::bind_new(&tx, &self.scope, result.session_id, tool_profile, fresh)?;
         if fresh {
             super::delivery::initialize(
                 &tx,
@@ -591,109 +572,6 @@ mod tests {
         database::ChatScope,
         keychain::{DatabaseKey, ReceiptKey},
     };
-    #[test]
-    #[cfg(feature = "kimi-k31-pro-candidate")]
-    fn light_chat_choice_replays_and_reopens_without_changing_legacy_input() {
-        if crate::chat::model_test_support::run_in_current_model_environment(concat!(
-            module_path!(),
-            "::light_chat_choice_replays_and_reopens_without_changing_legacy_input"
-        )) {
-            return;
-        }
-        let root = std::env::temp_dir().join(format!("light-chat-{}", Uuid::now_v7()));
-        std::fs::create_dir(&root).unwrap();
-        let scope = ChatScope::new(Uuid::now_v7().to_string(), Uuid::now_v7().to_string()).unwrap();
-        let open = || {
-            ChatRepository::open(
-                &root.join("chat"),
-                &DatabaseKey::from_bytes([172; 32]),
-                ReceiptKey::from_bytes([173; 32]),
-                scope.clone(),
-            )
-            .unwrap()
-        };
-        let mut repo = open();
-        let workspace = root.join("project");
-        std::fs::create_dir(&workspace).unwrap();
-        let project = Uuid::parse_str(
-            &repo
-                .register_project(&workspace, b"ordinary-bookmark")
-                .unwrap()
-                .id,
-        )
-        .unwrap();
-        let intent = ModelIntent {
-            profile_id: wire::ProfileId::KimiK31ProMaxV1,
-            expected_revision: 0,
-        };
-        let legacy = repo
-            .create_model_session(
-                Some(project),
-                vec![DraftContentBlock::Text("Original ordinary request".into())],
-                Uuid::now_v7(),
-                1,
-                intent.clone(),
-            )
-            .unwrap();
-        let message = repo
-            .load_history(legacy.session_id, None, Some(20))
-            .unwrap()
-            .turns[0]
-            .messages[0]
-            .message_id;
-        let digest =
-            crate::chat::database::stored_content_block_digest(&repo.connection, message).unwrap();
-        let blocks = vec![DraftContentBlock::Text("Explain six times seven.".into())];
-        let op = Uuid::now_v7();
-        let selected = Some(super::super::tool_profiles::ToolProfile::Light);
-        let pending = repo
-            .create_model_session_with_tool_profile(
-                Some(project),
-                blocks.clone(),
-                op,
-                1,
-                intent.clone(),
-                selected,
-            )
-            .unwrap();
-        assert_eq!(
-            repo.model_operation_tool_profile(pending.create_operation_id)
-                .unwrap(),
-            selected
-        );
-        assert_eq!(
-            repo.model_state(legacy.session_id).unwrap().tool_profile,
-            None
-        );
-        drop(repo);
-        let mut repo = open();
-        assert_eq!(
-            repo.model_state(pending.session_id).unwrap().tool_profile,
-            selected
-        );
-        assert_eq!(
-            repo.create_model_session_with_tool_profile(
-                Some(project),
-                blocks.clone(),
-                op,
-                1,
-                intent.clone(),
-                selected
-            )
-            .unwrap(),
-            pending
-        );
-        assert_eq!(
-            repo.create_model_session_with_tool_profile(Some(project), blocks, op, 1, intent, None),
-            Err(ChatError::ConversationConflict)
-        );
-        assert_eq!(
-            crate::chat::database::stored_content_block_digest(&repo.connection, message).unwrap(),
-            digest
-        );
-        drop(repo);
-        std::fs::remove_dir_all(root).unwrap();
-    }
     #[test]
     fn turn_model_metadata_is_frozen_read_only_and_missing_for_legacy_turns() {
         let root = std::env::temp_dir().join(format!("turn-model-metadata-{}", Uuid::now_v7()));

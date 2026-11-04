@@ -17,8 +17,6 @@ import ChatPermissionControl from "../../components/chat/ChatPermissionControl.v
 import RuntimeApprovalList from "../../components/chat/RuntimeApprovalList.vue";
 import { useRuntimePermissions } from "../../composables/useRuntimePermissions";
 import ChatModelControl from "../../components/chat/ChatModelControl.vue";
-import ChatToolProfileControl from "../../components/chat/ChatToolProfileControl.vue";
-import { lightChatEnabled, type ToolProfile } from "../../domain/chat-tool-profile";
 import { useChatModels } from "../../composables/useChatModels";
 import ChatDeliveryControl from "../../components/chat/ChatDeliveryControl.vue";
 import { useChatDelivery } from "../../composables/useChatDelivery";
@@ -492,8 +490,6 @@ const models = useChatModels(() => chatStore.context?.contextId ?? null, () => r
   get: () => isNewDraftMode.value ? sharedDrafts.planProfile : sharedDrafts.newProfile,
   set: profile => { if (isNewDraftMode.value) sharedDrafts.planProfile = profile; else sharedDrafts.newProfile = profile; },
 } : undefined);
-const effectiveToolProfile = computed<ToolProfile>(() => isDraftMode.value || selectedExpert.value ? "full"
-  : routeSessionId.value ? models.state.value?.toolProfile ?? "full" : sharedDrafts.newToolProfile);
 const delivery = useChatDelivery(
   () => kimiK31Candidate && chatModelsEnabled && !isDraftMode.value && normalPurposeReady.value && chatStore.hasAction("read_sessions") ? chatStore.context?.contextId ?? null : null,
   () => routeSessionId.value,
@@ -879,7 +875,6 @@ async function submit(recoverExpert = false): Promise<void> {
       input = compileSkillInput(input, selectedSkillsAtStart);
     }
     const selectedRefs = nativeSkillInputEnabled() && !recoverExpert ? compileSelectedSkillRefs(selectedSkillsAtStart) : undefined;
-    const newToolProfile = lightChatEnabled() && !isSessionRoute.value && effectiveToolProfile.value === "light" ? "light" : undefined;
     if (isSessionRoute.value) {
       const result = await (selectedRefs?.length
         ? chatStore.submitTurnWithResult(input, frozenExpert?.submission.intent ?? models.intent.value ?? undefined, marketSelection, turnExpert, selectedRefs)
@@ -904,9 +899,7 @@ async function submit(recoverExpert = false): Promise<void> {
       scrollToBottom();
       return;
     }
-    const result = await (newToolProfile
-      ? chatStore.createSessionWithResult(availableProjectId.value, input, models.intent.value ?? undefined, marketSelection, undefined, selectedRefs, newToolProfile)
-      : selectedRefs?.length
+    const result = await (selectedRefs?.length
       ? chatStore.createSessionWithResult(frozenExpert ? frozenExpert.submission.projectId : availableProjectId.value, input, frozenExpert?.submission.intent ?? models.intent.value ?? undefined, marketSelection, turnExpert, selectedRefs)
       : turnExpert !== undefined
       ? chatStore.createSessionWithResult(frozenExpert ? frozenExpert.submission.projectId : availableProjectId.value, input, frozenExpert?.submission.intent ?? models.intent.value ?? undefined, marketSelection, turnExpert)
@@ -929,7 +922,6 @@ async function submit(recoverExpert = false): Promise<void> {
     }
     if (turnExpert) { sharedDrafts.setExpert("new", null); chatExperts.acknowledgeSubmission(result.operationId); }
     models.resetNew();
-    sharedDrafts.newToolProfile = "full";
     shopPreview.adoptNewChat(result.sessionId);
     await router.push(`/chat/${result.sessionId}`);
     focusRestoreTarget = chatComposerDraftKey(result.sessionId);
@@ -1210,7 +1202,7 @@ onBeforeUnmount(() => {
           />
         </template>
         <template v-if="selectedExpert" #expert-control><ChatExpertChip :expert="selectedExpert" :disabled="expertRemovalBlocked || expertPicker.pending.value" :pending="!!routeSessionId && (chatExperts.busy.has(routeSessionId) || expertBinding?.state === 'applying')" @details="showExpertDetails" @remove="removeExpert" /></template>
-        <template v-if="expertsUiEnabled && !isDraftMode && effectiveToolProfile !== 'light' && permissionScope.hasCapability('plugin.read')" #expert-picker="{ close }">
+        <template v-if="expertsUiEnabled && !isDraftMode && permissionScope.hasCapability('plugin.read')" #expert-picker="{ close }">
           <ChatExpertControl :entries="expertResources.entries" :selected="selectedExpert" :disabled="expertRemovalBlocked || expertContextBlocked || expertPicker.pending.value" :loading="!expertResources.snapshot && expertResources.refreshing" :refreshing="!!expertResources.snapshot && expertResources.refreshing" :error="expertPicker.error.value ?? expertResources.error" :execution-available="expertResources.snapshot?.executionAvailable === true" :can-manage="expertResources.canManage" :busy-keys="expertResources.busy" :operation-errors="expertResources.operationErrors" :pending-keys="expertPendingKeys" @refresh="refreshExpertPicker" @select="selectExpert($event, close)" @close="close" @manage="browseExperts" />
         </template>
         <template v-if="!isDraftMode" #shop-control>
@@ -1224,7 +1216,6 @@ onBeforeUnmount(() => {
         </template>
         <template v-if="chatModelsEnabled" #model-control>
           <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" :error="models.error.value" :retry-label="models.retryLabel.value" @select="models.select" @retry="models.retry" />
-          <ChatToolProfileControl v-if="lightChatEnabled() && !isDraftMode" :model-value="effectiveToolProfile" :disabled="modelBlocked || Boolean(selectedExpert)" @update:model-value="sharedDrafts.newToolProfile = $event" />
         </template>
         <template v-if="!isDraftMode && runtimePermissionsEnabled" #permission-control>
           <ChatPermissionControl :state="permissions.state.value" :disabled="!permissions.ready.value || permissions.busy.value" :saving="permissions.saving.value" @select="permissions.setMode" />
@@ -1453,7 +1444,7 @@ onBeforeUnmount(() => {
         @unsupported-input="showUnsupportedInput"
       >
         <template v-if="selectedExpert" #expert-control><ChatExpertChip :expert="selectedExpert" :disabled="expertRemovalBlocked || expertPicker.pending.value" :pending="!!routeSessionId && (chatExperts.busy.has(routeSessionId) || expertBinding?.state === 'applying')" @details="showExpertDetails" @remove="removeExpert" /></template>
-        <template v-if="expertsUiEnabled && !isDraftMode && effectiveToolProfile !== 'light' && permissionScope.hasCapability('plugin.read')" #expert-picker="{ close }">
+        <template v-if="expertsUiEnabled && !isDraftMode && permissionScope.hasCapability('plugin.read')" #expert-picker="{ close }">
           <ChatExpertControl :entries="expertResources.entries" :selected="selectedExpert" :disabled="expertRemovalBlocked || expertContextBlocked || expertPicker.pending.value" :loading="!expertResources.snapshot && expertResources.refreshing" :refreshing="!!expertResources.snapshot && expertResources.refreshing" :error="expertPicker.error.value ?? expertResources.error" :execution-available="expertResources.snapshot?.executionAvailable === true" :can-manage="expertResources.canManage" :busy-keys="expertResources.busy" :operation-errors="expertResources.operationErrors" :pending-keys="expertPendingKeys" @refresh="refreshExpertPicker" @select="selectExpert($event, close)" @close="close" @manage="browseExperts" />
         </template>
         <template v-if="!isDraftMode" #shop-control>
@@ -1467,7 +1458,6 @@ onBeforeUnmount(() => {
         </template>
         <template v-if="chatModelsEnabled" #model-control>
           <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" :error="models.error.value" :retry-label="models.retryLabel.value" @select="models.select" @retry="models.retry" />
-          <ChatToolProfileControl v-if="lightChatEnabled() && effectiveToolProfile === 'light'" model-value="light" readonly />
         </template>
         <template v-if="!isDraftMode && runtimePermissionsEnabled" #permission-control>
           <ChatPermissionControl :state="permissions.state.value" :disabled="!permissions.ready.value || permissions.busy.value" :saving="permissions.saving.value" @select="permissions.setMode" />

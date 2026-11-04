@@ -115,12 +115,6 @@ pub struct Submission {
     pub permission_mode: PermissionMode,
     pub snapshot: SelectionSnapshot,
     pub services: Vec<ServiceBinding>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "optional_non_null"
-    )]
-    pub tool_profile: Option<ToolProfile>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -136,12 +130,6 @@ struct SubmissionWire {
     pub permission_mode: PermissionMode,
     pub snapshot: SelectionSnapshot,
     pub services: Vec<ServiceBinding>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "optional_non_null"
-    )]
-    pub tool_profile: Option<ToolProfile>,
 }
 impl TryFrom<SubmissionWire> for Submission {
     type Error = &'static str;
@@ -157,7 +145,6 @@ impl TryFrom<SubmissionWire> for Submission {
             permission_mode: w.permission_mode,
             snapshot: w.snapshot,
             services: w.services,
-            tool_profile: w.tool_profile,
         };
         v.validate()?;
         Ok(v)
@@ -3822,13 +3809,6 @@ impl std::fmt::Debug for SuspendResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("SuspendResponse([redacted])")
     }
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ToolProfile {
-    #[serde(rename = "full")]
-    Full,
-    #[serde(rename = "light")]
-    Light,
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", try_from = "StartTurnV2TextBlockWire")]

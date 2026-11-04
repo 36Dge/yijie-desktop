@@ -9,7 +9,7 @@ import {fileURLToPath} from "node:url";
 const desktop=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const contracts=path.resolve(desktop,"../yijie-contracts"),host=path.resolve(desktop,"../yijie-agent-host");
 const hash=b=>createHash("sha256").update(b).digest("hex");
-const commit="ccf89302398309fbc8d500ec95531e3e68b579f9";
+const commit="64ed36dfb2c4df7645d969e0eaf1b3f3bb0a50c4";
 const lockFile="contracts/kimi-k31-host-build.candidate.json";
 function inputs(hostRoot,ref){
  const git=(...args)=>execFileSync("git",["-C",hostRoot,...args],{encoding:"utf8",maxBuffer:16*1024*1024}).trim();
@@ -50,7 +50,7 @@ export function kimiCallSurfaces(env=process.env){
 function checkSurfaces(desktopRoot,contractsRoot,selection,env){
  for(const family of ["market-selection","market-host","experts"]){
   const lock=JSON.parse(readFileSync(path.join(desktopRoot,`contracts/${family}-v2.candidate.json`)));
-  assert.equal(lock.source_commit,"ccf89302398309fbc8d500ec95531e3e68b579f9");
+  assert.equal(lock.source_commit,"64ed36dfb2c4df7645d969e0eaf1b3f3bb0a50c4");
  }
  for(const consumer of ["desktop","agent-host"])execFileSync(process.execPath,["scripts/sync-model-call-surfaces-v2.mjs",`--consumer=${consumer}`,"--check"],{cwd:contractsRoot,stdio:"pipe"});
  if(selection.market){
