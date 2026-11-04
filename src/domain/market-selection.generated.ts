@@ -20,7 +20,8 @@ export type HttpsSchemasYijieAiChatMarketSelectionV1 =
   | ErrorCode
   | Error
   | SelectedSkillRef
-  | SelectedSkills;
+  | SelectedSkills
+  | ToolProfile;
 export type CanonicalId = string;
 export type Revision = number;
 export type ProfileId = "kimi-k3-max-v1" | "minimax-m3-high-v1";
@@ -49,6 +50,16 @@ export type ErrorCode =
   | "selection_stale"
   | "execution_unavailable"
   | "temporarily_unavailable";
+/**
+ * Explicit new-chat tool configuration. Omission means full. Light maps only
+ * to native features.multi_agent=false and features.goals=false; it does not
+ * change sandbox, approvals, selected connectors, models or token budgets.
+ * The selection is immutable for the session, including resume and model
+ * changes. Existing sessions retain full. Expert and scheduled-draft tasks
+ * cannot select light. Providers without this capability reject light.
+ *
+ */
+export type ToolProfile = "full" | "light";
 
 /**
  * No service label or secret is accepted as authority. Native and Host revalidate exact scope, generation, ready state and connector.use before a versioned turn is admitted.

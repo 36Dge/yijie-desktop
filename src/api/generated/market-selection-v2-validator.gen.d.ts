@@ -21,3 +21,4 @@ export declare const validateErrorCode:Validator<T.ErrorCode>;
 export declare const validateError:Validator<T.Error>;
 export declare const validateSelectedSkillRef:Validator<T.SelectedSkillRef>;
 export declare const validateSelectedSkills:Validator<T.SelectedSkills>;
+export declare const validateToolProfile:Validator<T.ToolProfile>;

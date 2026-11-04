@@ -795,6 +795,13 @@ impl std::fmt::Debug for SelectedSkillRef {
     }
 }
 pub type SelectedSkills = Vec<SelectedSkillRef>;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ToolProfile {
+    #[serde(rename = "full")]
+    Full,
+    #[serde(rename = "light")]
+    Light,
+}
 pub fn validate_selection(refs: &[SelectionRef]) -> Result<(), &'static str> {
     if refs.len() > 58 {
         return Err("too many connector references");

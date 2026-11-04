@@ -280,6 +280,12 @@ pub struct SubmitPayload {
     pub content_blocks: Vec<ContentBlock>,
     pub intent: ModelIntent,
     pub selection: Selection,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub tool_profile: Option<ToolProfile>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -296,6 +302,12 @@ struct SubmitPayloadWire {
     pub content_blocks: Vec<ContentBlock>,
     pub intent: ModelIntent,
     pub selection: Selection,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub tool_profile: Option<ToolProfile>,
 }
 impl TryFrom<SubmitPayloadWire> for SubmitPayload {
     type Error = &'static str;
@@ -307,6 +319,7 @@ impl TryFrom<SubmitPayloadWire> for SubmitPayload {
             content_blocks: w.content_blocks,
             intent: w.intent,
             selection: w.selection,
+            tool_profile: w.tool_profile,
         };
         v.validate()?;
         Ok(v)
@@ -795,6 +808,13 @@ impl std::fmt::Debug for SelectedSkillRef {
     }
 }
 pub type SelectedSkills = Vec<SelectedSkillRef>;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ToolProfile {
+    #[serde(rename = "full")]
+    Full,
+    #[serde(rename = "light")]
+    Light,
+}
 pub fn validate_selection(refs: &[SelectionRef]) -> Result<(), &'static str> {
     if refs.len() > 58 {
         return Err("too many connector references");

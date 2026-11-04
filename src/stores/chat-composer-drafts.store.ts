@@ -6,6 +6,7 @@ import type { CatalogEntry, ExpertDisplay } from "../domain/experts-v2.generated
 import { expertDefaultPrompt } from "../domain/expert-composer";
 import type { SelectionDisplay } from "../domain/market-connectors.generated";
 import type { SelectedChatSkill } from "../domain/chat-skills";
+import type { ToolProfile } from "../domain/chat-tool-profile";
 import { usePermissionStore } from "./permission.store";
 
 /** In-memory drafts survive page navigation, never account logout or scope changes. */
@@ -45,6 +46,7 @@ export const useChatComposerDraftStore = defineStore("chat-composer-drafts", () 
   function setExpert(target: ChatComposerDraftKey, value: ExpertDisplay | null): void { const next = { ...experts.value }; if (value) next[target] = Object.freeze({ ...value }); else { delete next[target]; clearExpertPrompt(target); } experts.value = next; }
   const workspaceId = ref<string | null>(null);
   const newProfile = ref<ProfileId>(defaultModelProfile);
+  const newToolProfile = ref<ToolProfile>("full");
   const planProfile = ref<ProfileId>(defaultModelProfile);
   let tenant: string | null = null;
 
@@ -52,6 +54,7 @@ export const useChatComposerDraftStore = defineStore("chat-composer-drafts", () 
     expertPrompts.clear();
     texts.value = createChatComposerDrafts(); selections.value = {}; experts.value = {}; skills.value = {}; workspaceId.value = null;
     newProfile.value = defaultModelProfile; planProfile.value = defaultModelProfile;
+    newToolProfile.value = "full";
   }
   function selection(target: ChatComposerDraftKey): readonly SelectionDisplay[] { return selections.value[target] ?? []; }
   function setSelection(target: ChatComposerDraftKey, values: readonly SelectionDisplay[]): void {
@@ -75,5 +78,5 @@ export const useChatComposerDraftStore = defineStore("chat-composer-drafts", () 
     else if (phase === "ready" && !permission.hasCapability("connector.use")) selections.value = {};
   }, { immediate: true, flush: "sync" });
 
-  return { texts, experts, expert, setExpert, prefillExpertPrompt, clearExpertPrompt, selections, skills, skillSelection, setSkills, clearSkills, workspaceId, newProfile, planProfile, selection, setSelection, clearSelection, clearTarget, preparePlanDraft, clear };
+  return { texts, experts, expert, setExpert, prefillExpertPrompt, clearExpertPrompt, selections, skills, skillSelection, setSkills, clearSkills, workspaceId, newProfile, newToolProfile, planProfile, selection, setSelection, clearSelection, clearTarget, preparePlanDraft, clear };
 });

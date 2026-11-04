@@ -236,6 +236,13 @@ impl ChatRepository {
             .ok_or(ChatError::InvalidInput)?
             .to_owned();
         let body = wire::Submission {
+            #[cfg(feature = "kimi-k31-pro-candidate")]
+            tool_profile: if pending.agent_session.is_none() {
+                self.session_tool_profile(pending.session)?
+                    .map(|_| wire::ToolProfile::Light)
+            } else {
+                None
+            },
             task_id: task.to_string(),
             local_session_id: pending.session.to_string(),
             agent_session_id: pending.agent_session.map(|id| id.to_string()),

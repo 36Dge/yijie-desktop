@@ -73,6 +73,52 @@ fn counts(repo: &ChatRepository) -> (i64, i64, i64, i64) {
 }
 
 #[test]
+#[cfg(feature = "kimi-k31-pro-candidate")]
+fn light_market_selection_is_frozen_and_expert_adoption_is_rejected() {
+    if crate::chat::model_test_support::run_in_current_model_environment(concat!(
+        module_path!(),
+        "::light_market_selection_is_frozen_and_expert_adoption_is_rejected"
+    )) {
+        return;
+    }
+    let mut f = Fixture::new();
+    let mut request = f.request();
+    request.tool_profile = Some(wire::ToolProfile::Light);
+    request.selection = vec![f.selection(0)];
+    let receipt = f
+        .repo()
+        .freeze_market_submission(request.clone(), 1, ExecutionAdmission::test())
+        .unwrap();
+    let session = id(&receipt.session_id).unwrap();
+    assert_eq!(
+        f.repo().session_tool_profile(session).unwrap(),
+        Some(wire::ToolProfile::Light)
+    );
+    assert_eq!(
+        f.repo().market_submission_replay(&request).unwrap(),
+        Some(receipt.clone())
+    );
+    let before = counts(f.repo());
+    let mut changed = request;
+    changed.tool_profile = None;
+    assert!(f.repo().market_submission_replay(&changed).is_err());
+    let scope = f.repo().scope.clone();
+    let tx = f.repo().connection.transaction().unwrap();
+    let binding = expert_wire::BindingSetPayload {
+        session_id: session.to_string(),
+        operation_id: Uuid::now_v7().to_string(),
+        expected_binding_revision: 0,
+        expert: None,
+    };
+    assert_eq!(
+        expert_store::begin(&tx, &scope, &binding, None, &"0".repeat(64), 100),
+        Err(expert_wire::ErrorCode::InvalidRequest)
+    );
+    drop(tx);
+    assert_eq!(counts(f.repo()), before);
+}
+
+#[test]
 fn feat157_selection_unready_provider_does_not_enqueue_even_empty_selection() {
     let mut f = Fixture::new();
     let request = f.request();

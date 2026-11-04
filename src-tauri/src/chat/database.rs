@@ -916,6 +916,7 @@ impl ChatRepository {
                 migrations::PLAN_RETIREMENT_SCHEMA_VERSION,
                 migrations::ARTIFACT_FILES_SCHEMA_VERSION,
                 migrations::SELECTED_SKILLS_SCHEMA_VERSION,
+                migrations::TOOL_PROFILES_SCHEMA_VERSION,
             ]
             .contains(&version)
             {
@@ -1023,7 +1024,7 @@ impl ChatRepository {
         if super::models::v2_enabled() {
             migrations::migrate_to_target(
                 &mut connection,
-                migrations::SELECTED_SKILLS_SCHEMA_VERSION,
+                migrations::TOOL_PROFILES_SCHEMA_VERSION,
             )?;
         }
         protect_database_files(&database_path)?;

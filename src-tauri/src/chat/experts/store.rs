@@ -220,6 +220,13 @@ pub(crate) fn begin(
     if let Some(prior) = replay_binding(db, scope, request, intent_digest)? {
         return Ok(prior);
     }
+    let session = uuid::Uuid::parse_str(&request.session_id).map_err(|_| Error::InvalidRequest)?;
+    if crate::chat::tool_profiles::read(db, scope, session)
+        .map_err(|_| Error::NotFound)?
+        .is_some()
+    {
+        return Err(Error::InvalidRequest);
+    }
     crate::chat::schedules::execution_guard::foreground(db).map_err(|error| {
         if error == crate::chat::error::ChatError::ConversationConflict {
             Error::Busy

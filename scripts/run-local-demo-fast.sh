@@ -302,13 +302,15 @@ export YIJIE_CHAT_MODELS_ENABLED="$chat_models_enabled"
 export VITE_YIJIE_CHAT_MODELS_ENABLED="$chat_models_enabled"
 # New input metadata is sent only by the source-verified current candidate.
 export VITE_YIJIE_NATIVE_SKILL_INPUT_ENABLED=false
+export VITE_YIJIE_LIGHT_CHAT_ENABLED=false
 if [[ "$chat_models_enabled" == "true" ]]; then
   [[ "$scheduled_enabled" == "true" && "$stable_api_only" == "false" ]] || fail "chat models require the current scheduled native runtime"
   if [[ "$kimi_k31_candidate" == "true" ]]; then
-    python3 "$host_root/scripts/sync-kimi-k31-pro-contracts.py" --commit 633aa9eee300a3123c1574306234682059f557ec --check
+    python3 "$host_root/scripts/sync-kimi-k31-pro-contracts.py" --commit ccf89302398309fbc8d500ec95531e3e68b579f9 --check
     node "$workspace_root/yijie-contracts/scripts/generate-runtime-kimi-k31-pro.mjs" --check
     candidate_lock="$desktop_root/contracts/runtime-kimi-k31-pro.candidate.json"
     export VITE_YIJIE_NATIVE_SKILL_INPUT_ENABLED=true
+    export VITE_YIJIE_LIGHT_CHAT_ENABLED=true
     codex_runtime_root="$workspace_root/yijie-codex/.yijie/build/execution-progress-v1/aarch64-apple-darwin"
   else
   node "$workspace_root/yijie-contracts/scripts/generate-runtime-chat-models.mjs" --check

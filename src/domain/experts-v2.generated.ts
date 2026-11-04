@@ -74,6 +74,16 @@ export type ReferencedRevision = number;
  * @maxItems 58
  */
 export type Selection = SelectionRef[];
+/**
+ * Explicit new-chat tool configuration. Omission means full. Light maps only
+ * to native features.multi_agent=false and features.goals=false; it does not
+ * change sandbox, approvals, selected connectors, models or token budgets.
+ * The selection is immutable for the session, including resume and model
+ * changes. Existing sessions retain full. Expert and scheduled-draft tasks
+ * cannot select light. Providers without this capability reject light.
+ *
+ */
+export type ToolProfile = "full" | "light";
 export type SelectionDigest = string;
 
 export interface SnapshotRequest {
@@ -288,6 +298,7 @@ export interface MarketSubmitPayload {
   contentBlocks: ContentBlock[];
   intent: ModelIntent;
   selection: Selection;
+  toolProfile?: ToolProfile;
 }
 export interface StartTurnV2TextBlock {
   type: "text";
