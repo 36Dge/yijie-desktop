@@ -305,11 +305,11 @@ export VITE_YIJIE_NATIVE_SKILL_INPUT_ENABLED=false
 if [[ "$chat_models_enabled" == "true" ]]; then
   [[ "$scheduled_enabled" == "true" && "$stable_api_only" == "false" ]] || fail "chat models require the current scheduled native runtime"
   if [[ "$kimi_k31_candidate" == "true" ]]; then
-    python3 "$host_root/scripts/sync-kimi-k31-pro-contracts.py" --commit 64ed36dfb2c4df7645d969e0eaf1b3f3bb0a50c4 --check
+    python3 "$host_root/scripts/sync-kimi-k31-pro-contracts.py" --commit 85020c2929aaddc19cd81e728c9a3d5f127146b8 --check
     node "$workspace_root/yijie-contracts/scripts/generate-runtime-kimi-k31-pro.mjs" --check
     candidate_lock="$desktop_root/contracts/runtime-kimi-k31-pro.candidate.json"
     export VITE_YIJIE_NATIVE_SKILL_INPUT_ENABLED=true
-    codex_runtime_root="$workspace_root/yijie-codex/.yijie/build/execution-progress-v1/aarch64-apple-darwin"
+    codex_runtime_root="$workspace_root/yijie-codex/.yijie/build/public-progress-completion-v1/aarch64-apple-darwin"
   else
   node "$workspace_root/yijie-contracts/scripts/generate-runtime-chat-models.mjs" --check
   node "$workspace_root/yijie-contracts/scripts/sync-runtime-chat-models.mjs" --check

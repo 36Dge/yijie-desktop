@@ -3,17 +3,17 @@
   "feature": "FEAT-164",
   "mode": "immutable_local_candidate",
   "release": false,
-  "contracts_commit": "64ed36dfb2c4df7645d969e0eaf1b3f3bb0a50c4",
+  "contracts_commit": "85020c2929aaddc19cd81e728c9a3d5f127146b8",
   "contracts": {
-    "chat-models-v2": "2162ae2c09d8221cad53763925d7ab4b97d19c3e6d92bfb28ea095194f069190",
-    "runtime-kimi-k31-pro": "c31d86f61cd3392005c06273271b825bd4b2d4c09628cdd2ecc3ca0efee600e8"
+    "chat-models-v2": "e39907575090887891abb448724717027d6a7cfe1d5da9829d8c2534dd26aa01",
+    "runtime-kimi-k31-pro": "2de91441e22fe9ff4922cad514c44db77cad6a32dfc9bc4f5abf026344ac6df9"
   },
   "host": {
-    "base_commit": "394d18068df87b712356ff3a07db27e309d1c0cc",
+    "base_commit": "25b3b42bbd65d27a3ebc1be76024f7d6b213cfeb",
     "sources": {
       "api/README.md": "d270ca2dabf257b528ee2f178ba03e3d7fb3f1e04ffc8b4414247d4c47c50807",
       "api/artifact-media.candidate.json": "6d3ba9477e73b9e04a76e5933ba1d87e68076c62a97d28d2941b5d005c0f9864",
-      "api/chat-models-v2.candidate.json": "2162ae2c09d8221cad53763925d7ab4b97d19c3e6d92bfb28ea095194f069190",
+      "api/chat-models-v2.candidate.json": "e39907575090887891abb448724717027d6a7cfe1d5da9829d8c2534dd26aa01",
       "api/chat-models.candidate.json": "5b1794bf49a55b14a37a89706f0234f0c00d125ab0cf591d9405f7fc07054ae9",
       "api/compatibility/agent-host-runtime-approval-v6-v2.json": "ab5333f9ff1e76dc06827d72ff81f83701d234f91a2cbf6664f146247f24db60",
       "api/compatibility/agent-host-runtime-approval-v6-v3.json": "9c196a0f6e34dfa917f9c3e6f27400307d991b81d37ba911c0f717d40642c90a",
@@ -126,7 +126,7 @@
       "api/protobuf/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "api/runtime-chat-models.candidate.json": "55d5acf851843731038c594a48dafb2e1ec199ec484fd9959f2f1a4409bb80e1",
       "api/runtime-input-only.candidate.json": "f3dff38e087538e6f3a5a12b7b6a18c1f9737af10db0559c68e038c26d5716fb",
-      "api/runtime-kimi-k31-pro.candidate.json": "c31d86f61cd3392005c06273271b825bd4b2d4c09628cdd2ecc3ca0efee600e8",
+      "api/runtime-kimi-k31-pro.candidate.json": "2de91441e22fe9ff4922cad514c44db77cad6a32dfc9bc4f5abf026344ac6df9",
       "api/runtime-permissions.lock.json": "00d65afae350b892c48e502ac8249c3a374530787630bd32f71f00e61bc786b9",
       "api/scheduled-draft.candidate.json": "2120913718e5cc7b07707b7651e87f137962fe07fa644ea4fa2278588ceb875c",
       "api/scheduled-task-recovery.candidate.json": "b111633640c57639415d3a20e0a4028561e3c7d707b9fe08dc2e132cece32186",
@@ -263,6 +263,7 @@
       "internal/codex/provider_authority.go": "83186729509663250329e2aa5d2ca862af6811d834f28376876aabbe937a5d2c",
       "internal/codex/provider_authority_test.go": "b378ef6bacbc28942a02cd53fd744b0c8e66b3cd4d467c5b0bb669f98910a003",
       "internal/codex/provider_test.go": "ecdfc0d1bbeaa1faef55d71f97b264a33ed9eb37acb06913710c7f0bd8b2a2fb",
+      "internal/codex/public_progress_completion_regression_test.go": "c96420c002bd79cc0a55e8f22bc0920ef31b467857cd847b4ef59743c76acb45",
       "internal/codex/public_progress_integration_test.go": "47556edf7dd2ddf20563455f0db58bc0a90fcc8e901b53c375e7f1fcf40163fb",
       "internal/codex/public_progress_policy.go": "c95c15bf99130a7cc69994d5a35b21d64370823bbf6c0353b8cc53f9011365c4",
       "internal/codex/retirement_test.go": "3f46df7da47a68fa21b14127eb1a09818c87226683c7d446127ce338a9c32719",
@@ -324,7 +325,7 @@
       "internal/contracts/runtimeinputonly/types.gen.go": "4c5dcf2b892bc5f86dcb8b613e19842b081f90ea38cadba7a84b30256114ff00",
       "internal/contracts/runtimeinputonly/validate.go": "b523495b1ef297a1a586a2559ee6e8afdc6f9c84aa8044c9c48001e13e262d1c",
       "internal/contracts/runtimeinputonly/validate_test.go": "1c059be78b4e68ba850a08831dbaf830bed7ee3395c27efe0d5b32c0dc125f14",
-      "internal/contracts/runtimekimik31pro/artifact.gen.go": "0ad71a237c9325a56c76d61eb6678d3398bfe7aeb95223f24749097333d57ce1",
+      "internal/contracts/runtimekimik31pro/artifact.gen.go": "ffdc726b3b0cc3f57255721f6dfa5b77af41c5862f61f13aefd8b1009b54cd24",
       "internal/contracts/runtimekimik31pro/config-batch-write.schema.json": "fb382df3fbfb02c782f8373b7d553e757b461f502c3587223dc0b74e8515d202",
       "internal/contracts/runtimekimik31pro/config-write-response.schema.json": "8cd93ef4e2af27f896f967f17f50cf1b25b91cbaae0d135a29ccd8ce8fbd0aef",
       "internal/contracts/runtimekimik31pro/config.schema.json": "841e0ab1c1bd2fea736ba2d46212ab5bedc06dce9fd83bbafbf50b57b9056d17",
