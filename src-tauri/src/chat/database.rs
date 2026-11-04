@@ -12223,6 +12223,18 @@ mod tests {
             Some("来自 Host 的原生最终值")
         );
         assert_eq!(final_item.item.phase.as_deref(), Some("final_answer"));
+        for (id, text) in [
+            ("host-opening", "我会比较城市产业与生活体验。"),
+            (
+                "host-interim",
+                "现有资料分别覆盖产业与生活成本，结论将保持同一比较口径。",
+            ),
+        ] {
+            let message = buffer.view.items.iter().find(|i| i.item.id == id).unwrap();
+            assert_eq!(message.item.text.as_deref(), Some(text));
+            assert_eq!(message.item.phase.as_deref(), Some("commentary"));
+        }
+
         let reason = buffer
             .view
             .items
@@ -12295,6 +12307,13 @@ mod tests {
             )
             .unwrap();
         assert_eq!(views[0].status.as_deref(), Some("failed"));
+        for id in ["host-opening", "host-interim"] {
+            let saved = views[0].items.iter().find(|i| i.item.id == id).unwrap();
+            let live = buffer.view.items.iter().find(|i| i.item.id == id).unwrap();
+            assert_eq!(saved.item.text, live.item.text);
+            assert_eq!(saved.item.phase.as_deref(), Some("commentary"));
+        }
+
         assert!(views[0]
             .items
             .iter()

@@ -67,7 +67,7 @@ describe("catalog generation provenance", () => {
     const names = ["market-catalog.json", "market-catalog.candidate.json", "market-catalog-feat164.candidate.json"];
     const before = names.map(name => readFileSync(path.join(root, "contracts", name)));
     syncMarketCatalog({desktopRoot:root, connectorsRoot:path.join(root, "../yijie-connectors"), check:true});
-    syncMarketCatalog({desktopRoot:root, connectorsRoot:path.join(root, "../yijie-connectors"), check:true, immutableCommit:"07c280e72f2f3ccca630d1576376d1b995c9c494"});
+    syncMarketCatalog({desktopRoot:root, connectorsRoot:path.join(root, "../yijie-connectors"), check:true, immutableCommit:"6bf6ed5bbe9657655e1fb081c7b133260c33c34e"});
     expect(names.map(name => readFileSync(path.join(root, "contracts", name)))).toEqual(before);
   });
 });

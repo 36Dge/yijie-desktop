@@ -37,6 +37,13 @@ try {
     assert(groups[0].entries.some(entry => entry.title === "查看公开资料"));
     assert.equal(summarizeActivity(groups[0], false).callCount, 3);
     assert(summarizeActivity(groups[0], false).title.includes("浏览器"));
+
+    const publicMessages = turn.items.filter(item => item.presentation === "commentary");
+    assert.equal(publicMessages.length, 2);
+    assert.deepEqual(publicMessages.map(item => item.contentBlocks.filter(block => block.type === "text").map(block => block.text).join("")), [
+      "我会比较城市产业与生活体验。",
+      "现有资料分别覆盖产业与生活成本，结论将保持同一比较口径。",
+    ]);
     assert.equal(JSON.stringify(view), original);
   } finally { await server.close(); }
   console.log("Actual Host projection → Native SSE/display/SQLCipher → normal reopen → frontend activity rows: PASS. No Runtime/model call.");
