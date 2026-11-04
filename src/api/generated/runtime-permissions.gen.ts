@@ -96,6 +96,13 @@ export interface components {
         RuntimeApprovalSnapshot: {
             requests: components["schemas"]["RuntimeApproval"][];
         };
+        /** @description User-selected managed Skill identity. Host resolves the exact enabled installation and native SKILL.md path from its verified catalog and receipt. No client path or prompt content is accepted. */
+        SelectedSkillRef: {
+            id: string;
+            version: string;
+        };
+        /** @description Ordered selections frozen with the user turn. IDs must be unique across the entire turn. Absence preserves legacy behavior. Native Skill inputs own instruction loading and per-turn deduplication. Consumers send only after the new source pin is admitted. */
+        SelectedSkills: components["schemas"]["SelectedSkillRef"][];
         StartTurnV2TextBlock: {
             /**
              * @description discriminator enum property added by openapi-typescript
@@ -104,6 +111,7 @@ export interface components {
             type: "text";
             /** @description Non-blank user text, bounded to 1 MiB in UTF-8 bytes. */
             text: string;
+            skills?: components["schemas"]["SelectedSkills"];
         };
         StartTurnV2ImageBlock: {
             /**
