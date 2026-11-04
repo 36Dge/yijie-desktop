@@ -2564,6 +2564,8 @@ enum DraftTargetPayload {
 enum TurnContentBlockPayload {
     Text {
         text: String,
+        #[serde(default, deserialize_with = "optional_selected_skills")]
+        skills: Option<super::connectors::selection_generated::SelectedSkills>,
     },
     File {
         #[serde(rename = "attachmentId")]
@@ -2573,6 +2575,12 @@ enum TurnContentBlockPayload {
         #[serde(rename = "attachmentId")]
         attachment_id: Uuid,
     },
+}
+
+fn optional_selected_skills<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<super::connectors::selection_generated::SelectedSkills>, D::Error> {
+    super::connectors::selection_generated::SelectedSkills::deserialize(deserializer).map(Some)
 }
 
 #[derive(Deserialize)]
@@ -4136,9 +4144,12 @@ fn draft_content_blocks(
     let mut result = Vec::with_capacity(blocks.len());
     for block in blocks {
         match block {
-            TurnContentBlockPayload::Text { text } => {
+            TurnContentBlockPayload::Text { text, skills } => {
                 validate_input(&text, request_id).map_err(ChatIpcError::v2)?;
-                result.push(DraftContentBlock::Text(text));
+                result.push(
+                    DraftContentBlock::selected_text(text, skills)
+                        .map_err(|_| ChatIpcError::request_invalid(Some(request_id)).v2())?,
+                );
             }
             TurnContentBlockPayload::File { attachment_id } => {
                 attachment_count += 1;

@@ -112,7 +112,9 @@ fn blocks(payload: &wire::SubmitPayload) -> Result<Vec<DraftContentBlock>, ChatE
         .iter()
         .map(|block| {
             Ok(match block {
-                wire::ContentBlock::Text(v) => DraftContentBlock::Text(v.text.clone()),
+                wire::ContentBlock::Text(v) => {
+                    DraftContentBlock::selected_text(v.text.clone(), v.skills.clone())?
+                }
                 wire::ContentBlock::File(v) => DraftContentBlock::File(id(&v.attachment_id)?),
                 wire::ContentBlock::Image(v) => DraftContentBlock::Image(id(&v.attachment_id)?),
             })

@@ -2221,6 +2221,7 @@ impl ConversationApplication {
                             dispatch.operation_id,
                             &[super::database::HostTurnInputBlock::Text {
                                 text: dispatch.input.clone(),
+                                skills: Vec::new(),
                             }],
                             &trace,
                             mode,

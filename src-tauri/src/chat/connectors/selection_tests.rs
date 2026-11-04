@@ -193,6 +193,7 @@ fn feat157_selection_same_operation_binds_complete_intent_and_never_adopts_legac
     changed.content_blocks = vec![wire::ContentBlock::Text(wire::TextInput {
         r#type: "text".into(),
         text: "a different ordinary draft".into(),
+        skills: None,
     })];
     changes.push(changed);
     let mut changed = request.clone();

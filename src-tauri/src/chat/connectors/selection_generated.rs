@@ -80,12 +80,24 @@ impl std::fmt::Debug for ModelIntent {
 pub struct TextInput {
     pub r#type: String,
     pub text: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub skills: Option<SelectedSkills>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TextInputWire {
     pub r#type: String,
     pub text: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub skills: Option<SelectedSkills>,
 }
 impl TryFrom<TextInputWire> for TextInput {
     type Error = &'static str;
@@ -93,6 +105,7 @@ impl TryFrom<TextInputWire> for TextInput {
         let v = Self {
             r#type: w.r#type,
             text: w.text,
+            skills: w.skills,
         };
         v.validate()?;
         Ok(v)
@@ -102,8 +115,8 @@ impl TextInput {
     pub fn validate(&self) -> Result<(), &'static str> {
         {
             let value_type = &self.r#type;
-            if value_type != "text" {
-                return Err("invalid selection constant");
+            if !["text"].contains(&value_type.as_str()) {
+                return Err("invalid selection enum");
             }
         }
         {
@@ -118,6 +131,21 @@ impl TextInput {
                 return Err("blank selection input");
             }
         }
+        self.skills
+            .as_ref()
+            .map(|value_skills| -> Result<(), &'static str> {
+                if value_skills.is_empty() {
+                    return Err("invalid selection array");
+                }
+                if value_skills.len() > 256 {
+                    return Err("invalid selection array");
+                }
+                for value in value_skills.iter() {
+                    value.validate()?;
+                }
+                Ok(())
+            })
+            .transpose()?;
         Ok(())
     }
 }
@@ -709,6 +737,64 @@ impl std::fmt::Debug for Error {
         f.write_str("Error([redacted])")
     }
 }
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "SelectedSkillRefWire")]
+pub struct SelectedSkillRef {
+    pub id: String,
+    pub version: String,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SelectedSkillRefWire {
+    pub id: String,
+    pub version: String,
+}
+impl TryFrom<SelectedSkillRefWire> for SelectedSkillRef {
+    type Error = &'static str;
+    fn try_from(w: SelectedSkillRefWire) -> Result<Self, Self::Error> {
+        let v = Self {
+            id: w.id,
+            version: w.version,
+        };
+        v.validate()?;
+        Ok(v)
+    }
+}
+impl SelectedSkillRef {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        {
+            let value_id = &self.id;
+            if value_id.chars().count() < 1 {
+                return Err("invalid selection text");
+            }
+            if value_id.chars().count() > 256 {
+                return Err("invalid selection text");
+            }
+            if value_id.trim().is_empty() {
+                return Err("blank selection input");
+            }
+        }
+        {
+            let value_version = &self.version;
+            if value_version.chars().count() < 1 {
+                return Err("invalid selection text");
+            }
+            if value_version.chars().count() > 64 {
+                return Err("invalid selection text");
+            }
+            if value_version.trim().is_empty() {
+                return Err("blank selection input");
+            }
+        }
+        Ok(())
+    }
+}
+impl std::fmt::Debug for SelectedSkillRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SelectedSkillRef([redacted])")
+    }
+}
+pub type SelectedSkills = Vec<SelectedSkillRef>;
 pub fn validate_selection(refs: &[SelectionRef]) -> Result<(), &'static str> {
     if refs.len() > 58 {
         return Err("too many connector references");

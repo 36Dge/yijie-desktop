@@ -1,8 +1,16 @@
 import type { ConversationTimelineContentBlock } from "./conversation-timeline";
 import type { ManagedSkillProjection } from "./skill-marketplace";
+import type { SelectedSkillRef } from "./market-selection-v2.generated";
+import { validateTextInput } from "../api/generated/market-selection-v2-validator.gen.js";
+
+// Set only by the fixed entry after both native/Host source pins are admitted.
+export function nativeSkillInputEnabled(): boolean {
+  return import.meta.env.VITE_YIJIE_NATIVE_SKILL_INPUT_ENABLED === "true";
+}
 
 export interface SelectedChatSkill {
   readonly id: string;
+  readonly version: string;
   readonly runtimeName: string;
   readonly displayName: string;
   readonly category: ManagedSkillProjection["category"];
@@ -22,7 +30,7 @@ export function skillSelectionIssue(skill: ManagedSkillProjection | undefined): 
 
 export function selectedSkillIssue(selected: SelectedChatSkill, catalog: readonly ManagedSkillProjection[]): string | null {
   const current = catalog.find(skill => skill.id === selected.id);
-  if (current && current.runtimeName !== selected.runtimeName) return "技能已更新，请重新选择";
+  if (current && (current.runtimeName !== selected.runtimeName || (nativeSkillInputEnabled() && current.version !== selected.version))) return "技能已更新，请重新选择";
   return skillSelectionIssue(current);
 }
 
@@ -34,6 +42,15 @@ export function compileSkillInput(text: string, selection: readonly SelectedChat
   const names = [...new Set(selection.map(skill => skill.runtimeName))];
   if (names.some(name => !/^[a-z0-9][a-z0-9-]{0,63}$/.test(name))) throw new Error("Invalid skill runtime name");
   return names.length ? `${names.map(name => `$${name}`).join(" ")}\n\n${text}` : text;
+}
+
+export function compileSelectedSkillRefs(selection: readonly SelectedChatSkill[]): readonly SelectedSkillRef[] {
+  if (selection.length === 0) return [];
+  const values = selection.map(({ id, version }) => Object.freeze({ id, version }));
+  if (new Set(values.map(value => value.id)).size !== values.length || !validateTextInput({ type: "text", text: "selection", skills: values })) {
+    throw new Error("Invalid selected Skill identity");
+  }
+  return Object.freeze(values);
 }
 
 

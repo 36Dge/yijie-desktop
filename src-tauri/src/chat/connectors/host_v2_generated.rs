@@ -3815,12 +3815,24 @@ impl std::fmt::Debug for SuspendResponse {
 pub struct StartTurnV2TextBlock {
     pub r#type: String,
     pub text: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub skills: Option<SelectedSkills>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StartTurnV2TextBlockWire {
     pub r#type: String,
     pub text: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub skills: Option<SelectedSkills>,
 }
 impl TryFrom<StartTurnV2TextBlockWire> for StartTurnV2TextBlock {
     type Error = &'static str;
@@ -3828,6 +3840,7 @@ impl TryFrom<StartTurnV2TextBlockWire> for StartTurnV2TextBlock {
         let v = Self {
             r#type: w.r#type,
             text: w.text,
+            skills: w.skills,
         };
         v.validate()?;
         Ok(v)
@@ -3856,6 +3869,26 @@ impl StartTurnV2TextBlock {
                 return Err("blank content");
             }
         }
+        self.skills
+            .as_ref()
+            .map(|value_skills| -> Result<(), &'static str> {
+                if value_skills.is_empty() {
+                    return Err("invalid broker collection");
+                }
+                if value_skills.len() > 256 {
+                    return Err("invalid broker collection");
+                }
+                for item in value_skills.iter() {
+                    item.validate()?;
+                }
+                for (i, item) in value_skills.iter().enumerate() {
+                    if value_skills[..i].contains(item) {
+                        return Err("duplicate broker collection item");
+                    }
+                }
+                Ok(())
+            })
+            .transpose()?;
         Ok(())
     }
 }
@@ -4131,6 +4164,70 @@ pub enum StartTurnV2FileMediaType {
     ImageSvgXml,
     #[serde(rename = "video/mp4")]
     VideoMp4,
+}
+pub type SelectedSkills = Vec<SelectedSkillRef>;
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "SelectedSkillRefWire")]
+pub struct SelectedSkillRef {
+    pub id: String,
+    pub version: String,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SelectedSkillRefWire {
+    pub id: String,
+    pub version: String,
+}
+impl TryFrom<SelectedSkillRefWire> for SelectedSkillRef {
+    type Error = &'static str;
+    fn try_from(w: SelectedSkillRefWire) -> Result<Self, Self::Error> {
+        let v = Self {
+            id: w.id,
+            version: w.version,
+        };
+        v.validate()?;
+        Ok(v)
+    }
+}
+impl SelectedSkillRef {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        {
+            let value_id = &self.id;
+            if value_id.chars().count() < 1 {
+                return Err("invalid broker text");
+            }
+            if value_id.chars().count() > 256 {
+                return Err("invalid broker text");
+            }
+            if value_id
+                .chars()
+                .all(|c| c.is_whitespace() || c == '\u{feff}')
+            {
+                return Err("blank content");
+            }
+        }
+        {
+            let value_version = &self.version;
+            if value_version.chars().count() < 1 {
+                return Err("invalid broker text");
+            }
+            if value_version.chars().count() > 64 {
+                return Err("invalid broker text");
+            }
+            if value_version
+                .chars()
+                .all(|c| c.is_whitespace() || c == '\u{feff}')
+            {
+                return Err("blank content");
+            }
+        }
+        Ok(())
+    }
+}
+impl std::fmt::Debug for SelectedSkillRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SelectedSkillRef([redacted])")
+    }
 }
 fn canonical_id(s: &str) -> bool {
     let b = s.as_bytes();

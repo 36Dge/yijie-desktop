@@ -126,9 +126,12 @@ impl HostBridge {
         operation: Uuid,
         blocks: &[HostTurnInputBlock],
     ) -> Result<Uuid, HostBridgeError> {
-        let [HostTurnInputBlock::Text { text }] = blocks else {
+        let [HostTurnInputBlock::Text { text, skills }] = blocks else {
             return Err(protocol_error());
         };
+        if !skills.is_empty() {
+            return Err(protocol_error());
+        }
         let input = wire::TurnRequest {
             schema_version: 1,
             policy_version: 1,

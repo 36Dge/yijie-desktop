@@ -19,3 +19,5 @@ export declare const validateSubmitRequest:Validator<T.SubmitRequest>;
 export declare const validateSubmitResponse:Validator<T.SubmitResponse>;
 export declare const validateErrorCode:Validator<T.ErrorCode>;
 export declare const validateError:Validator<T.Error>;
+export declare const validateSelectedSkillRef:Validator<T.SelectedSkillRef>;
+export declare const validateSelectedSkills:Validator<T.SelectedSkills>;

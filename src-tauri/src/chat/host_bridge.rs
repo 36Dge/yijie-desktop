@@ -2167,9 +2167,15 @@ fn validate_turn_v2_blocks(blocks: &[HostTurnInputBlock]) -> Result<(), HostBrid
     let mut file_context_bytes = 0_usize;
     for block in blocks {
         match block {
-            HostTurnInputBlock::Text { text } => {
+            HostTurnInputBlock::Text { text, skills } => {
                 if text.trim().is_empty() || text.len() > MAX_JSON_BYTES || text.contains('\0') {
                     return Err(protocol_error());
+                }
+                if skills.len() > 256 {
+                    return Err(protocol_error());
+                }
+                for skill in skills {
+                    skill.validate().map_err(|_| protocol_error())?;
                 }
             }
             HostTurnInputBlock::File {
@@ -3295,6 +3301,7 @@ mod tests {
         let blocks = vec![
             HostTurnInputBlock::Text {
                 text: "Compare the attachment".to_owned(),
+                skills: Vec::new(),
             },
             HostTurnInputBlock::File {
                 attachment_id: file_id,
@@ -3379,6 +3386,7 @@ mod tests {
         let blocks = vec![
             HostTurnInputBlock::Text {
                 text: "Compare the attached quarterly total with the image.".to_owned(),
+                skills: Vec::new(),
             },
             HostTurnInputBlock::File {
                 attachment_id: Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f61")
@@ -3419,6 +3427,7 @@ mod tests {
         let operation_id = Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f60").unwrap();
         let blocks = vec![HostTurnInputBlock::Text {
             text: "retry the identical canonical input".to_owned(),
+            skills: Vec::new(),
         }];
         let invalid_responses = [
             response(
@@ -3968,6 +3977,7 @@ mod tests {
                 Uuid::now_v7(),
                 &[HostTurnInputBlock::Text {
                     text: "普通测试".into(),
+                    skills: Vec::new(),
                 }],
                 &HostTrace::default(),
                 super::super::runtime_permissions::PermissionMode::Ask,

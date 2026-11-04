@@ -18,7 +18,9 @@ export type HttpsSchemasYijieAiChatMarketSelectionV2 =
   | SubmitRequest
   | SubmitResponse
   | ErrorCode
-  | Error;
+  | Error
+  | SelectedSkillRef
+  | SelectedSkills;
 export type CanonicalId = string;
 export type Revision = number;
 /**
@@ -33,6 +35,13 @@ export type SelectionDigest = string;
  * @maxItems 58
  */
 export type Selection = SelectionRef[];
+/**
+ * Ordered selections frozen with the user turn. IDs must be unique across the entire turn. Absence preserves legacy behavior. Native Skill inputs own instruction loading and per-turn deduplication. Consumers send only after the new source pin is admitted.
+ *
+ * @minItems 1
+ * @maxItems 256
+ */
+export type SelectedSkills = SelectedSkillRef[];
 export type ContentBlock = TextInput | FileInput | ImageInput;
 export type ErrorCode =
   | "invalid_request"
@@ -58,7 +67,18 @@ export interface ModelIntent {
 }
 export interface TextInput {
   type: "text";
+  /**
+   * Non-blank user text, bounded to 1 MiB in UTF-8 bytes.
+   */
   text: string;
+  skills?: SelectedSkills;
+}
+/**
+ * User-selected managed Skill identity. Host resolves the exact enabled installation and native SKILL.md path from its verified catalog and receipt. No client path or prompt content is accepted.
+ */
+export interface SelectedSkillRef {
+  id: string;
+  version: string;
 }
 export interface FileInput {
   type: "file";

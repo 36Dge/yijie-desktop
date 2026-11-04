@@ -105,11 +105,12 @@ impl Admission {
                 }
                 if !is_create && !resume {
                     let expected = r.load_start_turn_dispatch_v2(operation)?;
-                    let [HostTurnInputBlock::Text { text }] = expected.content_blocks.as_slice()
+                    let [HostTurnInputBlock::Text { text, skills }] =
+                        expected.content_blocks.as_slice()
                     else {
                         return Err(ChatError::ConversationConflict);
                     };
-                    if payload["text"].as_str() != Some(text.as_str()) {
+                    if !skills.is_empty() || payload["text"].as_str() != Some(text.as_str()) {
                         return Err(ChatError::ConversationConflict);
                     }
                 }

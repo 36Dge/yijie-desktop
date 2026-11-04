@@ -1367,7 +1367,8 @@ describe("FEAT-126 ChatPage", () => {
     wrapper.unmount();
   });
 
-  it.each([false, true])("submits selected skills as explicit Runtime mentions (reply=%s)", async (reply) => {
+  it.each([{reply:false,native:false},{reply:true,native:false},{reply:false,native:true},{reply:true,native:true}])("submits selected skills with preserved mentions and admitted identities (%j)", async ({reply,native}) => {
+    vi.stubEnv("VITE_YIJIE_NATIVE_SKILL_INPUT_ENABLED", String(native));
     skillFlag.enabled = true;
     vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "2026-10-20T00:00:00Z", skills: [installedSkill] });
     const { wrapper, store, pinia } = await mountPage(reply ? `/chat/${SESSION_ID}` : "/chat", reply);
@@ -1386,6 +1387,7 @@ describe("FEAT-126 ChatPage", () => {
     expect(refresh).toHaveBeenCalledOnce();
     expect(submit).toHaveBeenCalledOnce();
     expect(submit.mock.calls[0]?.[reply ? 0 : 1]).toBe("$copywriting\n\n根据合成资料撰写一段文案");
+    expect(submit.mock.calls[0]?.[reply ? 4 : 5]).toEqual(native ? [{ id: installedSkill.id, version: installedSkill.version }] : undefined);
     expect(drafts.skillSelection(target)).toEqual([]);
     wrapper.unmount();
   });

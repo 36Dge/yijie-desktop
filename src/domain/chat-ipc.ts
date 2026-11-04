@@ -1,4 +1,5 @@
 import type { AttachmentPresentation } from "./chat-file-presentation";
+import type { SelectedSkillRef } from "./market-selection-v2.generated";
 import { ARTIFACT_MEDIA_TYPES } from "../api/generated/artifact-media-policy.gen";
 import { isSessionPurposeView, type SessionPurposeView } from "./chat-session-purpose.generated";
 import { parseStrictRfc3339EpochNanoseconds } from "./rfc3339";
@@ -286,7 +287,7 @@ export interface ChatTextContentBlock {
 export type ChatMessageContentBlock = ChatTextContentBlock | ChatAttachment;
 
 export type ChatTurnContentBlock =
-  | ChatTextContentBlock
+  | (ChatTextContentBlock & Readonly<{ skills?: readonly SelectedSkillRef[] }>)
   | Readonly<{ type: "file" | "image"; attachmentId: string }>;
 
 export interface ChatMessage {

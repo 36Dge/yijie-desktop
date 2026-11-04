@@ -1,8 +1,24 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { installedSkill } from "../test/skill-fixture";
-import { compileSkillInput, presentSkillMessage, selectedSkillIssue, skillSelectionIssue } from "./chat-skills";
+import { compileSkillInput, compileSelectedSkillRefs, presentSkillMessage, selectedSkillIssue, skillSelectionIssue } from "./chat-skills";
+
+afterEach(() => vi.unstubAllEnvs());
 
 describe("per-turn explicit skill selection", () => {
+  it("requires re-selection after a managed version changes in the native input profile", () => {
+    vi.stubEnv("VITE_YIJIE_NATIVE_SKILL_INPUT_ENABLED", "true");
+    expect(selectedSkillIssue(installedSkill, [{ ...installedSkill, version: "2.0.0" }])).toContain("已更新");
+  });
+  it("freezes the selected managed identity without exposing a path or prompt", () => {
+    const selected = { ...installedSkill };
+    const frozen = compileSelectedSkillRefs([selected]);
+    expect(frozen).toEqual([{ id: selected.id, version: selected.version }]);
+    const version = selected.version;
+    selected.version = "2.0.0";
+    expect(frozen[0]?.version).toBe(version);
+    expect(Object.isFrozen(frozen)).toBe(true);
+    expect(Object.isFrozen(frozen[0])).toBe(true);
+  });
   it("compiles multiple canonical mentions once and leaves the user's text unchanged", () => {
     const second = { ...installedSkill, id: "yijie.store-operations.invoice-generator", runtimeName: "invoice-generator" };
     expect(compileSkillInput("整理这份合成资料。", [installedSkill, second, installedSkill]))

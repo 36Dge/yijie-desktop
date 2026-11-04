@@ -115,7 +115,7 @@ import { browserChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
 
 import { CHAT_AUTHORITY_RETRY_KEY } from "../../authorization/chat-authority-recovery";
 import { locateChatTurn } from "../../domain/locate-chat-turn";
-import { compileSkillInput, selectedSkillIssue, skillSelectionIssue, type ChatSkillChip } from "../../domain/chat-skills";
+import { compileSkillInput, compileSelectedSkillRefs, nativeSkillInputEnabled, selectedSkillIssue, skillSelectionIssue, type ChatSkillChip } from "../../domain/chat-skills";
 
 const route = useRoute();
 const router = useRouter();
@@ -525,7 +525,7 @@ function toggleSkill(id: string): void {
   if (current.some(skill => skill.id === id)) { sharedDrafts.setSkills(target, current.filter(skill => skill.id !== id)); return; }
   const entry = skills.skills.find(skill => skill.id === id);
   if (!entry || skillSelectionIssue(entry) || skills.operations[id]) return;
-  sharedDrafts.setSkills(target, [...current, { id: entry.id, runtimeName: entry.runtimeName, displayName: entry.displayName, category: entry.category }]);
+  sharedDrafts.setSkills(target, [...current, { id: entry.id, version: entry.version, runtimeName: entry.runtimeName, displayName: entry.displayName, category: entry.category }]);
 }
 const connectorChips = computed<readonly ConnectorChipView[]>(() => connectorSelection.value.map(selected => {
   const entry = connectors.entries.find(item => item.id === selected.serviceId);
@@ -874,8 +874,11 @@ async function submit(recoverExpert = false): Promise<void> {
       if (issue) { transientNotice.value = issue; return; }
       input = compileSkillInput(input, selectedSkillsAtStart);
     }
+    const selectedRefs = nativeSkillInputEnabled() && !recoverExpert ? compileSelectedSkillRefs(selectedSkillsAtStart) : undefined;
     if (isSessionRoute.value) {
-      const result = await (turnExpert !== undefined
+      const result = await (selectedRefs?.length
+        ? chatStore.submitTurnWithResult(input, frozenExpert?.submission.intent ?? models.intent.value ?? undefined, marketSelection, turnExpert, selectedRefs)
+        : turnExpert !== undefined
         ? chatStore.submitTurnWithResult(input, frozenExpert?.submission.intent ?? models.intent.value ?? undefined, marketSelection, turnExpert)
         : marketSelection !== undefined
         ? chatStore.submitTurnWithResult(input, models.intent.value ?? undefined, marketSelection)
@@ -896,7 +899,9 @@ async function submit(recoverExpert = false): Promise<void> {
       scrollToBottom();
       return;
     }
-    const result = await (turnExpert !== undefined
+    const result = await (selectedRefs?.length
+      ? chatStore.createSessionWithResult(frozenExpert ? frozenExpert.submission.projectId : availableProjectId.value, input, frozenExpert?.submission.intent ?? models.intent.value ?? undefined, marketSelection, turnExpert, selectedRefs)
+      : turnExpert !== undefined
       ? chatStore.createSessionWithResult(frozenExpert ? frozenExpert.submission.projectId : availableProjectId.value, input, frozenExpert?.submission.intent ?? models.intent.value ?? undefined, marketSelection, turnExpert)
       : marketSelection !== undefined
       ? chatStore.createSessionWithResult(availableProjectId.value, input, models.intent.value ?? undefined, marketSelection)

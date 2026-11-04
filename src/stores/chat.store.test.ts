@@ -1018,6 +1018,23 @@ describe("chat view-model store", () => {
     await store.dispose();
   });
 
+  it("preserves frozen Skill identities in the durable input route without relying on names", async () => {
+    const { client } = fakeClient();
+    const create = vi.spyOn(client, "createSessionV2");
+    const legacy = vi.spyOn(client, "createSession");
+    const store = createStore(client);
+    await store.bind(TENANT);
+    const refs = Object.freeze([Object.freeze({ id: "ordinary-sample", version: "1.0.0" })]);
+    const result = await store.createSessionWithResult(null, "$same-name\n\n普通问题", undefined, undefined, undefined, refs);
+    expect(result.status).toBe("local_durable_accepted");
+    expect(legacy).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledOnce();
+    const blocks = create.mock.calls[0]![2];
+    expect(blocks).toEqual([{ type: "text", text: "$same-name\n\n普通问题", skills: refs }]);
+    expect(blocks[0]?.type === "text" && blocks[0].skills).not.toBe(refs);
+    await store.dispose();
+  });
+
   it.each([false, true])("creates a projectless task without native project revalidation (v2=%s)", async (multimodal) => {
     const noProject = { ...session(SESSION_A), projectId: null };
     const { client } = fakeClient({

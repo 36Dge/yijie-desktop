@@ -255,8 +255,37 @@ pub struct StartTurnDispatch {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DraftContentBlock {
     Text(String),
+    SelectedText {
+        text: String,
+        skills: Vec<super::connectors::selection_generated::SelectedSkillRef>,
+    },
     File(Uuid),
     Image(Uuid),
+}
+
+impl DraftContentBlock {
+    pub(crate) fn selected_text(
+        text: String,
+        skills: Option<Vec<super::connectors::selection_generated::SelectedSkillRef>>,
+    ) -> Result<Self, ChatError> {
+        match skills {
+            None => Ok(Self::Text(text)),
+            Some(skills) if skills.is_empty() || skills.len() > 256 => Err(ChatError::InvalidInput),
+            Some(skills) => {
+                for skill in &skills {
+                    skill.validate().map_err(|_| ChatError::InvalidInput)?;
+                }
+                Ok(Self::SelectedText { text, skills })
+            }
+        }
+    }
+
+    fn selected_skills(&self) -> &[super::connectors::selection_generated::SelectedSkillRef] {
+        match self {
+            Self::SelectedText { skills, .. } => skills,
+            _ => &[],
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -286,6 +315,8 @@ impl DraftTarget {
 pub enum HostTurnInputBlock {
     Text {
         text: String,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        skills: Vec<super::connectors::selection_generated::SelectedSkillRef>,
     },
     File {
         attachment_id: Uuid,
@@ -308,9 +339,10 @@ pub enum HostTurnInputBlock {
 impl std::fmt::Debug for HostTurnInputBlock {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Text { text } => formatter
+            Self::Text { text, skills } => formatter
                 .debug_struct("Text")
                 .field("utf8_bytes", &text.len())
+                .field("skill_count", &skills.len())
                 .finish(),
             Self::File {
                 attachment_id,
@@ -883,6 +915,7 @@ impl ChatRepository {
                 migrations::DELIVERY_PROOF_SCHEMA_VERSION,
                 migrations::PLAN_RETIREMENT_SCHEMA_VERSION,
                 migrations::ARTIFACT_FILES_SCHEMA_VERSION,
+                migrations::SELECTED_SKILLS_SCHEMA_VERSION,
             ]
             .contains(&version)
             {
@@ -985,6 +1018,12 @@ impl ChatRepository {
             migrations::migrate_to_target(
                 &mut connection,
                 migrations::ARTIFACT_FILES_SCHEMA_VERSION,
+            )?;
+        }
+        if super::models::v2_enabled() {
+            migrations::migrate_to_target(
+                &mut connection,
+                migrations::SELECTED_SKILLS_SCHEMA_VERSION,
             )?;
         }
         protect_database_files(&database_path)?;
@@ -3900,7 +3939,12 @@ impl ChatRepository {
                 "text" => {
                     let text = row.2.ok_or(ChatError::DatabaseUnavailable)?;
                     validate_message(&text)?;
-                    content_blocks.push(HostTurnInputBlock::Text { text });
+                    let skills = stored_selected_skills(
+                        &self.connection,
+                        parse_uuid_value(message_id)?,
+                        row.0,
+                    )?;
+                    content_blocks.push(HostTurnInputBlock::Text { text, skills });
                 }
                 "file" => {
                     if remaining_file_blocks == 0 {
@@ -6849,9 +6893,19 @@ pub(super) fn validate_draft_blocks(blocks: &[DraftContentBlock]) -> Result<(), 
     let mut attachment_ids = HashSet::new();
     let mut attachment_count = 0_usize;
     let mut total_text_bytes = 0_usize;
+    let mut skill_ids = HashSet::new();
     for block in blocks {
+        if matches!(block, DraftContentBlock::SelectedText { skills, .. } if skills.is_empty()) {
+            return Err(ChatError::InvalidInput);
+        }
+        for skill in block.selected_skills() {
+            skill.validate().map_err(|_| ChatError::InvalidInput)?;
+            if !skill_ids.insert(skill.id.as_str()) || skill_ids.len() > 256 {
+                return Err(ChatError::InvalidInput);
+            }
+        }
         match block {
-            DraftContentBlock::Text(text) => {
+            DraftContentBlock::Text(text) | DraftContentBlock::SelectedText { text, .. } => {
                 validate_message(text)?;
                 total_text_bytes = total_text_bytes
                     .checked_add(text.len())
@@ -6876,7 +6930,9 @@ fn draft_text_projection(blocks: &[DraftContentBlock]) -> String {
     blocks
         .iter()
         .filter_map(|block| match block {
-            DraftContentBlock::Text(text) => Some(text.as_str()),
+            DraftContentBlock::Text(text) | DraftContentBlock::SelectedText { text, .. } => {
+                Some(text.as_str())
+            }
             DraftContentBlock::File(_) | DraftContentBlock::Image(_) => None,
         })
         .collect::<Vec<_>>()
@@ -6893,7 +6949,7 @@ fn first_attachment_name(
 ) -> Result<Option<String>, ChatError> {
     let Some(id) = blocks.iter().find_map(|block| match block {
         DraftContentBlock::File(id) | DraftContentBlock::Image(id) => Some(*id),
-        DraftContentBlock::Text(_) => None,
+        DraftContentBlock::Text(_) | DraftContentBlock::SelectedText { .. } => None,
     }) else {
         return Ok(None);
     };
@@ -6932,12 +6988,23 @@ fn bind_draft_blocks(
 ) -> Result<String, ChatError> {
     validate_draft_blocks(blocks)?;
     validate_draft_target(transaction, owner_user_id, tenant_id, draft_target)?;
+    if blocks
+        .iter()
+        .any(|block| !block.selected_skills().is_empty())
+    {
+        let version: i64 = transaction
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(map_sqlite_error)?;
+        if version < migrations::SELECTED_SKILLS_SCHEMA_VERSION {
+            return Err(ChatError::OrchestrationUnavailable);
+        }
+    }
     let target_kind = draft_target.kind();
     let target_session_id = draft_target.session_id().map(|value| value.to_string());
     let mut image_bytes = 0_usize;
     for (ordinal, block) in blocks.iter().enumerate() {
         match block {
-            DraftContentBlock::Text(text) => {
+            DraftContentBlock::Text(text) | DraftContentBlock::SelectedText { text, .. } => {
                 transaction
                     .execute(
                         "INSERT INTO chat_message_content_blocks(
@@ -6955,7 +7022,9 @@ fn bind_draft_blocks(
                 let expected_kind = match block {
                     DraftContentBlock::File(_) => "file",
                     DraftContentBlock::Image(_) => "image",
-                    DraftContentBlock::Text(_) => unreachable!(),
+                    DraftContentBlock::Text(_) | DraftContentBlock::SelectedText { .. } => {
+                        unreachable!()
+                    }
                 };
                 let row: Option<(String, i64)> = transaction
                     .query_row(
@@ -7044,8 +7113,49 @@ fn bind_draft_blocks(
                     .map_err(map_constraint_or_database)?;
             }
         }
+        for (skill_ordinal, skill) in block.selected_skills().iter().enumerate() {
+            transaction.execute(
+                "INSERT INTO chat_message_skill_selections(message_id, block_ordinal, skill_ordinal, skill_id, skill_version) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![message_id.to_string(), ordinal as i64, skill_ordinal as i64, skill.id, skill.version],
+            ).map_err(map_constraint_or_database)?;
+        }
     }
     stored_content_block_digest(transaction, message_id)
+}
+
+fn stored_selected_skills(
+    connection: &Connection,
+    message_id: Uuid,
+    block_ordinal: i64,
+) -> Result<Vec<super::connectors::selection_generated::SelectedSkillRef>, ChatError> {
+    let version: i64 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(map_sqlite_error)?;
+    if version < migrations::SELECTED_SKILLS_SCHEMA_VERSION {
+        return Ok(Vec::new());
+    }
+    let mut statement = connection.prepare(
+        "SELECT skill_id, skill_version FROM chat_message_skill_selections WHERE message_id=?1 AND block_ordinal=?2 ORDER BY skill_ordinal ASC",
+    ).map_err(map_sqlite_error)?;
+    let values = statement
+        .query_map(params![message_id.to_string(), block_ordinal], |row| {
+            Ok(super::connectors::selection_generated::SelectedSkillRef {
+                id: row.get(0)?,
+                version: row.get(1)?,
+            })
+        })
+        .map_err(map_sqlite_error)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(map_sqlite_error)?;
+    if values.len() > 256 {
+        return Err(ChatError::DatabaseUnavailable);
+    }
+    for value in &values {
+        value
+            .validate()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+    }
+    Ok(values)
 }
 
 pub(crate) fn stored_content_block_digest(
@@ -7089,6 +7199,13 @@ pub(crate) fn stored_content_block_digest(
         digest.update([0]);
         digest.update(attachment_digest.as_bytes());
         digest.update([0xff]);
+        let skills = stored_selected_skills(connection, message_id, ordinal)?;
+        if !skills.is_empty() {
+            // No additional bytes for legacy rows: their persisted digests stay valid.
+            digest.update(b"yijie-selected-skills-v1\0");
+            digest.update(serde_json::to_vec(&skills).map_err(|_| ChatError::DatabaseUnavailable)?);
+            digest.update([0xff]);
+        }
     }
     Ok(format!("{:x}", digest.finalize()))
 }
@@ -7119,9 +7236,14 @@ fn draft_matches_stored_blocks(
     if stored.len() != blocks.len() {
         return Ok(false);
     }
-    for (stored, requested) in stored.iter().zip(blocks) {
+    for (ordinal, (stored, requested)) in stored.iter().zip(blocks).enumerate() {
+        if stored_selected_skills(connection, message_id, ordinal as i64)?.as_slice()
+            != requested.selected_skills()
+        {
+            return Ok(false);
+        }
         let matches = match requested {
-            DraftContentBlock::Text(text) => {
+            DraftContentBlock::Text(text) | DraftContentBlock::SelectedText { text, .. } => {
                 stored.0 == "text"
                     && stored.1.as_deref() == Some(text.as_str())
                     && stored.2.is_none()
@@ -9133,6 +9255,100 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "kimi-k31-pro-candidate")]
+    fn selected_skill_metadata_survives_reopen_without_changing_legacy_history() {
+        let root = std::env::temp_dir().join(format!("yijie-selected-skills-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let owner = scope();
+        let mut repository = open_repository_for_scope(&root, 67, owner.clone());
+        let project = register_synthetic_project(&mut repository, &root);
+        let legacy_blocks = vec![DraftContentBlock::Text("Original ordinary message".into())];
+        let legacy_operation = Uuid::now_v7();
+        let legacy = repository
+            .create_session_and_enqueue_multimodal(project, &legacy_blocks, legacy_operation, 7)
+            .unwrap();
+        let legacy_message = repository
+            .load_history(legacy.session_id, None, Some(20))
+            .unwrap()
+            .turns[0]
+            .messages[0]
+            .message_id;
+        let legacy_digest =
+            stored_content_block_digest(&repository.connection, legacy_message).unwrap();
+        migrations::migrate_to_target(
+            &mut repository.connection,
+            migrations::SELECTED_SKILLS_SCHEMA_VERSION,
+        )
+        .unwrap();
+        assert_eq!(
+            stored_content_block_digest(&repository.connection, legacy_message).unwrap(),
+            legacy_digest
+        );
+        assert_eq!(
+            repository
+                .create_session_and_enqueue_multimodal(project, &legacy_blocks, legacy_operation, 7)
+                .unwrap(),
+            legacy
+        );
+
+        let selection = super::super::connectors::selection_generated::SelectedSkillRef {
+            id: "ordinary-sample".into(),
+            version: "1.0.0".into(),
+        };
+        let blocks = vec![DraftContentBlock::selected_text(
+            "$same-name\n\nExplain six times seven.".into(),
+            Some(vec![selection.clone()]),
+        )
+        .unwrap()];
+        let operation = Uuid::now_v7();
+        let pending = repository
+            .create_session_and_enqueue_multimodal(project, &blocks, operation, 7)
+            .unwrap();
+        drop(repository);
+
+        let mut reopened = open_repository_for_scope(&root, 67, owner);
+        let message = reopened
+            .load_history(pending.session_id, None, Some(20))
+            .unwrap()
+            .turns[0]
+            .messages[0]
+            .message_id;
+        let materialized = reopened
+            .materialize_turn_blocks(&message.to_string(), unix_seconds().unwrap())
+            .unwrap();
+        assert!(
+            matches!(materialized.as_slice(), [HostTurnInputBlock::Text { text, skills }]
+            if text == "$same-name\n\nExplain six times seven." && skills == std::slice::from_ref(&selection))
+        );
+        assert_eq!(
+            reopened
+                .create_session_and_enqueue_multimodal(project, &blocks, operation, 7)
+                .unwrap(),
+            pending
+        );
+        let changed = vec![DraftContentBlock::selected_text(
+            "$same-name\n\nExplain six times seven.".into(),
+            Some(vec![
+                super::super::connectors::selection_generated::SelectedSkillRef {
+                    version: "2.0.0".into(),
+                    ..selection
+                },
+            ]),
+        )
+        .unwrap()];
+        assert_eq!(
+            reopened.create_session_and_enqueue_multimodal(project, &changed, operation, 7),
+            Err(ChatError::ConversationConflict)
+        );
+        assert_eq!(
+            stored_content_block_digest(&reopened.connection, legacy_message).unwrap(),
+            legacy_digest
+        );
+        drop(reopened);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn ordinary_turn_timing_target_is_read_only_scoped_and_deleted_with_session() {
         let root = std::env::temp_dir().join(format!("ordinary-timing-{}", Uuid::now_v7()));
         fs::create_dir(&root).unwrap();
@@ -10979,7 +11195,7 @@ mod tests {
         assert_eq!(dispatch.content_blocks.len(), 3);
         assert!(matches!(
             &dispatch.content_blocks[0],
-            HostTurnInputBlock::Text { text }
+            HostTurnInputBlock::Text { text, .. }
                 if text == "Compare quarterly total with the chart"
         ));
         assert!(matches!(

@@ -621,7 +621,7 @@ async fn feat155_draft_clarification_followup_uses_same_restricted_conversation(
         let claim=r.claim_next_conversation_outbox(execution::now().unwrap()+1,30)?.unwrap();
         assert_eq!(claim.operation_id,op);
         let dispatch=r.load_start_turn_dispatch_v2(op)?;
-        assert!(matches!(&dispatch.content_blocks[..],[crate::chat::database::HostTurnInputBlock::Text{text}] if text=="北京时间"));
+        assert!(matches!(&dispatch.content_blocks[..],[crate::chat::database::HostTurnInputBlock::Text{text,..}] if text=="北京时间"));
         let count:i64=r.connection.query_row("SELECT count(*) FROM chat_scheduled_draft_sessions",[],|r|r.get(0)).unwrap();assert_eq!(count,1);
         // Leave it explicitly pending: normal cleanup stops the worker, no send or fabricated terminal.
         Ok(())

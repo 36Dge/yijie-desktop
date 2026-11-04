@@ -75,7 +75,6 @@
       }
     },
     "TextInput": {
-      "title": "ChatTextContentBlock",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -84,13 +83,20 @@
       ],
       "properties": {
         "type": {
-          "const": "text"
+          "type": "string",
+          "enum": [
+            "text"
+          ]
         },
         "text": {
           "type": "string",
           "minLength": 1,
           "maxLength": 1048576,
-          "pattern": "\\S"
+          "pattern": "\\S",
+          "description": "Non-blank user text, bounded to 1 MiB in UTF-8 bytes."
+        },
+        "skills": {
+          "$ref": "#/$defs/SelectedSkills"
         }
       }
     },
@@ -347,6 +353,39 @@
         }
       },
       "description": "requestId is echoed only when a real canonical non-nil request UUID can be decoded; malformed input errors omit it, never fabricate identity. Optional fields reject explicit null."
+    },
+    "SelectedSkillRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "\\S"
+        }
+      },
+      "description": "User-selected managed Skill identity. Host resolves the exact enabled installation and native SKILL.md path from its verified catalog and receipt. No client path or prompt content is accepted."
+    },
+    "SelectedSkills": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/SelectedSkillRef"
+      },
+      "description": "Ordered selections frozen with the user turn. IDs must be unique across the entire turn. Absence preserves legacy behavior. Native Skill inputs own instruction loading and per-turn deduplication. Consumers send only after the new source pin is admitted."
     },
     "Revision": {
       "type": "integer",
