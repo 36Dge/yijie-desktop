@@ -8,5 +8,5 @@ assert(process.argv.slice(2).every(arg => arg === "--check"));
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const check = process.argv.includes("--check");
 syncMarketCatalog({ desktopRoot, connectorsRoot: path.resolve(desktopRoot, "../yijie-connectors"), check,
-  immutableCommit: "5733c9c79ca3a65d290b1a56fedbc2fac81342fe" });
+  immutableCommit: "07c280e72f2f3ccca630d1576376d1b995c9c494" });
 console.log(`61-entry non-secret Connectors catalog ${check ? "verified" : "synchronized"}; no provider activation.`);
