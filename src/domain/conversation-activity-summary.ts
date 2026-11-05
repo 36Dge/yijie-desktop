@@ -1,6 +1,6 @@
 import type { ConversationTimelineItemViewModel as Item } from "./conversation-timeline";
 import type { ConversationActivityGroup } from "./conversation-activity-presentation";
-import { activityEntriesForItem, activityNativeItem, activityToolTitle, activityWebTitle } from "./conversation-activity-entry";
+import { activityEntriesForItem, activityNativeItem, activityToolSourceLabel, activityToolTitle, activityWebTitle } from "./conversation-activity-entry";
 
 export function activityItemTitle(item: Item): string {
   if (item.presentation === "web_search") return activityWebTitle(item);
@@ -15,7 +15,7 @@ export function activityItemTitle(item: Item): string {
 export function summarizeActivity(group: ConversationActivityGroup, live: boolean) {
   const calls = group.items.filter(item => ["command", "tool", "web_search"].includes(item.presentation));
   const toolSources = [...new Set(calls.flatMap(item => {
-    const label = item.presentation === "tool" ? activityNativeItem(item)?.toolDisplay?.sourceLabel : null;
+    const label = item.presentation === "tool" ? activityToolSourceLabel(item) : null;
     return label ? [label] : [];
   }))];
   const sources = new Set(calls.flatMap(item => item.webSearch?.sources?.map(source => source.url) ?? []));
@@ -23,7 +23,7 @@ export function summarizeActivity(group: ConversationActivityGroup, live: boolea
   const categories = new Set(group.entries.map(entry => entry.category));
   const parts: string[] = [];
   if (toolSources.length) parts.push(`已使用 ${toolSources.join("、")}`);
-  if (calls.some(item => item.presentation === "tool" && !activityNativeItem(item)?.toolDisplay?.sourceLabel)) parts.push("调用了工具");
+  if (calls.some(item => item.presentation === "tool" && !activityToolSourceLabel(item))) parts.push("调用了工具");
   if (categories.has("read") || categories.has("listFiles") || categories.has("search")) parts.push("查看了项目内容");
   if (categories.has("command")) parts.push("运行了命令");
   const webActions = new Set(calls.filter(item => item.presentation === "web_search").map(item => item.webSearch?.action));

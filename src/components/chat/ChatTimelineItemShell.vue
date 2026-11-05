@@ -43,6 +43,12 @@ const plainProcess = computed(() => props.processPresentation &&
 const availabilityInDetails = computed(() => props.collapsible && props.processPresentation &&
   ["web_search", "command", "tool"].includes(props.item.presentation) &&
   props.item.availability === "partial" && !props.item.activityLabel && !props.item.approval);
+const availabilityText = computed(() => {
+  const content = props.item.availability === "unavailable" ? "此项内容暂不可用" : "此项信息不完整";
+  return props.item.execution?.status === "failed"
+    ? `${content}。`
+    : `${content}；不代表执行失败。`;
+});
 const id = useId();
 const titleId = `${id}-title`;
 const statusId = `${id}-status`;
@@ -83,7 +89,7 @@ function toggle(): void {
     :aria-busy="busy ? 'true' : 'false'"
   >
     <p v-if="!availabilityInDetails && item.role !== 'user' && item.availability && item.availability !== 'available'" class="chat-timeline-item-shell__availability" role="note">
-      {{ item.availability === "unavailable" ? "此项内容暂不可用" : "此项信息不完整" }}；不代表执行失败。
+      {{ availabilityText }}
     </p>
     <header v-if="item.role !== 'user' && !plainProcess && !hideNormalAnswerStatus" class="chat-timeline-item-shell__header">
       <button
@@ -141,7 +147,7 @@ function toggle(): void {
       :id="contentId"
       class="chat-timeline-item-shell__body"
     >
-      <p v-if="availabilityInDetails" class="chat-timeline-item-shell__availability" role="note">此项信息不完整；不代表执行失败。</p>
+      <p v-if="availabilityInDetails" class="chat-timeline-item-shell__availability" role="note">{{ availabilityText }}</p>
       <slot />
     </div>
 
