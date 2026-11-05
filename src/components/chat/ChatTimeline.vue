@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, provide, watch } from "vue";
 import { chatTracePresentationKey, createChatTracePresentationStore } from "../../stores/chat-trace-presentation.store";
-import { conversationDiagnosticMessage } from "../../domain/conversation-diagnostics";
+import { conversationDiagnosticMessage, showConversationNotice } from "../../domain/conversation-diagnostics";
 import type {
   ConversationTimelineArtifactReferenceContentBlock,
   ConversationTimelineAttachmentReferenceContentBlock,
@@ -46,7 +46,7 @@ watch(() => props.timeline.identity, () => traceChoices.clear());
 const isOutputPolicyNotice = (notice: ConversationTimelineNoticeViewModel) =>
   notice.severity === "warning" && notice.diagnostic === "command_output_pending_final";
 const outputPolicyNotices = computed(() => props.timeline.notices.filter(isOutputPolicyNotice));
-const visibleNotices = computed(() => props.timeline.notices.filter(notice => !isOutputPolicyNotice(notice)));
+const visibleNotices = computed(() => props.timeline.notices.filter(notice => !isOutputPolicyNotice(notice) && showConversationNotice(notice.severity, notice.diagnostic)));
 
 const emit = defineEmits<{
   "disclosure-change": [change: ChatTimelineDisclosureChange];
@@ -82,7 +82,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
 }
 
 function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): string {
-  if (notice.diagnostic) return conversationDiagnosticMessage(notice.diagnostic);
+  if (notice.diagnostic && notice.diagnostic !== "runtime_notice") return conversationDiagnosticMessage(notice.diagnostic);
   const message = notice.severity === "error"
     ? "对话发生错误，已保留可用内容。"
     : "对话连接存在需要注意的信息，已确认的内容仍可阅读。";

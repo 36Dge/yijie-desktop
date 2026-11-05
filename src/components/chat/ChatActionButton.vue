@@ -63,17 +63,28 @@ defineExpose({focus});
 
 <style scoped>
 .chat-answer-action {
+  position: relative;
   display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center;
   width: var(--yj-space-8); height: var(--yj-space-8); padding: 0;
   border: var(--yj-border-width) solid transparent; border-radius: var(--yj-radius-sm);
   color: var(--yj-color-icon-muted); background: transparent; cursor: pointer;
 }
-.chat-answer-action :deep(.yj-icon) { color: inherit; }
+.chat-answer-action::before {
+  content: "";
+  position: absolute;
+  width: var(--yj-space-6); height: var(--yj-space-6);
+  top: 50%; left: 50%; transform: translate(-50%, -50%);
+  border-radius: inherit;
+  background: var(--chat-answer-action-background, transparent);
+  pointer-events: none;
+}
+.chat-answer-action :deep(.yj-icon) { position: relative; color: inherit; }
 .chat-answer-action:hover:not([aria-disabled="true"]):not(.is-selected) {
-  color: var(--yj-color-text-primary); background: var(--yj-color-control-hover);
+  --chat-answer-action-background: var(--yj-color-control-hover);
+  color: var(--yj-color-text-primary);
 }
 .chat-answer-action.is-selected { color: var(--yj-color-text-secondary); background: transparent; }
-.chat-answer-action:active:not([aria-disabled="true"]):not(.is-selected) { background: var(--yj-color-control-pressed); }
+.chat-answer-action:active:not([aria-disabled="true"]):not(.is-selected) { --chat-answer-action-background: var(--yj-color-control-pressed); }
 .chat-answer-action.is-error { color: var(--yj-color-semantic-error-ink); }
 .chat-answer-action[aria-disabled="true"] { color: var(--yj-color-text-disabled); cursor: default; }
 .chat-answer-action:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-space-1); }

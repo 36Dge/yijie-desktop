@@ -1,5 +1,6 @@
 import { observedProgressMessages, tailCommentaryCandidate } from "./conversation-process";
 import { traceDiagnosticBlocksLive } from "./conversation-trace-liveness";
+import { reasoningSummaryIsCurrent } from "./conversation-reasoning-summary";
 import { activityEntriesForItem, type ConversationActivityEntry } from "./conversation-activity-entry";
 import type { ConversationTimelineItemViewModel as Item, ConversationTimelineTurnViewModel as Turn } from "./conversation-timeline";
 
@@ -47,7 +48,7 @@ export function conversationActivityPresentation(turn: Turn, attentionIds: Reado
     const active = [...latest.group.entries].reverse().find(entry => entry.item.busy);
     const retry = turn.traceNotices?.[turn.traceNotices.length - 1];
     const retrying = retry?.scope === "turn" && retry.method === "error" && retry.willRetry === true && retry.sequence === turn.traceSequence;
-    nodes[nodes.length - 1] = {...latest, group: {...latest.group, state: retrying ? {kind: "thinking", label: "运行时正在重试"} : active ? {kind: "active", entry: active} : {kind: "thinking"}}};
+    nodes[nodes.length - 1] = {...latest, group: {...latest.group, state: retrying ? {kind: "thinking", label: "运行时正在重试"} : active ? {kind: "active", entry: active} : reasoningSummaryIsCurrent(turn) ? {kind: "summary"} : {kind: "thinking"}}};
   }
   if (commentaryMode === "latest") {
     const latestCommentary = [...nodes].reverse().find(node => node.kind === "message" && node.item.presentation === "commentary" && (node.item.busy || node.item.contentBlocks.some(block => (block.type === "text" || block.type === "code") && block.text.trim())));
@@ -66,6 +67,7 @@ export function traceIsLive(turn: Turn): boolean {
 export function traceCurrentStatus(turn: Turn): string | null {
   if ((turn.liveObserved === true && turn.source === "native_observed" && turn.statusSource === "runtime_notification" && turn.domainStatus === "waiting_approval") || turn.items.some(item => item.approval?.status === "pending")) return "等待你的确认";
   if (!traceIsLive(turn)) return null;
+  if (reasoningSummaryIsCurrent(turn)) return null;
   // Current tool/thinking feedback belongs to the latest group's header.
   const nodes = conversationActivityPresentation(turn);
   const lastNode = nodes[nodes.length - 1];

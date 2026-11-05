@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { NativeTraceNotice } from "../../api/generated/native-conversation-private.gen";
-import { conversationDiagnosticMessage } from "../../domain/conversation-diagnostics";
+import { conversationDiagnosticMessage, showConversationNotice } from "../../domain/conversation-diagnostics";
 
 const props = defineProps<{ notices: readonly NativeTraceNotice[] }>();
 const visibleNotices = computed(() => props.notices.filter((notice, index, all) => {
+  if (!showConversationNotice(notice.method, notice.code)) return false;
   const previous = all[index - 1];
   // Collapse only consecutive equivalent display notices, never saved facts.
   return !previous || previous.scope !== notice.scope || previous.method !== notice.method || previous.code !== notice.code || (previous.willRetry ?? null) !== (notice.willRetry ?? null) || previous.itemId !== notice.itemId;
@@ -19,11 +20,14 @@ function title(notice: NativeTraceNotice) {
 </script>
 
 <template>
-  <aside v-if="notices.length" class="chat-trace-notices" aria-label="运行通知">
-    <details v-for="notice in visibleNotices" :key="notice.eventId">
+  <aside v-if="visibleNotices.length" class="chat-trace-notices" aria-label="运行通知">
+    <template v-for="notice in visibleNotices" :key="notice.eventId">
+    <p v-if="notice.code === 'runtime_notice'" role="note">{{ title(notice) }}</p>
+    <details v-else>
       <summary>{{ title(notice) }}</summary>
       <p role="note">本轮记录的提示：{{ conversationDiagnosticMessage(notice.code) }}</p>
     </details>
+    </template>
   </aside>
 </template>
 

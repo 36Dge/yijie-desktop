@@ -55,12 +55,13 @@ describe("FEAT-134 Agent Host v4 exact pin", () => {
   it("verifies immutable v4 objects without moving the current development checkouts", async () => {
     const head = root => execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
     const originalHeads = [head(contractsRoot), head(agentHostRoot)];
+    const verifiedContractsRoot = path.resolve(repositoryRoot, process.env.YIJIE_DESKTOP_CONTRACTS_DIR ?? "../yijie-contracts");
     const pinnedHostRoot = await resolveAgentHostCheckout({
       repositoryRoot, fullCommit: lock.agent_host.full_commit, explicitRoot: process.env.YIJIE_DESKTOP_AGENT_HOST_DIR,
     });
     await expect(checkAgentHostV4Contract()).resolves.toBeUndefined();
     await expect(verifyImmutableGitObject(
-      contractsRoot,
+      verifiedContractsRoot,
       lock.contracts.repository,
       "0".repeat(40),
       "Contracts",

@@ -98,9 +98,9 @@ function navigate(event: KeyboardEvent): void {
   </Teleport>
   <NPopover :to="overlay ?? false" v-model:show="open" trigger="click" placement="top-start" :disabled="blocked" :show-arrow="false" raw>
     <template #trigger>
-      <button ref="triggerElement" class="permission-trigger yj-control yj-control--pill" :class="{ 'is-full': state?.mode === 'full' }" type="button" :disabled="blocked" :aria-label="`权限审批：${state ? selected.label : '读取中'}`" aria-haspopup="menu" :aria-expanded="open" :title="blocked ? '任务运行、等待审批或同步期间不能切换权限' : '更改当前任务的权限审批模式'" @keydown.down.prevent="open = !blocked" @keydown.esc="open = false">
+      <button ref="triggerElement" class="permission-trigger yj-control yj-control--pill" :class="{ 'is-full': state?.mode === 'full' }" type="button" :disabled="blocked" :aria-label="`权限审批：${state ? selected.label : '读取中'}`" aria-haspopup="menu" :aria-expanded="open" :title="blocked ? '任务运行、等待审批或同步期间不能切换权限' : `权限审批：${selected.label}，点击更改`" @keydown.down.prevent="open = !blocked" @keydown.esc="open = false">
         <span class="permission-trigger-icon"><YjIcon :name="selected.icon" size="sm" :stroke-width="1.5" /></span>
-        <span>{{ saving ? '正在保存' : state ? selected.label : '读取权限' }}</span>
+        <span class="permission-trigger-label">{{ saving ? '正在保存' : state ? selected.label : '读取权限' }}</span>
         <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
       </button>
     </template>
@@ -140,11 +140,16 @@ function navigate(event: KeyboardEvent): void {
 
 <style scoped>
 .permission-trigger {
+  width: var(--chat-composer-control-width, auto);
+  flex: none;
+  padding-inline: var(--chat-composer-control-padding, var(--yj-space-3));
   border: 0;
   background: transparent;
   color: var(--yj-color-text-primary);
   cursor: pointer;
 }
+.permission-trigger-label,
+.permission-trigger > .yj-control__chevron { display: var(--chat-composer-control-label-display, inline-flex); }
 .permission-trigger-icon {
   display: inline-flex;
   align-items: center;

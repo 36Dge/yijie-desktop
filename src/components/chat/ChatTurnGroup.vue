@@ -11,6 +11,9 @@ import ChatActivityRow from "./ChatActivityRow.vue";
 import ChatTurnPlan from "./ChatTurnPlan.vue";
 import ChatTraceNotices from "./ChatTraceNotices.vue";
 import ChatThinkingIndicator from "./ChatThinkingIndicator.vue";
+import ChatDeepThinking from "./ChatDeepThinking.vue";
+import { conversationReasoningSummary } from "../../domain/conversation-reasoning-summary";
+import { useActivitySummary } from "./useActivitySummary";
 import type { ChatTimelineDisclosureChange } from "./ChatTimelineItemShell.vue";
 import type { ChatApprovalDecisionChange, ChatApprovalTransientState } from "./ChatCommandItem.vue";
 const props = withDefaults(defineProps<{
@@ -40,6 +43,17 @@ const nodes = computed(() => conversationActivityPresentation(props.turn, attent
 const hasProcess = computed(() => Boolean(props.turn.plan) || nodes.value.some(node => node.kind === "activity" || node.kind === "message" && node.process));
 const answerStarted = computed(() => props.turn.items.some(item => item.presentation === "final_answer" && item.contentBlocks.some(block => (block.type === "text" || block.type === "code") && block.text.trim())));
 const nativeLiveProgress = computed(() => traceIsLive(props.turn));
+const reasoningSummary = computed(() => conversationReasoningSummary(props.turn, nativeLiveProgress.value));
+const reasoningHeader = useActivitySummary(computed(() => ({
+  title: reasoningSummary.value?.title ?? "思考摘要",
+  key: reasoningSummary.value?.key ?? "empty",
+  state: reasoningSummary.value?.state ?? "summary",
+})), () => reasoningSummary.value?.identity ?? `${props.turn.identity}:no-summary`);
+const reasoningExpanded = computed(() => choices.get(`${props.turn.identity}:reasoning-summary`, false));
+function toggleReasoning(change: ChatTimelineDisclosureChange) {
+  choices.set(change.itemIdentity, change.expanded);
+  emit("disclosure-change", change);
+}
 const hasOutput = computed(() => Boolean(props.turn.plan) || props.turn.items.some(item => item.presentation !== "user_message" && (item.approval || item.activityLabel || !["reasoning", "commentary", "final_answer", "assistant_unclassified"].includes(item.presentation) || item.contentBlocks.some(block => (block.type === "text" || block.type === "code") ? block.text.trim().length > 0 : true))));
 const outputObserved = ref(false);
 watch(() => [props.turn.identity, hasOutput.value] as const, ([identity, output], previous) => { outputObserved.value = previous?.[0] === identity ? outputObserved.value || output : output; }, {immediate: true, flush: "sync"});
@@ -55,11 +69,21 @@ const currentStatus = computed(() => traceCurrentStatus(props.turn));
 const plan = computed(() => props.turn.plan ? {...props.turn.plan, defaultExpanded: false} : null);
 const processControls = computed(() => nodes.value.filter(isProcess).map(node => `${processId}-${encodeURIComponent(node.identity)}`).concat(plan.value ? [`${processId}-plan`] : []).join(" "));
 const entries = computed(() => {
-  const list: (typeof nodes.value[number] | {kind: "timing" | "plan"; identity: string})[] = [...nodes.value];
+  const list: (typeof nodes.value[number] | {kind: "timing" | "plan" | "reasoning-summary"; identity: string})[] = [...nodes.value];
   const first = nodes.value.findIndex(node => node.kind !== "message" || node.item.presentation !== "user_message");
   const index = first < 0 ? list.length : first;
   list.splice(index, 0, {kind: "timing", identity: `${props.turn.identity}:timing`});
   if (plan.value) list.splice(index + 1, 0, {kind: "plan", identity: `${props.turn.identity}:plan`});
+  if (reasoningSummary.value) {
+    // A real public opening leads the process. This is a reading placement only:
+    // unknown phases and the source Item order remain unchanged, and a final-only
+    // history keeps its existing summary-before-answer layout.
+    const firstPublic = list.findIndex(node => node.kind === "message" && node.item.kind === "assistant_message" &&
+      node.item.contentBlocks.some(block => (block.type === "text" || block.type === "code") && block.text.trim()));
+    const opening = list[firstPublic];
+    const afterOpening = opening?.kind === "message" && (opening.item.presentation === "commentary" || opening.process);
+    list.splice(afterOpening ? firstPublic + 1 : index + 1, 0, {kind: "reasoning-summary", identity: reasoningSummary.value.identity});
+  }
   return list;
 });
 function isProcess(node: (typeof nodes.value)[number]) { return node.kind === "activity" || node.kind === "message" && node.process; }
@@ -217,6 +241,11 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
           </button>
           <span v-else>{{ timingLabel || '耗时待确认' }}</span>
         </li>
+        <li v-else-if="node.kind === 'reasoning-summary' && reasoningSummary" class="chat-turn-group__reasoning-summary">
+          <ChatDeepThinking :item="reasoningSummary.items[0]!" :items="reasoningSummary.items" :disclosure-identity="reasoningSummary.identity"
+            label="思考摘要" :title="reasoningHeader.title" :expanded="reasoningExpanded" :visible="true" :live="nativeLiveProgress"
+            :thinking="reasoningSummary.state === 'thinking'" :state-message="reasoningSummary.stateMessage" @disclosure-change="toggleReasoning" />
+        </li>
         <li v-else-if="node.kind === 'plan' && plan" v-show="processExpanded" :id="`${processId}-plan`" @focusin="preserveProcess" @pointerdown="preserveProcess">
           <ChatTurnPlan :plan="plan" :ended="['completed', 'failed', 'interrupted'].includes(turn.domainStatus)" />
         </li>
@@ -290,6 +319,7 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
 
 .chat-turn-group {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   gap: var(--yj-space-3);
   padding-block: var(--yj-space-4);
@@ -336,6 +366,7 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
 .chat-turn-group__items,
 .chat-turn-group__notices {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   margin: var(--yj-space-0);
   padding: var(--yj-space-0);

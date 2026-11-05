@@ -1,11 +1,8 @@
 import { onScopeDispose, shallowRef, watch, type ComputedRef } from "vue";
-import type { summarizeActivity } from "../../domain/conversation-activity-summary";
-
-type Summary = ReturnType<typeof summarizeActivity>;
 
 /** Stabilize changes of activity identity, never text within that identity.
  * Completion and a different group take effect immediately. Facts are not delayed. */
-export function useActivitySummary(summary: ComputedRef<Summary>, groupIdentity: () => string) {
+export function useActivitySummary<Summary extends {key: string; state: string}>(summary: ComputedRef<Summary>, groupIdentity: () => string) {
   const displayed = shallowRef(summary.value);
   let changedAt = Date.now();
   let timer: ReturnType<typeof setTimeout> | undefined;

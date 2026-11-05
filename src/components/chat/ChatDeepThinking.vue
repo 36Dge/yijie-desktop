@@ -8,21 +8,32 @@ import ChatShortScrollbar from "./ChatShortScrollbar.vue";
 import ChatThinkingIndicator from "./ChatThinkingIndicator.vue";
 import YjIcon from "../yijie/YjIcon.vue";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   item: ConversationTimelineItemViewModel;
+  items?: readonly ConversationTimelineItemViewModel[];
+  disclosureIdentity?: string;
+  label?: string;
+  title?: string;
+  expanded?: boolean;
   visible: boolean;
   live: boolean;
   thinking?: boolean;
   stateMessage: string | null;
-}>();
+}>(), { expanded: undefined });
 const emit = defineEmits<{ "disclosure-change": [change: ChatTimelineDisclosureChange] }>();
-const expanded = ref(false);
+const localExpanded = ref(false);
+const expanded = computed(() => props.expanded ?? localExpanded.value);
+const identity = computed(() => props.disclosureIdentity ?? props.item.identity);
+const label = computed(() => props.label ?? "深度思考");
 const viewport = ref<HTMLElement | null>(null);
 const content = ref<HTMLElement | null>(null);
 const scrollbar = ref<InstanceType<typeof ChatShortScrollbar> | null>(null);
 const contentId = `${useId()}-thinking`;
-const hasContent = computed(() => hasReadableProcessContent(props.item));
-const contentSections = computed(() => props.item.contentBlocks.map(block => ({ block, blocks: [block] })));
+const displayedItems = computed(() => props.items ?? [props.item]);
+const hasContent = computed(() => displayedItems.value.some(hasReadableProcessContent));
+const contentSections = computed(() => displayedItems.value.flatMap(item => item.contentBlocks.map(block => ({ item, block, blocks: [block] }))));
+const contentMounted = ref(false);
+watch(expanded, value => { if (value) contentMounted.value = true; }, {immediate: true, flush: "sync"});
 let followLatest = true;
 let frame: number | null = null;
 
@@ -51,12 +62,13 @@ function trackScroll(position: number, maximum: number, previous: number) {
   else if (maximum - position <= 1) followLatest = true;
 }
 function toggle() {
-  expanded.value = !expanded.value;
-  if (expanded.value && props.live) followLatest = true;
-  emit("disclosure-change", { itemIdentity: props.item.identity, expanded: expanded.value });
+  const next = !expanded.value;
+  if (props.expanded === undefined) localExpanded.value = next;
+  if (next && props.live) followLatest = true;
+  emit("disclosure-change", { itemIdentity: identity.value, expanded: next });
 }
-watch(() => props.item.identity, () => { expanded.value = false; followLatest = true; scrollbar.value?.reset(); cancelScroll(); });
-watch([() => props.item.contentBlocks, () => props.live, () => props.visible, expanded], (_current, previous) => {
+watch(identity, () => { localExpanded.value = false; contentMounted.value = false; followLatest = true; scrollbar.value?.reset(); cancelScroll(); });
+watch([contentSections, () => props.live, () => props.visible, expanded], (_current, previous) => {
   scrollbar.value?.sync();
   if (!expanded.value || !props.visible) { scrollbar.value?.reset(); cancelScroll(); }
   else followOutput(previous?.[1] === true);
@@ -65,31 +77,31 @@ onBeforeUnmount(cancelScroll);
 </script>
 
 <template>
-  <article class="chat-deep-thinking" aria-label="深度思考" :aria-busy="live ? 'true' : 'false'">
+  <article class="chat-deep-thinking" :aria-label="label" :aria-busy="live ? 'true' : 'false'">
     <button class="chat-deep-thinking__toggle" type="button" :aria-expanded="expanded" :aria-controls="contentId"
-      :aria-label="`深度思考，${expanded ? '收起' : '展开'}`" @click="toggle">
-      <ChatThinkingIndicator label="深度思考" :active="live && thinking === true" :paused="!visible" />
+      :aria-label="`${label}，${expanded ? '收起' : '展开'}`" @click="toggle">
+      <span class="chat-deep-thinking__title" :title="title ?? label"><ChatThinkingIndicator :label="title ?? label" :active="live && thinking === true" :paused="!visible" /></span>
       <YjIcon class="chat-deep-thinking__chevron" :name="expanded ? 'chevronDown' : 'chevronRight'"
         size="xs" :stroke-width="1.5" tone="muted" />
     </button>
-    <p v-if="item.availability && item.availability !== 'available'" class="chat-deep-thinking__notice" role="note">
+    <p v-if="!items && item.availability && item.availability !== 'available'" class="chat-deep-thinking__notice" role="note">
       {{ item.availability === 'unavailable' ? '此项内容暂不可用' : '此项信息不完整' }}；不代表执行失败。
     </p>
     <p v-if="stateMessage" class="chat-deep-thinking__notice" role="note">{{ stateMessage }}</p>
     <div v-show="expanded" class="chat-deep-thinking__scroll-frame">
       <div :id="contentId" ref="viewport" class="chat-deep-thinking__viewport"
-        role="region" aria-label="深度思考内容" tabindex="0">
-        <div ref="content" class="chat-deep-thinking__content" @chat-content-progress="followOutput(true)">
-          <section v-for="{ block, blocks } in contentSections" :key="block.identity"
+        role="region" :aria-label="`${label}内容`" tabindex="0">
+        <div v-if="!items || contentMounted || expanded" ref="content" class="chat-deep-thinking__content" @chat-content-progress="followOutput(true)">
+          <section v-for="{ item: sourceItem, block, blocks } in contentSections" :key="block.identity" :data-reasoning-item="sourceItem.itemId"
             :aria-label="block.type === 'text' && block.reasoningSource === 'summary' ? '思考摘要' : '思考原文'">
-            <ChatSafeContent :blocks="blocks" mode="rich" :streaming="live" :animate="expanded && visible"
-              :link-target="{sessionId: item.threadId, turnId: item.turnId, itemId: item.itemId}" />
+            <ChatSafeContent :blocks="blocks" mode="rich" :streaming="live" :animate="!items && expanded && visible"
+              :link-target="{sessionId: sourceItem.threadId, turnId: sourceItem.turnId, itemId: sourceItem.itemId}" />
           </section>
           <p v-if="!hasContent" class="chat-deep-thinking__empty">{{ stateMessage || (live ? '正在等待思考内容…' : '暂无可显示的思考内容。') }}</p>
         </div>
       </div>
       <ChatShortScrollbar ref="scrollbar" :viewport="viewport" :content="content" :active="expanded && visible"
-        :controls="contentId" label="滚动深度思考内容" @scroll="trackScroll" @reading-start="pauseFollowing" @resize="followOutput()" />
+        :controls="contentId" :label="`滚动${label}内容`" @scroll="trackScroll" @reading-start="pauseFollowing" @resize="followOutput()" />
     </div>
   </article>
 </template>
@@ -113,9 +125,12 @@ onBeforeUnmount(cancelScroll);
   background: transparent;
   font: inherit;
   cursor: pointer;
+  max-width: 100%;
 }
+.chat-deep-thinking__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-deep-thinking__title :deep(.chat-thinking) { display: inline; }
 .chat-deep-thinking__toggle:hover { color: var(--yj-color-text-primary); }
-.chat-deep-thinking__toggle .chat-deep-thinking__chevron { color: inherit; opacity: 0; }
+.chat-deep-thinking__toggle .chat-deep-thinking__chevron { flex-shrink: 0; color: inherit; opacity: 0; }
 .chat-deep-thinking__toggle:hover .chat-deep-thinking__chevron,
 .chat-deep-thinking__toggle:focus-visible .chat-deep-thinking__chevron,
 .chat-deep-thinking__toggle[aria-expanded="true"] .chat-deep-thinking__chevron { opacity: 1; }

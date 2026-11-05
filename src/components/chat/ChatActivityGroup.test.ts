@@ -3,6 +3,7 @@ import { afterEach, expect, it } from "vitest";
 import { enableAutoUnmount, mount } from "@vue/test-utils";
 import { traceItem, traceTurn } from "../../domain/conversation-activity-fixtures";
 import ChatTurnGroup from "./ChatTurnGroup.vue";
+import ChatTraceNotices from "./ChatTraceNotices.vue";
 
 enableAutoUnmount(afterEach);
 it("keeps group and turn choices while final text arrives, with readable native detail", async () => {
@@ -35,9 +36,27 @@ it("folds ordinary cold history, preserves errors and shows retry intent without
 
 it("keeps notice scope readable without exposing opaque runtime codes", () => {
   const turn = traceTurn([traceItem("a", "agentMessage", {text: "Answer"})]);
-  turn.traceNotices = [{eventId: "notice", sequence: "1", method: "warning", code: "runtime_notice", scope: "thread"}];
+  turn.traceNotices = [{eventId: "notice", sequence: "1", method: "warning", code: "answer_completion_continuing", scope: "thread"}];
   const wrapper = mount(ChatTurnGroup, {props: {turn, position: 1}});
   expect(wrapper.get(".chat-trace-notices summary").text()).toBe("对话运行提示");
   expect(wrapper.get(".chat-trace-notices details").attributes("open")).toBeUndefined();
-  expect(wrapper.text()).not.toContain("runtime_notice");
+  expect(wrapper.text()).not.toContain("answer_completion_continuing");
+});
+
+it("hides generic warning-only notices without removing facts, meaningful notices or error state", async () => {
+  const warnings = [1, 2, 3, 4].map(i => ({eventId: `warning-${i}`, sequence: String(i), method: "warning" as const, code: "runtime_notice", scope: "thread" as const}));
+  const before = JSON.stringify(warnings);
+  const wrapper = mount(ChatTraceNotices, {props: {notices: warnings}});
+  expect(wrapper.find(".chat-trace-notices").exists()).toBe(false);
+  await wrapper.setProps({notices: [...warnings,
+    {eventId: "known", sequence: "5", method: "warning", code: "answer_completion_continuing", scope: "turn"},
+    {eventId: "retry", sequence: "6", method: "error", code: "runtime_notice", scope: "turn", willRetry: true},
+    {eventId: "failed", sequence: "7", method: "error", code: "runtime_notice", scope: "turn", willRetry: false},
+  ]});
+  expect(wrapper.findAll("details")).toHaveLength(1);
+  expect(wrapper.text()).toContain("正在根据已有结果补全回答");
+  expect(wrapper.text()).toContain("运行时曾报告重试");
+  expect(wrapper.text()).toContain("运行错误，未安排重试");
+  expect(wrapper.text()).not.toContain("未提供可显示的详细原因");
+  expect(JSON.stringify(warnings)).toBe(before);
 });

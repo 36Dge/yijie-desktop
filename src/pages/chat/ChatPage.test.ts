@@ -60,6 +60,13 @@ type ChatSubmissionResult,
 } from "../../stores/chat.store";
 import ChatPage from "./ChatPage.vue";
 
+const promptBoundary = vi.hoisted(() => ({ invoke: null as null | ((command: string, args: unknown) => Promise<unknown>) }));
+vi.mock("@tauri-apps/api/core", async original => {
+  const actual = await original<typeof import("@tauri-apps/api/core")>();
+  return { ...actual, invoke: (command: string, args: unknown) => promptBoundary.invoke
+    ? promptBoundary.invoke(command, args) : actual.invoke(command, args as Record<string, unknown>) };
+});
+
 const expertFlag = vi.hoisted(() => ({ enabled: false }));
 vi.mock("../../authorization/experts-ui-config", () => ({ get expertsUiEnabled() { return expertFlag.enabled; } }));
 const skillFlag = vi.hoisted(() => ({ enabled: false }));
@@ -296,6 +303,7 @@ async function mountPage(
 }
 
 afterEach(() => {
+  promptBoundary.invoke = null;
   expertFlag.enabled = false;
   skillFlag.enabled = false;
   vi.useRealTimers();
@@ -307,6 +315,63 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
+
+it.skipIf(!process.env.YIJIE_PROMPT_BOUNDARY_SETUP)("selected skill continuous Native Host Runtime boundary", async () => {
+  const { readFileSync, writeFileSync } = await import("node:fs");
+  const { execFileSync } = await import("node:child_process");
+  const { join, basename } = await import("node:path");
+  const setupFile = process.env.YIJIE_PROMPT_BOUNDARY_SETUP!;
+  const setup = JSON.parse(readFileSync(setupFile, "utf8"));
+  expect(basename(setup.root)).toMatch(/^feat164-native-boundary-/);
+  expect(setupFile).toBe(join(setup.root, "boundary.json"));
+  expect(setup.prompt_skill).toBe(true);
+  expect(chatModelsEnabled && kimiK31Candidate).toBe(true);
+  vi.stubEnv("VITE_YIJIE_NATIVE_SKILL_INPUT_ENABLED", "true");
+  skillFlag.enabled = true;
+  const skill = { ...installedSkill, id: "yijie.fixture.model-only", runtimeName: "yijie-fixture-model-only", displayName: "合成模型技能" };
+  vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "2026-11-04T00:00:00Z", skills: [skill] });
+  const { modelDefinitions: current } = await import("../../domain/chat-models-v2.generated");
+  vi.spyOn(chatModelClient, "catalog").mockResolvedValue({ schema_version: 2, default_profile: "kimi-k3-1-pro-max-v1", models: current.map(profile => ({ profile, available: true, reason: "ready" })) });
+  const { wrapper, store, pinia } = await mountPage("/chat");
+  const skills = useSkillStore(pinia); skills.skills = [skill]; skills.phase = "ready";
+  vi.spyOn(skills, "open").mockResolvedValue();
+  const submit = vi.spyOn(store, "createSessionWithResult"); // call through the real store
+  let requests = 0;
+  promptBoundary.invoke = async (command, args) => {
+    if (command !== "chat_model_submit_v1") throw new Error("unrelated UI read is outside the headless submission boundary");
+    requests += 1;
+    expect(requests).toBe(1);
+    const request = (args as { request: unknown }).request;
+    writeFileSync(join(setup.root, "renderer-request.json"), JSON.stringify(request), { flag: "wx", mode: 0o600 });
+    // Reuse the existing explicit Native boundary. No App, real keys or shell;
+    // the child exits normally and writes the actual durable Native receipt.
+    const out = execFileSync("cargo", ["test", "--manifest-path", "src-tauri/Cargo.toml", "--features", "kimi-k31-pro-candidate", "--lib", "chat::feat164_boundary_tests::feat164_native_host_boundary", "--", "--exact", "--ignored", "--test-threads=1", "--nocapture"], {
+      encoding: "utf8", maxBuffer: 4 * 1024 * 1024,
+      env: { ...process.env, YIJIE_FEAT164_BOUNDARY_SETUP: setupFile },
+    });
+    writeFileSync(join(setup.root, "native-prepare.log"), out, { mode: 0o600 });
+    expect(out).toContain("PROMPT_SKILL_NATIVE_PASS prepare");
+    return JSON.parse(readFileSync(join(setup.root, "renderer-response.json"), "utf8"));
+  };
+  await wrapper.get('[aria-label="可添加文件、技能、连接器"]').trigger("click");
+  await flushPromises();
+  const menu = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent?.trim() === "技能");
+  expect(menu).toBeDefined(); await new DOMWrapper(menu!).trigger("click"); await flushPromises();
+  const choice = document.querySelector<HTMLElement>('[aria-label="已安装的技能"] [role="checkbox"]');
+  expect(choice).not.toBeNull(); await new DOMWrapper(choice!).trigger("click"); await flushPromises();
+  expect(useChatComposerDraftStore(pinia).skillSelection("new").map(s => s.id)).toEqual([skill.id]);
+  await wrapper.get("textarea").setValue("请简短说明六乘七。");
+  await wrapper.get('[aria-label="发送任务"]').trigger("click");
+  await flushPromises();
+  expect(submit).toHaveBeenCalledOnce();
+  const result = await submit.mock.results[0]!.value;
+  expect(result.status).toBe("local_durable_accepted");
+  expect(requests).toBe(1);
+  expect(useChatComposerDraftStore(pinia).skillSelection("new")).toEqual([]);
+  writeFileSync(join(setup.root, "renderer-accepted.json"), JSON.stringify(result), { mode: 0o600 });
+  wrapper.unmount();
+  console.log("PROMPT_SKILL_RENDERER_PASS: actual picker/page/store/client -> production Rust decoder/storage -> Host -> Runtime; OS WebView not exercised");
+}, 300_000);
 
 it("locates the exact requested local turn without sending or substituting the latest turn", async () => {
   const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => undefined);

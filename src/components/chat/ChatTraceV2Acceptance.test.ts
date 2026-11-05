@@ -36,7 +36,10 @@ describe("v2 normal reading acceptance", () => {
     await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
     await wrapper.get(".chat-activity-group__toggle").trigger("click");
     expect(wrapper.findAll("[data-activity-item]")).toHaveLength(40);
-    expect(wrapper.find(".chat-deep-thinking").exists()).toBe(false);
+    expect(wrapper.findAll(".chat-turn-group__reasoning-summary")).toHaveLength(1);
+    expect(wrapper.find(".chat-activity-group .chat-deep-thinking").exists()).toBe(false);
+    await wrapper.get('.chat-turn-group__reasoning-summary button').trigger('click');
+    expect(wrapper.findAll('[data-reasoning-item]')).toHaveLength(32);
     expect(wrapper.get(".chat-activity-group__counts").text()).toBe("40 次调用");
     expect(JSON.stringify(saved)).toBe(original);
     expect(saved.items).toHaveLength(72);
@@ -98,14 +101,17 @@ describe("v2 normal reading acceptance", () => {
     expect(summarizeActivity(last!, true).key).toContain("late");
   });
 
-  it("A09 / A25 uses one current thinking state with no new reasoning rows", () => {
+  it("A09 / A25 exposes the native summary in one current thinking disclosure without tool rows", async () => {
     const wrapper = render(view([command("done"), traceItem("r", "reasoning", {summary: ["Ordinary context"]})], true), true);
-    expect(wrapper.get(".chat-activity-group__title").text()).toBe("正在思考");
+    expect(wrapper.get(".chat-turn-group__reasoning-summary button").text()).toBe("正在思考 · Ordinary context");
     expect(wrapper.find(".chat-turn-group__progress").exists()).toBe(false);
     expect(wrapper.findAll("[data-activity-item]")).toHaveLength(1);
     const only = render(view([traceItem("r", "reasoning", {summary: ["Ordinary context"]})], true), true);
     expect(only.find(".chat-activity-group").exists()).toBe(false);
-    expect(only.get('[role="status"]').text()).toBe("正在思考");
+    expect(only.get('.chat-deep-thinking__toggle').text()).toBe("正在思考 · Ordinary context");
+    await only.get('.chat-deep-thinking__toggle').trigger('click');
+    expect(only.get('[aria-label="思考摘要内容"]').isVisible()).toBe(true);
+    expect(only.get('[aria-label="思考摘要内容"]').text()).toContain("Ordinary context");
   });
 
   it("A10 stabilizes header identity changes, updates same-key text, and completes immediately", async () => {

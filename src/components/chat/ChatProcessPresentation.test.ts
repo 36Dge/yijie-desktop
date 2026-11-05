@@ -91,7 +91,9 @@ describe("native process reading layout", () => {
     await wrapper.get(".chat-turn-group__timing button").trigger("click");
     for (const group of wrapper.findAll(".chat-activity-group__toggle")) await group.trigger("click");
     expect(wrapper.findAll("[data-activity-item]")).toHaveLength(3);
-    expect(wrapper.findAll(".chat-deep-thinking")).toHaveLength(0);
+    expect(wrapper.findAll(".chat-turn-group__reasoning-summary .chat-deep-thinking")).toHaveLength(1);
+    await wrapper.get('.chat-turn-group__reasoning-summary button').trigger('click');
+    expect(wrapper.findAll('[data-reasoning-item]')).toHaveLength(2);
     expect(view.items.filter(entry => entry.item.type === "reasoning")).toHaveLength(2);
     const command=wrapper.get(".chat-turn-group__item--command");
     await command.get("button").trigger("click");

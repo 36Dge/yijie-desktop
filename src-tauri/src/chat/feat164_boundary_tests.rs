@@ -34,6 +34,8 @@ struct Setup {
     phase: String,
     owner: String,
     tenant: String,
+    #[serde(default)]
+    prompt_skill: bool,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -89,6 +91,10 @@ async fn feat164_native_host_boundary() {
     );
     assert_eq!(file, setup.root.join("boundary.json"));
     assert!(matches!(setup.phase.as_str(), "prepare" | "reopen"));
+    if setup.prompt_skill {
+        prompt_selected_skill_boundary(setup).await;
+        return;
+    }
     let db = DatabaseWorker::start(
         setup.root.join("native"),
         ChatScope::new(setup.owner, setup.tenant).unwrap(),
@@ -393,4 +399,159 @@ async fn feat164_native_host_boundary() {
     drop(host);
     drop(db); // normal SQLCipher worker shutdown; no process faults
     println!("FEAT164_NATIVE_PHASE_PASS {}", setup.phase);
+}
+
+// Same ordinary Host/Native fixture, now carrying the exact request emitted by
+// ChatPage -> chat store -> chatModelClient. Uses the production decoder/store
+// and Host bridge; AppHandle authorization and coordinator scheduling are not
+// driven by this headless test and must not be claimed as App E2E coverage.
+async fn prompt_selected_skill_boundary(setup: Setup) {
+    let db = DatabaseWorker::start(
+        setup.root.join("native"),
+        ChatScope::new(setup.owner, setup.tenant).unwrap(),
+        Box::new(Keys),
+        Box::new(Keys),
+    )
+    .unwrap();
+    let host = HostBridge::from_connection(HostConnection {
+        port: setup.port.parse().unwrap(),
+        token_path: setup.root.join("host/api-token"),
+        instance_nonce: setup.nonce.clone(),
+    })
+    .unwrap();
+    let input: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(setup.root.join("renderer-request.json")).unwrap())
+            .unwrap();
+    let (request_id, submission, blocks, model) =
+        super::ipc::decode_prompt_boundary_submission(input);
+    assert_eq!(model.profile_id, wire::ProfileId::KimiK31ProMaxV1);
+    let handoff = setup.root.join("native-handoff.json");
+    let pending = db
+        .call(move |r| r.create_model_session(None, blocks, submission, 1, model))
+        .await
+        .unwrap();
+    assert_eq!(pending.create_operation_id, submission);
+    let operation = pending.turn_operation_id;
+    let saved: Handoff;
+    if setup.phase == "prepare" {
+        assert!(!handoff.exists());
+        let create = pending.create_operation_id;
+        assert_eq!(
+            db.claim_next_conversation_outbox(now(), 30)
+                .await
+                .unwrap()
+                .unwrap()
+                .operation_id,
+            create
+        );
+        let task = Uuid::now_v7();
+        db.call(move |r| r.begin_delivery_send(create, "public"))
+            .await
+            .unwrap();
+        db.bind_public_task(create, task, now()).await.unwrap();
+        let created = admitted(&host, &db, create)
+            .with_model_profile(Some("kimi-k3-1-pro-max-v1".into()))
+            .unwrap()
+            .start_session(
+                task,
+                &setup.root.join("workspace"),
+                &HostTrace {
+                    request_id: Some(create),
+                    ..HostTrace::default()
+                },
+            )
+            .await
+            .unwrap();
+        let agent = created.agent_session_id;
+        let thread = created.codex_thread_id.unwrap();
+        db.bind_host_session_and_enqueue_turn(create, task, agent, thread)
+            .await
+            .unwrap();
+        assert_eq!(
+            db.claim_next_conversation_outbox(now(), 30)
+                .await
+                .unwrap()
+                .unwrap()
+                .operation_id,
+            operation
+        );
+        let dispatch = db.load_start_turn_dispatch_v2(operation).await.unwrap();
+        assert!(matches!(dispatch.content_blocks.as_slice(),
+            [super::database::HostTurnInputBlock::Text { text, skills }]
+            if text == "$yijie-fixture-model-only\n\n请简短说明六乘七。" && skills.len() == 1
+                && skills[0].id == "yijie.fixture.model-only" && skills[0].version == "0.1.0"));
+        let native_turn = admitted(&host, &db, operation)
+            .with_model_profile(Some("kimi-k3-1-pro-max-v1".into()))
+            .unwrap()
+            .start_permission_turn(
+                agent,
+                operation,
+                &dispatch.content_blocks,
+                &HostTrace::default(),
+                super::runtime_permissions::PermissionMode::Ask,
+            )
+            .await
+            .unwrap();
+        db.accept_native_turn(operation, native_turn, setup.nonce.clone())
+            .await
+            .unwrap();
+        saved = Handoff {
+            session: pending.session_id,
+            host: agent,
+            thread,
+            turn: pending.turn_id,
+            operation,
+            selection: Uuid::nil(),
+            fingerprint: String::new(),
+        };
+        std::fs::write(&handoff, serde_json::to_vec(&saved).unwrap()).unwrap();
+    } else {
+        saved = serde_json::from_slice(&std::fs::read(&handoff).unwrap()).unwrap();
+        assert_eq!(saved.operation, operation);
+        // Reopening and reading a previously accepted operation cannot claim
+        // another send. Actual Host idempotency is exercised by the Go driver.
+        assert!(db
+            .claim_next_conversation_outbox(now(), 30)
+            .await
+            .unwrap()
+            .is_none());
+    }
+    let turn = saved.turn;
+    let selections = db.call(move |r| {
+        let mut statement = r.connection.prepare("SELECT s.skill_id, s.skill_version FROM chat_message_skill_selections s JOIN chat_messages m ON m.id=s.message_id WHERE m.turn_id=?1 ORDER BY s.block_ordinal,s.skill_ordinal").map_err(|_| ChatError::DatabaseUnavailable)?;
+        let rows = statement.query_map([turn.to_string()], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))).map_err(|_| ChatError::DatabaseUnavailable)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|_| ChatError::DatabaseUnavailable)
+    }).await.unwrap();
+    assert_eq!(
+        selections,
+        vec![("yijie.fixture.model-only".into(), "0.1.0".into())]
+    );
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let snapshot = host.read_native_thread(saved.host).await.unwrap();
+        if snapshot
+            .turns
+            .iter()
+            .any(|t| t.status.as_deref() == Some("completed"))
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "ordinary turn did not settle"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    std::fs::write(
+        setup.root.join("renderer-response.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "schemaVersion": 1, "requestId": request_id,
+            "data": { "sessionId": saved.session, "turnId": saved.turn, "operationId": submission }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    drop(host);
+    drop(db);
+    println!("PROMPT_SKILL_NATIVE_PASS {}", setup.phase);
 }

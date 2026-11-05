@@ -55,7 +55,9 @@ describe("app router", () => {
     [["task.read"] as const, "/settings", "settings"],
     [[] as const, "/settings", "settings"],
   ])("ROUTE-001 resolves the root policy for %j", async (capabilities, path, name) => {
-    const router = createAppRouter(createMemoryHistory(), boundary(capabilities), undefined, true);
+    // This case verifies routing policy. Loading the entire chat page makes a
+    // cold Vite transform consume its timeout; page rendering has its own tests.
+    const router = createAppRouter(createMemoryHistory(), boundary(capabilities), pageLoaders().loaders, true);
 
     await router.push("/");
     await router.isReady();

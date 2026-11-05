@@ -544,17 +544,20 @@ describe("ChatTimeline", () => {
     expect(disclosureFor("commentary-b").getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("renders the known runtime notice without presenting it as an unknown diagnosis", () => {
+  it("hides generic warnings without concealing a failed turn or an error notice", async () => {
     const timeline = projectedTimeline({
       threadNotices: [{ severity: "warning", code: "conversation_warning", diagnostic: "runtime_notice" }],
       turns: [{ ...completedTurn("turn-main", 0), status: "failed", terminalStatus: "failed", terminalCode: "other" }],
       items: [message("turn-main", "user", 0, "user_message", "普通问题")],
     });
     const wrapper = mount(ChatTimeline, { props: { timeline } });
-    expect(wrapper.get(".chat-timeline__notices").text()).toContain("未提供可显示的详细原因");
+    expect(wrapper.find(".chat-timeline__notices").exists()).toBe(false);
     expect(wrapper.text()).not.toContain("未分类提示");
     expect(wrapper.text()).toContain("本轮未能完成");
     expect(wrapper.findAllComponents(ChatTimelineItemShell)).toHaveLength(1);
+    await wrapper.setProps({timeline: {...timeline, notices: timeline.notices.map(notice => ({...notice, severity: "error" as const}))}});
+    expect(wrapper.get(".chat-timeline__notices").text()).toContain("对话发生错误");
+    expect(wrapper.text()).not.toContain("未提供可显示的详细原因");
     wrapper.unmount();
   });
 

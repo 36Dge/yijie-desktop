@@ -71,8 +71,8 @@ function key(event: KeyboardEvent): void {
   <NPopover :to="overlay ?? false" v-model:show="open" trigger="click" placement="top-end" :show-arrow="false" :disabled="blocked" raw>
     <template #trigger>
       <button ref="trigger" class="model-trigger yj-control yj-control--pill" type="button" :disabled="blocked" :aria-label="`选择对话模型，当前 ${label}`" :aria-expanded="open" aria-haspopup="menu" :title="disabled ? (disabledReason ?? '当前任务结束后可切换模型') : unavailable ? `${unavailableLabel(selectedAvailability?.reason)}，请选择可用模型` : label" @keydown.stop @keydown.down.prevent="open = !blocked" @keydown.esc="open = false">
-        <span v-if="selected" class="model-brand model-trigger-brand" :class="{ 'is-kimi': selected.icon === 'modelKimi' }"><YjIcon :name="selected.icon" size="sm" /></span>
-        <span>{{ label }}</span>
+        <span class="model-brand model-trigger-brand" :class="{ 'is-kimi': selected?.icon === 'modelKimi' }"><YjIcon :name="selected?.icon ?? 'assistant'" size="sm" /></span>
+        <span class="model-trigger-label">{{ label }}</span>
         <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
       </button>
     </template>
@@ -102,14 +102,18 @@ function key(event: KeyboardEvent): void {
 
 <style scoped>
 .model-trigger {
+  width: var(--chat-composer-control-width, auto);
+  flex: none;
   gap: var(--yj-space-1);
-  padding-inline: var(--yj-space-2);
+  padding-inline: var(--chat-composer-control-padding, var(--yj-space-2));
   border: 0;
   background: transparent;
   color: var(--yj-color-text-primary);
   font-weight: var(--yj-font-weight-regular);
   cursor: pointer;
 }
+.model-trigger-label,
+.model-trigger > .yj-control__chevron { display: var(--chat-composer-control-label-display, inline-flex); }
 .model-trigger:hover:not(:disabled),
 .model-trigger[aria-expanded="true"] { background: var(--yj-color-control-hover); }
 .model-trigger:active:not(:disabled) { background: var(--yj-color-control-pressed); }

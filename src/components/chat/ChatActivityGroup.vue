@@ -13,7 +13,7 @@ const props = defineProps<{ group: ConversationActivityGroup; live: boolean; vis
 const emit = defineEmits<{ "disclosure-change": [change: ChatTimelineDisclosureChange] }>();
 const choices = inject(chatTracePresentationKey, null) ?? createChatTracePresentationStore();
 const expanded = computed(() => choices.get(props.group.identity, false));
-const singleton = computed(() => props.group.state.kind === "summary" && props.group.entries.length === 1 &&
+const singleton = computed(() => !props.live && props.group.state.kind === "summary" && props.group.entries.length === 1 &&
   props.group.entries[0]!.item.domainStatus === "completed" && !props.group.entries[0]!.item.busy && !choices.has(props.group.identity));
 const summary = computed(() => summarizeActivity(props.group, props.live));
 const header = useActivitySummary(summary, () => props.group.identity);

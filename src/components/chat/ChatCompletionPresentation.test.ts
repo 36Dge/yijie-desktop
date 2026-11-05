@@ -17,11 +17,15 @@ function view(): NativeConversationView {
 const turn = (value: NativeConversationView) => selectConversationTimeline(composeConversationView({threads:[{threadId:"session",status:"ready"}],turns:[],items:[]},[value]),"session",undefined,{protectApprovalProcessContent:false,liveTurnId:"turn"})!.turns[0]!;
 
 describe("answer completion reading layout", () => {
-  it("omits ordinary reasoning rows and preserves saved records and the real tool result", async () => {
+  it("keeps one readable summary outside tool rows while preserving empty facts and the tool result", async () => {
     const value=view(), original=JSON.stringify(value);
     const wrapper=mount(ChatTurnGroup,{props:{turn:turn(value),position:1}});
     await wrapper.get('.chat-turn-group__process-toggle').trigger('click');
-    expect(wrapper.findAll('.chat-deep-thinking')).toHaveLength(0);
+    expect(wrapper.findAll('.chat-turn-group__reasoning-summary .chat-deep-thinking')).toHaveLength(1);
+    await wrapper.get('.chat-deep-thinking__toggle').trigger('click');
+    expect(wrapper.findAll('[data-reasoning-item]')).toHaveLength(1);
+    expect(wrapper.get('[data-reasoning-item]').attributes('data-reasoning-item')).toBe('thought');
+    expect(wrapper.get('[data-reasoning-item]').text()).toContain('已有资料足以说明历史。');
     expect(value.items.filter(entry => entry.item.type === 'reasoning')).toHaveLength(2);
     expect(wrapper.find('.chat-activity-group__toggle').exists()).toBe(false);
     expect(wrapper.findAll('[data-activity-item]')).toHaveLength(1);

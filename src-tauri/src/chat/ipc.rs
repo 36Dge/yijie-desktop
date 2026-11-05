@@ -10239,6 +10239,29 @@ struct ModelSubmissionPayload {
     intent: super::models::ModelIntent,
     operation_id: Uuid,
 }
+
+// The cross-language headless test uses the production IPC decoder and block
+// adapter. This does not add an App command or a second wire representation.
+#[cfg(all(test, feature = "kimi-k31-pro-candidate"))]
+pub(super) fn decode_prompt_boundary_submission(
+    value: Value,
+) -> (
+    Uuid,
+    Uuid,
+    Vec<DraftContentBlock>,
+    super::models::ModelIntent,
+) {
+    let request: CommandRequest<ModelSubmissionPayload> = decode_request(value).unwrap();
+    validate_operation(request.payload.operation_id, request.request_id).unwrap();
+    assert!(request.payload.session_id.is_none());
+    assert!(request.payload.project_id.is_none());
+    (
+        request.request_id,
+        request.payload.operation_id,
+        draft_content_blocks(request.payload.content_blocks, request.request_id).unwrap(),
+        request.payload.intent,
+    )
+}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ModelSessionPayload {

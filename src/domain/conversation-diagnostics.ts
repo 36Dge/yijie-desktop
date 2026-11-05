@@ -41,3 +41,9 @@ export function safeConversationDiagnostic(code: string): string {
 export function conversationDiagnosticMessage(code: string): string {
   return messages[safeConversationDiagnostic(code)]!;
 }
+
+/** Presentation only: keep generic warnings in native facts, without an empty
+ * user-facing explanation. Errors retain their state and retry information. */
+export function showConversationNotice(kind: "warning" | "error", code?: string): boolean {
+  return kind !== "warning" || code !== "runtime_notice";
+}

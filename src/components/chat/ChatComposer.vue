@@ -900,25 +900,27 @@ function handlePaste(event: ClipboardEvent): void {
 }
 
 @container chat-composer (max-width: 680px) {
-  .chat-composer--reply .chat-composer__actions,
-  .chat-composer--expert .chat-composer__actions {
-    grid-template-columns: minmax(0, 1fr);
-    row-gap: var(--yj-space-2);
+  .chat-composer__actions {
+    --chat-composer-control-label-display: none;
+    --chat-composer-control-width: var(--yj-control-height-sm);
+    --chat-composer-control-padding: 0;
   }
-
-  .chat-composer--reply .chat-composer__trailing-actions,
-  .chat-composer--expert .chat-composer__trailing-actions { justify-self: end; }
 }
 
 .chat-composer__permission {
+  width: var(--chat-composer-control-width, auto);
   min-width: 0;
   max-width: 100%;
   flex: 0 1 auto;
   border: 0;
+  padding-inline: var(--chat-composer-control-padding, var(--yj-space-3));
   overflow: hidden;
 }
 
 .chat-composer__permission :deep(.yj-icon) { color: inherit; }
+.chat-composer__permission-label,
+.chat-composer__permission-value,
+.chat-composer__permission > .yj-control__chevron { display: var(--chat-composer-control-label-display, inline-flex); }
 
 .chat-composer__drop-overlay {
   position: absolute;
