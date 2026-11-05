@@ -9,7 +9,7 @@
     "runtime-kimi-k31-pro": "0943663c8958ceb22492e866958689621b3e695288b55b7e7bb834957b6ca392"
   },
   "host": {
-    "base_commit": "d0bf442f11853f9ca46248379d7094aca2d529cc",
+    "base_commit": "226711a52acb2d71503fb60575fdf5a8c53383d6",
     "sources": {
       "api/README.md": "d270ca2dabf257b528ee2f178ba03e3d7fb3f1e04ffc8b4414247d4c47c50807",
       "api/artifact-media.candidate.json": "6d3ba9477e73b9e04a76e5933ba1d87e68076c62a97d28d2941b5d005c0f9864",
@@ -266,7 +266,7 @@
       "internal/codex/public_message_contract_test.go": "4760b249e1e959a173ecc9c48d2dc0e0b5eba9e9521391fa26f031fc9d0d8a30",
       "internal/codex/public_progress_completion_regression_test.go": "c96420c002bd79cc0a55e8f22bc0920ef31b467857cd847b4ef59743c76acb45",
       "internal/codex/public_progress_integration_test.go": "a28e76838b8e99ac862e6eede688865b6ef7076b4f93b681e0fedd91dd8d57cf",
-      "internal/codex/public_progress_policy.go": "53f676a270871f6565b8d10dc7307c9df0d6bf8c73b886fb3e0b79f0a9a9d2cc",
+      "internal/codex/public_progress_policy.go": "5855cc8304717fb1d1a768a0acab93df03497d5127f69369b8eb288d107f67fd",
       "internal/codex/public_progress_wire_diagnostic_test.go": "10b83775df79aa748cdb1c91dce2d798779ffa695e04ba41f0b3bc7c87786d3c",
       "internal/codex/retirement_test.go": "3f46df7da47a68fa21b14127eb1a09818c87226683c7d446127ce338a9c32719",
       "internal/codex/runtime.go": "1cc8eac541d8f8d443ad7aa681566ba20e79da57df32982e45cebe44a63eea65",
