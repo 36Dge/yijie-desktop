@@ -4,7 +4,7 @@
  * Reserved standalone transport lines are hidden; quoted/code examples remain.
  */
 export function readablePublicCommentary(text: string): string {
-  if (!text.includes("[[yijie.public-message.v1:")) return text;
+  if (!text.includes("[[yijie.public-message.v1:") && !text.includes("[[yijie-public-message-v1:")) return text;
   let fence: { marker: string; length: number } | null = null;
   let result = "";
   for (const line of text.match(/[^\n]*\n|[^\n]+$/gu) ?? []) {
@@ -20,8 +20,16 @@ export function readablePublicCommentary(text: string): string {
       result += line;
       continue;
     }
-    if (value.length <= 128 && /^ {0,3}\[\[yijie\.public-message\.v1:(?:commentary|final_answer)\]\][ \t\r]*$/u.test(value)) continue;
+    if (value.length <= 128 && /^ {0,3}\[\[(?:yijie\.public-message\.v1|yijie-public-message-v1):(?:commentary|final_answer)\]\][ \t\r]*$/u.test(value)) continue;
     result += line;
   }
   return result;
+}
+
+/** Consume the observed r2 transport spelling in a saved unknown-phase message.
+ * This is text cleanup only: never promote that historical phase or turn status.
+ */
+export function readablePublicAssistantText(text: string, phase: string | null | undefined): string {
+  const observedUnknownFrame = phase == null && /^\[\[yijie-public-message-v1:(?:commentary|final_answer)\]\]\r?\n(?=\S)/u.test(text);
+  return phase === "commentary" || observedUnknownFrame ? readablePublicCommentary(text) : text;
 }

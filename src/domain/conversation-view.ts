@@ -1,7 +1,7 @@
 import type {LocalSubmissionView, NativeRecordDiagnostic} from "../api/generated/native-conversation-history.gen";
 import type { NativeConversationView } from "../api/generated/native-conversation-private.gen";
 import { safeConversationDiagnostic } from "./conversation-diagnostics";
-import { readablePublicCommentary } from "./public-message-reading";
+import { readablePublicAssistantText } from "./public-message-reading";
 
 export const CONVERSATION_ITEM_KINDS = Object.freeze([
   "user_message",
@@ -450,7 +450,7 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
           : item.type === "reasoning"
           ? (["summary", "content"] as const).flatMap(reasoningSource =>
             (item[reasoningSource] ?? []).map((text, blockIndex) => ({type: "text", text, blockIndex, reasoningSource})))
-          : item.text == null ? [] : [{type: "text", text: item.type === "agentMessage" && item.phase === "commentary" ? readablePublicCommentary(item.text) : item.text, blockIndex: 0}];
+          : item.text == null ? [] : [{type: "text", text: item.type === "agentMessage" ? readablePublicAssistantText(item.text, item.phase) : item.text, blockIndex: 0}];
         return {threadId: view.sessionId, turnId: view.turnId, itemId: item.id, ordinal: entry.ordinal, kind,
           availability: item.availability,
           ...(item.webSearch ? {webSearch: item.webSearch} : {}),
