@@ -380,11 +380,12 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
 
 .chat-turn-group__item--user_message {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   justify-items: end;
 }
 
 .chat-turn-group__item--user_message :deep(.chat-timeline-item-shell) {
-  max-width: min(100%, var(--yj-layout-chat-column-max));
+  max-width: var(--yj-layout-chat-user-bubble-max);
 }
 
 .chat-turn-group__unknown {

@@ -212,6 +212,8 @@
   --yj-layout-composer-height: 176px;
   --yj-layout-chat-entry-top-offset: 96px;
   --yj-layout-chat-entry-max: 760px;
+  /* Keep a quarter of the reading column free, with more room for text in narrow panes. */
+  --yj-layout-chat-user-bubble-max: min(max(75%, 320px), calc(100% - var(--yj-space-4)));
   --yj-layout-chat-workspace-control-max: 320px;
   --yj-layout-workspace-menu-width: 280px;
   --yj-layout-chat-context-menu-width: 175px;
