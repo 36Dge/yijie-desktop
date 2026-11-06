@@ -967,7 +967,10 @@ fn canonical_file_extension(media_type: &str) -> Option<&'static str> {
     }
 }
 
-fn validate_file_for_save(media_type: &str, bytes: &[u8]) -> Result<(), ArtifactNativeCode> {
+pub(super) fn validate_file_for_save(
+    media_type: &str,
+    bytes: &[u8],
+) -> Result<(), ArtifactNativeCode> {
     if !(1..=MAX_ARTIFACT_BYTES).contains(&bytes.len()) {
         return Err(ArtifactNativeCode::LimitExceeded);
     }

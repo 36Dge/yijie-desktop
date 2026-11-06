@@ -6,8 +6,8 @@
     "chat_document_preview_v1"
   ],
   "x-event": "chat-document-preview-invalidated",
-  "x-authority": "Existing Native context/owner/tenant + committed artifact or bound message attachment; no paths, raw bytes, URLs, model or publish actions",
-  "x-compatibility": "New private operation; existing artifact and draft v1/v2 APIs unchanged; no durable state or Runtime protocol change",
+  "x-authority": "Existing Native context/owner/tenant and a committed artifact, bound attachment, or exact file reference in the named assistant item. Local references are read only below Desktop or the scoped session workspace.",
+  "x-compatibility": "Adds a scoped message-file location lookup for workspace-relative tooltips. Only locate returns located/path. Existing open/resize/position/close responses retain their shape. No storage migration or Runtime contract change.",
   "definitions": {
     "Source": {
       "oneOf": [
@@ -72,6 +72,9 @@
             "messageId",
             "attachmentId"
           ]
+        },
+        {
+          "$ref": "#/definitions/MessageFileSource"
         }
       ]
     },
@@ -273,6 +276,27 @@
             "action",
             "viewId"
           ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "locate"
+            },
+            "viewId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "source": {
+              "$ref": "#/definitions/MessageFileSource"
+            }
+          },
+          "required": [
+            "action",
+            "viewId",
+            "source"
+          ]
         }
       ]
     },
@@ -313,7 +337,9 @@
             "docx",
             "pptx",
             "xlsx",
-            "pdf"
+            "pdf",
+            "image",
+            "video"
           ]
         },
         "revision": {
@@ -418,7 +444,8 @@
             "ready",
             "resized",
             "position",
-            "closed"
+            "closed",
+            "located"
           ]
         },
         "viewId": {
@@ -444,6 +471,11 @@
               "type": "null"
             }
           ]
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 4096,
+          "description": "Only returned by locate. The authorised absolute path for this exact message reference; no file content is read."
         }
       },
       "required": [
@@ -507,6 +539,41 @@
           "format": "uuid"
         }
       }
+    },
+    "MessageFileSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "messageFile"
+        },
+        "sessionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "turnId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "itemId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "Complete decoded absolute or workspace-relative filesystem reference. A local file URL from an older reader is also accepted. Native independently extracts and compares whole references in the stored assistant message."
+        }
+      },
+      "required": [
+        "kind",
+        "sessionId",
+        "turnId",
+        "itemId",
+        "reference"
+      ]
     }
   },
   "$ref": "#/definitions/Request",

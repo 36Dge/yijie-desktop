@@ -37,6 +37,7 @@ image = { version = "=0.25.10", default-features = false, features = ["gif", "jp
 libc = "=0.2.183"
 openidconnect = "=4.0.1"
 pdf-extract = "=0.12.0"
+pulldown-cmark = { version = "=0.10.3", default-features = false, features = ["html"] }
 quick-xml = "=0.41.0"
 reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls", "stream"] }
 rusqlite = { version = "=0.40.1", default-features = false, features = ["blob", "bundled-sqlcipher", "uuid", "limits"] }

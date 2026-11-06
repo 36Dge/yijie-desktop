@@ -8,6 +8,9 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::io::Cursor;
 
+#[path = "document_preview_markdown.rs"]
+mod markdown;
+
 #[cfg(test)]
 #[path = "document_preview_content_tests.rs"]
 mod tests;
@@ -42,14 +45,18 @@ pub(super) fn escape(s: &str) -> String {
 }
 
 pub(super) fn page(body: &str, dark: bool, zoom: f64) -> String {
+    styled_page(body, dark, zoom, "")
+}
+
+fn styled_page(body: &str, dark: bool, zoom: f64, styles: &str) -> String {
+    let theme = if dark { "dark" } else { "light" };
     format!(
-        r#"<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
-:root{{color-scheme:{};font:14px/1.6 system-ui}}body{{margin:20px;color:CanvasText;background:Canvas;overflow-wrap:anywhere;zoom:{zoom}}}
+        r#"<!doctype html><html data-theme="{theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+:root{{color-scheme:{theme};font:14px/1.6 system-ui}}body{{margin:20px;color:CanvasText;background:Canvas;overflow-wrap:anywhere;zoom:{zoom}}}
 pre{{white-space:pre-wrap;tab-size:4}}table{{border-collapse:collapse;min-width:100%;margin:12px 0}}td,th{{border:1px solid GrayText;padding:6px 10px;vertical-align:top}}th{{position:sticky;top:0;background:Canvas}}
 table.sheet{{width:max-content;min-width:100%}}.sheet td,.sheet th{{min-width:96px;max-width:320px;overflow-wrap:break-word}}.sheet th:first-child{{min-width:40px}}
 img{{display:block;max-width:100%;height:auto;margin:12px auto}}.page{{margin:0 auto}}.notice{{color:GrayText}}.formula{{white-space:pre-wrap}}h1,h2,h3{{line-height:1.35}}p{{margin:10px 0}}.list{{padding-inline-start:20px}}
-</style></head><body>{body}</body></html>"#,
-        if dark { "dark" } else { "light" }
+{styles}</style></head><body>{body}</body></html>"#
     )
 }
 
@@ -505,6 +512,23 @@ pub(super) fn render(
         previous: None,
         partial: false,
     };
+    if mime.starts_with("image/") || mime == "video/mp4" {
+        // Only Native-admitted media enters this generated page. WebKit owns
+        // playback/seeking; the chat WebView never receives a disk URL or bytes.
+        use base64::Engine;
+        let data = base64::engine::general_purpose::STANDARD.encode(bytes);
+        let body = if mime == "video/mp4" {
+            result.kind = "video";
+            format!(
+                r#"<video controls playsinline preload="metadata" style="width:100%" src="data:video/mp4;base64,{data}"></video>"#
+            )
+        } else {
+            result.kind = "image";
+            format!(r#"<img class="page" alt="图片预览" src="data:{mime};base64,{data}">"#)
+        };
+        result.html = page(&body, dark, zoom);
+        return Ok(result);
+    }
     if mime == "text/html" {
         result.kind = "html";
         result.html = std::str::from_utf8(bytes)
@@ -530,6 +554,10 @@ pub(super) fn render(
                 text, truncated, ..
             } => {
                 result.partial = truncated;
+                if mime == "text/markdown" {
+                    result.html = markdown::page(&text, dark, zoom);
+                    return Ok(result);
+                }
                 format!("<pre>{}</pre>", escape(&text))
             }
             FilePreviewProjection::Csv { rows, truncated } => {

@@ -1,8 +1,12 @@
-import { computed, inject, onBeforeUnmount, ref, watch, type InjectionKey } from "vue";
+import { computed, inject, onBeforeUnmount, ref, watch, type ComputedRef, type InjectionKey } from "vue";
+import type { MessageFileReference } from "../domain/message-file-reference";
 import type { WebSourceTarget } from "../domain/web-source.generated";
 import { sourceHref, webSourceActionsKey } from "./useWebSources";
 
 export type MessageLinkTarget = Omit<WebSourceTarget, "url">;
+export const messageFileActionKey: InjectionKey<ComputedRef<((target: MessageLinkTarget, file: MessageFileReference) => void) | undefined>> = Symbol("message-file-action");
+export const messageFileWorkspaceKey: InjectionKey<ComputedRef<string | null>> = Symbol("message-file-workspace");
+export const messageFileLocationKey: InjectionKey<ComputedRef<((target: MessageLinkTarget, file: MessageFileReference) => Promise<string>) | undefined>> = Symbol("message-file-location");
 export const messageLinkTargetKey: InjectionKey<() => MessageLinkTarget | undefined> = Symbol("message-link-target");
 
 export function useChatMessageLink(destination: () => string | null) {

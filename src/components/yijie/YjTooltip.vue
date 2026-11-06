@@ -14,7 +14,8 @@ export default defineComponent({
     text: String as PropType<string | null>,
     placement: { type: String as PropType<PopoverPlacement>, default: "top" },
   },
-  setup(props, { slots, attrs }) {
+  emits: ["show"],
+  setup(props, { slots, attrs, emit }) {
     const id = useId();
     const owner = Symbol("tooltip");
     const parent = inject(parentTooltipKey, null);
@@ -22,6 +23,7 @@ export default defineComponent({
     const focused = ref(false);
     const dismissed = ref(false);
     const show = computed(() => Boolean(props.text) && !dismissed.value && activeTooltip.value === owner && (hovered.value || focused.value));
+    watch(show, visible => { if (visible) emit("show"); });
     function resume() {
       if (!dismissed.value && props.text && (hovered.value || focused.value)) activeTooltip.value = owner;
       else parent?.resume();

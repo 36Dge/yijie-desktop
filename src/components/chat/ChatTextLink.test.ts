@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
+import { computed } from "vue";
+import { messageFileActionKey } from "../../composables/useChatMessageLink";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ChatSafeContent from "./ChatSafeContent.vue";
 import { webSourceActionsKey } from "../../composables/useWebSources";
@@ -64,5 +66,55 @@ describe("conversation text hyperlinks", () => {
     expect(wrapper.text()).toBe(text); expect(wrapper.find("a").exists()).toBe(false);
     const {wrapper: code} = render(`\`\`\`md\n${text}\n\`\`\``);
     expect(code.get("code").text()).toBe(text); expect(code.find("a").exists()).toBe(false);
+  });
+});
+
+describe("conversation output file links", () => {
+  const path = "/Users/example/Desktop/杭州旅游介绍 (初稿).md";
+  const uri = "file://" + encodeURI(path);
+  const source = `已生成并保存到你的电脑桌面：\n\n**[杭州旅游介绍.md](${uri})**\n\n路径：\`${path}\``;
+  function renderFile(text: string, streaming = false) {
+    const open = vi.fn();
+    const wrapper = mount(ChatSafeContent, { attachTo: document.body,
+      props: {blocks: blocks(text), linkTarget: target, fileLinks: true, streaming, animate: false},
+      global: {provide: {[messageFileActionKey as symbol]: computed(() => open)}},
+    });
+    return { wrapper, open };
+  }
+  it("folds the duplicate path, shows the decoded location on hover/focus and opens only on activation", async () => {
+    const { wrapper, open } = renderFile(source);
+    const links = wrapper.findAll('[role="link"]');
+    expect(links).toHaveLength(1);
+    const link = links[0]!;
+    expect(link.text()).toBe("《杭州旅游介绍 (初稿).md》");
+    expect(link.find("svg").exists()).toBe(true);
+    expect(wrapper.text()).toBe("已生成并保存到你的电脑桌面：《杭州旅游介绍 (初稿).md》");
+    expect(wrapper.find("[href]").exists()).toBe(false);
+    await link.trigger("mouseenter"); await flushPromises();
+    expect(document.getElementById(link.attributes("aria-describedby")!)?.textContent).toBe(path);
+    await link.trigger("mouseleave"); (link.element as HTMLButtonElement).focus(); await link.trigger("focusin");
+    expect(link.attributes("aria-describedby")).toBeTruthy();
+    await link.trigger("keydown", {key: "Escape"});
+    expect(link.attributes("aria-describedby")).toBeUndefined();
+    expect(open).not.toHaveBeenCalled();
+    await link.trigger("click");
+    expect(open).toHaveBeenCalledExactlyOnceWith(target, { raw: uri, path, name: "杭州旅游介绍 (初稿).md" });
+    expect(wrapper.props("blocks")).toEqual(blocks(source));
+  });
+  it("recognizes different formats, preserves same-name files in other directories and skips fenced examples", () => {
+    const text = "- **[预览](/work/a/报告.pdf)**\n\n路径：/work/b/报告.pdf\n\n> [表格](</work/计划 (1).xlsx>)\n\n| 海报 | 视频 |\n| --- | --- |\n| `/work/封面.png` | [观看](/work/演示.mp4) |\n\n```txt\n/work/例子.html\n```";
+    const { wrapper } = renderFile(text);
+    expect(wrapper.findAll('[role="link"]').map(link => link.attributes("data-yj-tooltip"))).toEqual([
+      "/work/a/报告.pdf", "/work/b/报告.pdf", "/work/计划 (1).xlsx", "/work/封面.png", "/work/演示.mp4",
+    ]);
+    expect(wrapper.get("pre").text()).toBe("/work/例子.html");
+  });
+  it("activates a streamed bold output only after the destination closes", async () => {
+    const { wrapper } = renderFile("**[指南](file:///Users/example/Desk", true);
+    expect(wrapper.text()).toBe("指南");
+    expect(wrapper.find('[role="link"]').exists()).toBe(false);
+    await wrapper.setProps({blocks: blocks(source)});
+    expect(wrapper.findAll('[role="link"]')).toHaveLength(1);
+    expect(wrapper.text()).not.toContain("/Users/");
   });
 });

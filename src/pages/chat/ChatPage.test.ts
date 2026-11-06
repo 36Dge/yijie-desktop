@@ -16,6 +16,7 @@ import axe from "axe-core";
 import { createPinia,setActivePinia } from "pinia";
 import { afterEach,describe,expect,it,vi } from "vitest";
 import { createMemoryHistory,createRouter } from "vue-router";
+import { documentPreviewClient } from "../../api/chat-document-preview-client";
 import { chatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
 import { chatArtifactNativeClient } from "../../api/chat-artifact-native-client";
 import { chatArtifactReportNativeClient } from "../../api/chat-artifact-report-native-client";
@@ -390,6 +391,31 @@ it("locates the exact requested local turn without sending or substituting the l
 });
 
 describe("FEAT-126 ChatPage", () => {
+  it.skipIf(!kimiK31Candidate)("opens the linked output from a saved answer in the ordinary chat sidebar", async () => {
+    const reference = "file:///Users/example/Desktop/杭州旅游介绍.md";
+    const answer = `**[杭州旅游介绍.md](${reference})**\n\n路径：\`/Users/example/Desktop/杭州旅游介绍.md\``;
+    const turn = HISTORY_WITHOUT_REASONING.turns[0]!;
+    const history = {turns: [{...turn, messages: turn.messages.map(message =>
+      message.role === "assistant" ? {...message, content: answer} : message)}], nextCursor: null};
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(924);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 336, 600));
+    const native = vi.spyOn(documentPreviewClient, "run").mockImplementation(async (_context, action) => ({
+      status: action.action === "open" ? "ready" : "closed", viewId: action.viewId, position: null,
+      document: action.action === "open" ? {kind:"text", revision:"a".repeat(64), expiresAt:Math.floor(Date.now()/1000)+600,
+        sections:[],section:0,offset:0,nextOffset:null,previousOffset:null,partial:false,notice:null} : null,
+    }));
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true, history);
+    const links = wrapper.findAll(".chat-file-link");
+    expect(links.map(link => link.text())).toEqual(["《杭州旅游介绍.md》"]);
+    await links[0]!.trigger("mouseenter");
+    expect(native).not.toHaveBeenCalled();
+    await links[0]!.trigger("click"); await flushPromises();
+    expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toBe("杭州旅游介绍.md");
+    expect(native).toHaveBeenCalledWith(store.context!.contextId, expect.objectContaining({
+      action:"open", source:{kind:"messageFile", sessionId:SESSION_ID,turnId:TURN_ID,itemId:`${TURN_ID}:assistant:0`,reference: "/Users/example/Desktop/杭州旅游介绍.md"},
+    }));
+  });
+
   it.skipIf(!kimiK31Candidate)("hides the duplicate preview trigger while open and restores keyboard focus after collapsing", async () => {
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1028);
     const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);

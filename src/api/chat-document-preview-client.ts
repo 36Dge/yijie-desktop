@@ -12,7 +12,7 @@ function object(value: unknown): Record<string, unknown> {
 function document(value: unknown): Document | null {
   if (value === null) return null;
   const d = object(value);
-  if (!["html", "text", "docx", "pptx", "xlsx", "pdf"].includes(String(d.kind)) || typeof d.revision !== "string" || !/^[a-f0-9]{64}$/.test(d.revision) || !Number.isSafeInteger(d.expiresAt) || Number(d.expiresAt) <= 0 || !Array.isArray(d.sections) || d.sections.length > 512 || typeof d.partial !== "boolean" || (d.notice !== null && (typeof d.notice !== "string" || d.notice.length > 512))) throw new DocumentPreviewError("artifact_native_unavailable");
+  if (!["html", "text", "docx", "pptx", "xlsx", "pdf", "image", "video"].includes(String(d.kind)) || typeof d.revision !== "string" || !/^[a-f0-9]{64}$/.test(d.revision) || !Number.isSafeInteger(d.expiresAt) || Number(d.expiresAt) <= 0 || !Array.isArray(d.sections) || d.sections.length > 512 || typeof d.partial !== "boolean" || (d.notice !== null && (typeof d.notice !== "string" || d.notice.length > 512))) throw new DocumentPreviewError("artifact_native_unavailable");
   for (const key of ["section", "offset", "nextOffset", "previousOffset"]) {
     if ((key === "nextOffset" || key === "previousOffset") && d[key] === null) continue;
     if (!Number.isSafeInteger(d[key]) || Number(d[key]) < 0) throw new DocumentPreviewError("artifact_native_unavailable");
@@ -24,7 +24,8 @@ export function parseDocumentPreviewResponse(value: unknown, requestId: string, 
   const response = object(value);
   if (response.schemaVersion !== 1 || response.requestId !== requestId) throw new DocumentPreviewError("artifact_native_unavailable");
   const data = object(response.data);
-  if (data.viewId !== viewId || !["ready", "resized", "position", "closed"].includes(String(data.status))) throw new DocumentPreviewError("artifact_native_unavailable");
+  if (data.viewId !== viewId || !["ready", "resized", "position", "closed", "located"].includes(String(data.status))) throw new DocumentPreviewError("artifact_native_unavailable");
+  if (data.status === "located" && (typeof data.path !== "string" || !data.path.startsWith("/") || data.path.length > 4096 || data.path.includes("\0") || data.document !== null || data.position !== null)) throw new DocumentPreviewError("artifact_native_unavailable");
   const doc = document(data.document);
   if (data.status === "ready" && !doc) throw new DocumentPreviewError("artifact_native_unavailable");
   if (data.position !== null) {
@@ -39,7 +40,7 @@ export function createDocumentPreviewClient(nativeInvoke: Invoker = invoke) {
       const request: Request = { schemaVersion: 1, requestId: crypto.randomUUID(), contextId, payload };
       try {
         const result = parseDocumentPreviewResponse(await nativeInvoke("chat_document_preview_v1", { request }), request.requestId, payload.viewId);
-        if (result.status !== { open: "ready", resize: "resized", position: "position", close: "closed" }[payload.action]) throw new DocumentPreviewError("artifact_native_unavailable");
+        if (result.status !== { locate: "located", open: "ready", resize: "resized", position: "position", close: "closed" }[payload.action]) throw new DocumentPreviewError("artifact_native_unavailable");
         return result;
       }
       catch (error) {

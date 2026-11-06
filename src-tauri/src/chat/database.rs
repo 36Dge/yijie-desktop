@@ -1788,8 +1788,12 @@ impl ChatRepository {
         revision: String,
         now: i64,
     ) -> Result<bool, ChatError> {
-        let (session, second, id) = source.ids();
+        if let super::document_preview_native::DocumentSource::MessageFile(target) = &source {
+            return Ok(self.message_file_project(target)?.is_some());
+        }
+        let (session, second, id) = source.stored_ids().ok_or(ChatError::InvalidInput)?;
         let sql=match source {
+            super::document_preview_native::DocumentSource::MessageFile(_) => return Err(ChatError::InvalidInput),
             super::document_preview_native::DocumentSource::Artifact{..}=>
                 "SELECT EXISTS(SELECT 1 FROM chat_output_artifacts a JOIN chat_sessions s ON s.id=a.session_id JOIN chat_turns t ON t.id=a.turn_id AND t.session_id=s.id WHERE a.artifact_id=?1 AND a.turn_id=?2 AND a.session_id=?3 AND a.owner_user_id=?4 AND a.tenant_id=?5 AND s.owner_user_id=a.owner_user_id AND s.tenant_id=a.tenant_id AND a.state='ready' AND a.local_committed_at IS NOT NULL AND a.sha256=?6 AND a.expires_at>?7)",
             super::document_preview_native::DocumentSource::Attachment{..}=>
@@ -10347,6 +10351,84 @@ mod tests {
             Err(ChatError::NotFound)
         );
         drop(repository);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn message_file_preview_reads_the_file_referenced_in_a_saved_assistant_answer() {
+        use super::super::{
+            message_file_preview, native_conversation::NativeDisplayBuffer, native_project,
+        };
+        let root = fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!("yijie-message-file-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let workspace = root.join("workspace");
+        fs::create_dir(&workspace).unwrap();
+        let selection = native_project::create_selection(&workspace)
+            .unwrap()
+            .unwrap();
+        let owner = scope();
+        let mut repo = open_repository_for_scope(&root, 43, owner.clone());
+        let project = repo
+            .register_project(&workspace, &selection.bookmark)
+            .unwrap();
+        let pending = repo
+            .create_session_and_enqueue(
+                Uuid::parse_str(&project.id).unwrap(),
+                "首条消息",
+                Uuid::now_v7(),
+            )
+            .unwrap();
+        bind_and_accept_first_turn(&mut repo, &pending, unix_seconds().unwrap());
+        let context = repo.active_turn_context(pending.session_id).unwrap();
+        let path = workspace.join("杭州旅行 (初稿).md");
+        let text = "# 杭州旅行\n沿西湖步行。";
+        fs::write(&path, text).unwrap();
+        let url = url::Url::from_file_path(&path).unwrap().to_string();
+        let answer = format!("**[旅行指南]({url})**\n\n路径：`{}`", path.display());
+        let event = native_test_event(
+            &context,
+            1,
+            "item/completed",
+            serde_json::json!({"item":{"id":"guide","type":"agentMessage","text":answer,"phase":"final_answer","availability":"available"}}),
+        );
+        let mut buffer = NativeDisplayBuffer::new(context.clone(), None).unwrap();
+        assert!(buffer.observe(&event).unwrap());
+        repo.commit_native_view(&context, buffer.view, Some(&event), unix_seconds().unwrap())
+            .unwrap();
+        drop(repo);
+        let repo = open_repository_for_scope(&root, 43, owner);
+        let target = message_file_preview::MessageFile {
+            session_id: pending.session_id,
+            turn_id: pending.turn_id,
+            item_id: "guide".into(),
+            reference: url,
+        };
+        assert!(matches!(repo.message_file_project(&target).unwrap(),
+            Some(message_file_preview::MessageFileProject::Saved(id)) if id == project.id));
+        let resolved = repo.resolve_schedule_project(&project.id).unwrap();
+        let file = message_file_preview::read(&target.path().unwrap(), &resolved, 100).unwrap();
+        assert_eq!(file.mime, "text/markdown");
+        assert_eq!(file.bytes, text.as_bytes());
+        assert!(super::super::document_preview_content::render(
+            &file.mime,
+            &file.bytes,
+            0,
+            0,
+            false,
+            1.0
+        )
+        .unwrap()
+        .html
+        .contains("沿西湖步行"));
+        let other = message_file_preview::MessageFile {
+            reference: workspace.join("第二天.md").display().to_string(),
+            ..target
+        };
+        assert!(repo.message_file_project(&other).unwrap().is_none());
+        drop(repo);
         fs::remove_dir_all(root).unwrap();
     }
 

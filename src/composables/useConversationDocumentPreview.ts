@@ -2,7 +2,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, u
 import { listen, TauriEvent, type UnlistenFn } from "@tauri-apps/api/event";
 import { documentPreviewClient, DocumentPreviewError } from "../api/chat-document-preview-client";
 import type { Document as PreviewDocument, Invalidated, Loaded, Viewport } from "../domain/document-preview.generated";
-import { addPreviewTab, closePreviewTab, isSidebarFile, openPreviewFile, previewFailure, previewWidths, type PreviewFile, type PreviewTab, type PreviewTabs } from "../domain/conversation-file-preview";
+import { addPreviewTab, closePreviewTab, defaultPreviewLocation, isSidebarFile, openPreviewFile, previewFailure, previewWidths, type PreviewFile, type PreviewTab, type PreviewTabs } from "../domain/conversation-file-preview";
 import { useWorkspaceFullscreen } from "./useWorkspaceFullscreen";
 
 export function useConversationDocumentPreview(props: Readonly<{ contextId: string | null; scopeKey: string; enabled: boolean }>, emit: { (event: "expanded", value: boolean): void; (event: "restoreTrigger"): void }) {
@@ -14,6 +14,12 @@ const addButton = useTemplateRef<HTMLButtonElement>("addButton");
 const fullscreenButton = useTemplateRef<HTMLButtonElement>("fullscreenButton");
 const separator = useTemplateRef<HTMLElement>("separator");
 const opened = ref(false);
+// Local media uses the same isolated reader in a dialog, without creating or
+// selecting a document tab. Closing it resumes the previous document.
+const media = ref<PreviewTab | null>(null);
+const mediaViewport = useTemplateRef<HTMLElement>("mediaViewport");
+const activeViewport = computed(() => media.value ? mediaViewport.value : viewport.value);
+const presenting = computed(() => Boolean(media.value || opened.value));
 const { fullscreen, fullscreenTarget } = useWorkspaceFullscreen();
 const width = ref(0);
 const preferred = ref<number | null>(null);
@@ -21,7 +27,7 @@ const state = reactive<PreviewTabs>({ tabs: [], activeId: null });
 const active = computed(() => state.tabs.find(t => t.id === state.activeId) ?? null);
 const geometry = computed(() => previewWidths(width.value, preferred.value));
 const metadata = ref<PreviewDocument | null>(null);
-const phase = ref<"empty" | "loading" | "ready" | "error" | "paused">("empty");
+const phase = ref<"empty" | "loading" | "ready" | "error" | "paused" | "artifact">("empty");
 const error = ref<ReturnType<typeof previewFailure> | null>(null);
 const notice = ref("");
 const dragging = ref(false);
@@ -34,35 +40,53 @@ let disposed = false;
 let epoch = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let deadline: ReturnType<typeof setTimeout> | undefined;
-let frame = 0;
+let frame: number | null = null;
 let inFlight = false;
 let queued: { tab: PreviewTab; epoch: number; context: string } | null = null;
-let current: { id: string; context: string; tab: PreviewTab; loaded: boolean } | null = null;
+type NativeView = { id: string; context: string; tab: PreviewTab; loaded: boolean; bounds: Viewport; visible: boolean; resize?: Promise<void> };
+let current: NativeView | null = null;
 const closeTasks = new Set<Promise<void>>();
 const newId = () => crypto.randomUUID();
 const capacityText = "最多打开10个标签页，请先关闭一个";
 const insufficientSpaceText = "窗口空间不足，请扩大窗口后打开文件预览";
 
 function measuredViewport(): Viewport | null {
-  const r = viewport.value?.getBoundingClientRect();
+  const r = activeViewport.value?.getBoundingClientRect();
   return r && r.width >= 1 && r.height >= 1 ? { x: Math.max(0, r.x), y: Math.max(0, r.y), width: r.width, height: r.height, dpr: window.devicePixelRatio || 1 } : null;
 }
-function overlayVisible(includeTooltips = true): boolean {
-  const bounds = viewport.value?.getBoundingClientRect();
+function blockingOverlayVisible(): boolean {
+  const bounds = activeViewport.value?.getBoundingClientRect();
   if (!bounds) return false;
   return [...document.querySelectorAll<HTMLElement>('.n-modal-container,.n-dropdown-menu,.n-popover,[aria-modal="true"],dialog[open]')].some(e => {
-    if (!includeTooltips && (e.classList.contains("n-tooltip") || e.getAttribute("role") === "tooltip")) return false;
+    if (media.value && mediaViewport.value && e.contains(mediaViewport.value)) return false;
+    if (e.matches('.n-tooltip,[role="tooltip"]')) return false;
     const r = e.getBoundingClientRect();
     return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== "hidden"
       && r.left < bounds.right && r.right > bounds.left && r.top < bounds.bottom && r.bottom > bounds.top;
   });
 }
 function syncViewport() {
-  cancelAnimationFrame(frame);
+  if (disposed || frame !== null) return;
   frame = requestAnimationFrame(() => {
-    const view = current; const bounds = measuredViewport();
-    if (!view || !bounds || disposed) return;
-    void documentPreviewClient.run(view.context, { action: "resize", viewId: view.id, viewport: bounds, visible: opened.value && !dragging.value && !overlayVisible() && document.visibilityState !== "hidden" && phase.value === "ready" }).catch(() => {});
+    frame = null;
+    const view = current;
+    if (!view || disposed) return;
+    if (view.resize) {
+      void view.resize.then(syncViewport);
+      return;
+    }
+    const bounds = measuredViewport();
+    if (!bounds) return;
+    const visible = presenting.value && phase.value === "ready" && document.visibilityState !== "hidden" && !blockingOverlayVisible();
+    const last = view.bounds;
+    if (visible === view.visible && bounds.x === last.x && bounds.y === last.y &&
+        bounds.width === last.width && bounds.height === last.height && bounds.dpr === last.dpr) return;
+    // Apply frame and visibility changes in order. A late resize must not cover
+    // an open menu or blank a document that has already become visible again.
+    view.resize = documentPreviewClient.run(view.context, { action: "resize", viewId: view.id, viewport: bounds, visible })
+      .then(() => { view.bounds = bounds; view.visible = visible; })
+      .catch(() => { /* A later layout change retries while this view is live. */ })
+      .finally(() => { view.resize = undefined; });
   });
 }
 function detach(preserve: boolean): Promise<void> {
@@ -71,8 +95,8 @@ function detach(preserve: boolean): Promise<void> {
   clearTimeout(timer); clearTimeout(deadline);
   if (!view) return Promise.resolve();
   const task = (async () => {
-    const bounds = measuredViewport();
-    if (bounds) await documentPreviewClient.run(view.context, { action: "resize", viewId: view.id, viewport: bounds, visible: false }).catch(() => {});
+    await view.resize;
+    await documentPreviewClient.run(view.context, { action: "resize", viewId: view.id, viewport: view.bounds, visible: false }).catch(() => {});
     if (preserve && view.loaded) {
       try {
         const value = await documentPreviewClient.run(view.context, { action: "position", viewId: view.id });
@@ -84,7 +108,7 @@ function detach(preserve: boolean): Promise<void> {
   closeTasks.add(task); void task.finally(() => closeTasks.delete(task)); return task;
 }
 function loaded() {
-  if (!current?.loaded || !metadata.value || !opened.value || phase.value === "error") return;
+  if (!current?.loaded || !metadata.value || !presenting.value || phase.value === "error") return;
   clearTimeout(timer); phase.value = "ready"; syncViewport();
 }
 async function pump() {
@@ -94,11 +118,11 @@ async function pump() {
   const viewId = newId();
   try {
     await Promise.all([...closeTasks]); await nextTick();
-    if (job.epoch !== epoch || !opened.value || !job.tab.file) return;
+    if (job.epoch !== epoch || !presenting.value || !job.tab.file) return;
     const bounds = measuredViewport(); if (!bounds) throw new DocumentPreviewError("artifact_native_unavailable");
-    const view = { id: viewId, context: job.context, tab: job.tab, loaded: false }; current = view;
+    const view: NativeView = { id: viewId, context: job.context, tab: job.tab, loaded: false, bounds, visible: false }; current = view;
     const result = await documentPreviewClient.run(job.context, { action: "open", viewId, source: job.tab.file.source, viewport: bounds, location: job.tab.location, theme: document.documentElement.dataset.theme === "dark" ? "dark" : "light" });
-    if (job.epoch !== epoch || disposed || current !== view || !opened.value) {
+    if (job.epoch !== epoch || disposed || current !== view || !presenting.value) {
       await documentPreviewClient.run(job.context, { action: "close", viewId }).catch(() => {}); return;
     }
     if (!result.document) throw new DocumentPreviewError("artifact_native_unavailable");
@@ -120,9 +144,20 @@ function reload(preserve = true) {
   const generation = ++epoch; queued = null;
   const closed = detach(preserve);
   error.value = null;
-  const tab = active.value;
-  if (!opened.value || !props.enabled || !props.contextId || !tab?.file) { phase.value = "empty"; return; }
+  const tab = media.value ?? active.value;
+  if (!presenting.value || !props.enabled || !props.contextId || !tab?.file) { phase.value = "empty"; return; }
   if (tab.file.status === "expired" || (tab.file.expiresAt !== null && tab.file.expiresAt <= Date.now() / 1000)) { invalidate("artifact_native_expired"); return; }
+  if (tab.file.artifact?.kind === "report") {
+    // Structured reports use their existing scoped report reader.
+    // Mount only the active one, after releasing any previous document view.
+    phase.value = "loading";
+    void closed.then(() => {
+      if (generation !== epoch) return;
+      phase.value = "artifact";
+      if (tab.file?.expiresAt) deadline = setTimeout(() => invalidate("artifact_native_expired"), Math.max(0, tab.file.expiresAt * 1000 - Date.now()));
+    });
+    return;
+  }
   phase.value = "loading";
   queued = { tab, epoch: generation, context: props.contextId };
   timer = setTimeout(() => { if (generation === epoch) invalidate("preview_timeout"); }, 15000);
@@ -142,12 +177,27 @@ function ensureOpen(): boolean {
   notice.value = ""; opened.value = true; return true;
 }
 function openFile(file: PreviewFile) {
-  if (!isSidebarFile(file.mediaType, file.name) || !ensureOpen()) return;
-  const previous = active.value; const wasReady = phase.value === "ready" || phase.value === "loading";
+  if (!props.enabled) return;
+  if (!isSidebarFile(file.mediaType, file.name) || file.artifact?.kind === "image" || file.artifact?.kind === "video") {
+    if (file.source.kind === "messageFile") {
+      media.value = {id: newId(), file, location: defaultPreviewLocation()};
+      reload();
+    }
+    return;
+  }
+  if (!ensureOpen()) return;
+  const previous = active.value; const previousSource = previous?.file?.source; const wasReady = phase.value === "ready" || phase.value === "loading";
   const tab = openPreviewFile(state, file, newId);
   if (!tab) { notice.value = capacityText; return; }
-  if (tab !== previous || !wasReady || !current) reload();
+  const retargeted = previousSource?.kind === "messageFile" && file.source.kind === "messageFile" &&
+    (previousSource.turnId !== file.source.turnId || previousSource.itemId !== file.source.itemId || previousSource.reference !== file.source.reference);
+  if (tab !== previous || retargeted || (phase.value !== "artifact" && (!wasReady || !current))) reload();
   focusTab(tab.id);
+}
+function closeMedia() {
+  media.value = null;
+  measureLayout();
+  reload(false);
 }
 function collapse(restore = true) {
   fullscreen.value = false; opened.value = false; epoch++; queued = null; phase.value = "empty"; endDrag(false); void detach(true);
@@ -167,7 +217,7 @@ function toggleFullscreen() {
   });
 }
 function fullscreenKey(event: KeyboardEvent) {
-  if (fullscreen.value && event.key === "Escape" && !event.defaultPrevented && !overlayVisible(false)) {
+  if (fullscreen.value && event.key === "Escape" && !event.defaultPrevented && !blockingOverlayVisible()) {
     event.preventDefault(); toggleFullscreen();
   }
 }
@@ -195,9 +245,9 @@ function keyTab(event: KeyboardEvent, id: string) {
   if (target) { event.preventDefault(); focusTab(target); }
   if (event.key === "Delete") { event.preventDefault(); closeTab(id); }
 }
-function navigate(section: number, offset: number, zoom = active.value?.location.zoom ?? 1) {
+function navigate(section: number, offset: number) {
   if (!active.value) return;
-  active.value.location = { ...active.value.location, section, offset, zoom, scrollX: 0, scrollY: 0 };
+  active.value.location = { ...active.value.location, section, offset, scrollX: 0, scrollY: 0 };
   reload(false);
 }
 function resetWidth() { preferred.value = null; syncViewport(); }
@@ -230,7 +280,7 @@ function measureLayout(measured?: number, restoreOnCollapse = false) {
   const next = measured ?? fallback;
   if (next !== width.value && drag) endDrag(false);
   width.value = next;
-  if (!geometry.value.available && opened.value && !fullscreen.value) {
+  if (!geometry.value.available && opened.value && !fullscreen.value && !media.value) {
     const focusHidden = restoreOnCollapse || panel.value?.contains(document.activeElement) || separator.value === document.activeElement;
     collapse(Boolean(focusHidden)); notice.value = insufficientSpaceText;
   }
@@ -238,22 +288,22 @@ function measureLayout(measured?: number, restoreOnCollapse = false) {
 }
 function suspend() {
   cancelDrag(); epoch++; queued = null; void detach(true);
-  phase.value = active.value?.file ? "paused" : "empty";
+  phase.value = media.value || active.value?.file ? "paused" : "empty";
 }
 function visibility() {
   cancelDrag();
   if (document.visibilityState === "hidden") suspend();
-  else if (opened.value) reload();
+  else if (presenting.value && phase.value === "paused") reload();
 }
 watch(opened, value => emit("expanded", value), { immediate: true });
 watch(() => geometry.value.right, () => { void nextTick(syncViewport); });
 // Scope follows route + authenticated tenant/revision/capability. A short-lived
 // Native context can renew within that same scope; release its content at once,
 // then authorize/read again using the replacement context without losing tabs.
-watch(() => props.scopeKey, () => { collapse(false); state.tabs = []; state.activeId = null; preferred.value = null; notice.value = ""; });
+watch(() => props.scopeKey, () => { media.value = null; collapse(false); state.tabs = []; state.activeId = null; preferred.value = null; notice.value = ""; });
 watch(() => [props.contextId, props.enabled], () => {
   if (!props.contextId || !props.enabled) suspend();
-  else if (opened.value) reload();
+  else if (presenting.value) reload();
 });
 onMounted(async () => {
   resizeObserver = new ResizeObserver(entries => {
@@ -265,7 +315,7 @@ onMounted(async () => {
   mutationObserver = new MutationObserver(syncViewport); mutationObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["style", "class", "aria-modal", "hidden", "open"] });
   themeObserver = new MutationObserver(records => {
     if (records.some(record => record.attributeName === "data-ui-zoom-percent")) { cancelDrag(); measureLayout(); syncViewport(); }
-    if (records.some(record => record.attributeName === "data-theme") && opened.value) reload();
+    if (records.some(record => record.attributeName === "data-theme") && presenting.value) reload();
   });
   themeObserver.observe(document.documentElement, { attributes:true, attributeFilter:["data-theme", "data-ui-zoom-percent"] });
   document.addEventListener("visibilitychange", visibility);
@@ -276,13 +326,13 @@ onMounted(async () => {
       listen<Loaded>("chat-document-preview-loaded", ({ payload }) => { if (payload && current?.id === payload.viewId) { current.loaded = true; loaded(); } }),
       listen<Invalidated>("chat-document-preview-invalidated", ({ payload }) => { if (payload && current?.id === payload.viewId) invalidate(`artifact_native_${payload.reason}`); }),
       listen(TauriEvent.WINDOW_BLUR, suspend, { target: { kind: "Window", label: "main" } }),
-      listen(TauriEvent.WINDOW_FOCUS, () => { if (opened.value) reload(); }, { target: { kind: "Window", label: "main" } }),
+      listen(TauriEvent.WINDOW_FOCUS, () => { if (presenting.value && phase.value === "paused") reload(); }, { target: { kind: "Window", label: "main" } }),
     ]);
     const registered = callbacks.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
     if (disposed) registered.forEach(stop => stop()); else unlisteners = registered;
   } catch { /* Browser-only scaffolds cannot claim Native preview availability. */ }
 });
-watch(viewport, (value, previous) => { if (previous) resizeObserver?.unobserve(previous); if (value) resizeObserver?.observe(value); });
-onBeforeUnmount(() => { disposed = true; epoch++; queued = null; void detach(false); resizeObserver?.disconnect(); mutationObserver?.disconnect(); themeObserver?.disconnect(); unlisteners.forEach(stop => stop()); document.removeEventListener("visibilitychange", visibility); window.removeEventListener("blur", cancelDrag); window.removeEventListener("keydown", fullscreenKey); cancelAnimationFrame(frame); });
-return { root, panel, viewport, tabStrip, addButton, separator, opened, fullscreen, fullscreenTarget, state, active, geometry, metadata, phase, error, notice, dragging, capacityText, toggle, toggleFullscreen, openFile, collapse, createTab, selectTab, closeTab, keyTab, navigate, resetWidth, keyResize, startDrag, moveDrag, endDrag, reload };
+watch(activeViewport, (value, previous) => { if (previous) resizeObserver?.unobserve(previous); if (value) resizeObserver?.observe(value); });
+onBeforeUnmount(() => { disposed = true; epoch++; queued = null; void detach(false); resizeObserver?.disconnect(); mutationObserver?.disconnect(); themeObserver?.disconnect(); unlisteners.forEach(stop => stop()); document.removeEventListener("visibilitychange", visibility); window.removeEventListener("blur", cancelDrag); window.removeEventListener("keydown", fullscreenKey); if (frame !== null) cancelAnimationFrame(frame); });
+return { root, panel, viewport, media, mediaViewport, closeMedia, syncViewport, tabStrip, addButton, separator, opened, fullscreen, fullscreenTarget, state, active, geometry, metadata, phase, error, notice, dragging, capacityText, toggle, toggleFullscreen, openFile, collapse, createTab, selectTab, closeTab, keyTab, navigate, resetWidth, keyResize, startDrag, moveDrag, endDrag, reload };
 }

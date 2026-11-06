@@ -11,6 +11,7 @@ mod database;
 mod document_preview_content;
 pub(crate) mod document_preview_native;
 mod document_preview_pdf;
+mod message_file_preview;
 #[cfg(target_os = "macos")]
 pub(crate) use database::isolated_model_migration::{
     run as migrate_isolated_k3, run_daily as migrate_daily_k3,

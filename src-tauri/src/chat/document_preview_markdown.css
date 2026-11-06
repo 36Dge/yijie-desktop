@@ -1,0 +1,71 @@
+/* This stylesheet is embedded only in the isolated Markdown document. */
+body {
+  margin: 0;
+  padding: 16px;
+}
+.markdown-document {
+  --md-ink: #25282b;
+  --md-muted: #51565d;
+  --md-rule: #dfe2e5;
+  --md-surface: #f5f6f7;
+  --md-link: #8538c6;
+  max-width: 72ch;
+  margin-inline: auto;
+  color: var(--md-ink);
+  font: 14px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+[data-theme="dark"] .markdown-document {
+  --md-ink: #ecedf0;
+  --md-muted: #b5bbc4;
+  --md-rule: #444a52;
+  --md-surface: #272b30;
+  --md-link: #d2a5ff;
+}
+.markdown-document :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1.4em 0 .6em;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.markdown-document h1 { font-size: 24px; }
+.markdown-document h2 { font-size: 20px; }
+.markdown-document h3 { font-size: 17px; }
+.markdown-document :is(h4, h5, h6) { font-size: 15px; }
+.markdown-document :is(p, ul, ol, blockquote, pre, .md-table) { margin: 0 0 1em; }
+.markdown-document > :first-child { margin-top: 0; }
+.markdown-document > :last-child { margin-bottom: 0; }
+.markdown-document blockquote {
+  padding-inline-start: 12px;
+  border-inline-start: 3px solid var(--md-rule);
+  color: var(--md-muted);
+}
+.markdown-document blockquote > :last-child { margin-bottom: 0; }
+.markdown-document :is(ul, ol) { padding-inline-start: 1.65em; }
+.markdown-document li + li { margin-top: .25em; }
+.markdown-document li :is(ul, ol) { margin-block: .25em; }
+.markdown-document strong { font-weight: 650; }
+.md-reference { color: var(--md-link); text-decoration: underline; text-underline-offset: .12em; }
+.markdown-document code {
+  padding: .1em .3em;
+  border-radius: 4px;
+  background: var(--md-surface);
+  font: .93em "SF Mono", Menlo, Consolas, monospace;
+}
+.markdown-document pre {
+  overflow-x: auto;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--md-surface);
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.markdown-document pre code { padding: 0; background: transparent; }
+.markdown-document hr { margin-block: 1.5em; border: 0; border-top: 1px solid var(--md-rule); }
+.md-table { overflow-x: auto; }
+.md-table table { width: 100%; margin: 0; }
+.md-table :is(th, td) {
+  min-width: 4em;
+  padding: 6px 8px;
+  border: 1px solid var(--md-rule);
+  text-align: start;
+}
+.md-table th { position: static; background: var(--md-surface); font-weight: 600; }

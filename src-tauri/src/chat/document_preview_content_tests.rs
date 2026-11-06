@@ -189,3 +189,40 @@ fn html_keeps_rendering_script_source_and_text_reuses_existing_projection() {
     assert!(p.html.contains("normal &amp; readable"));
     assert!(!p.partial);
 }
+
+#[test]
+fn markdown_sidebar_renders_document_structure_and_read_only_reference_labels() {
+    let source = "# 旅行指南\n\n> 湖光山色\n\n## 城市概览\n\n**旅行关键词：** 西湖与[路线](https://example.org/guide)。\n\n| 季节 | 景点 |\n| --- | --- |\n| 春季 | 苏堤 |\n\n1. 茶园\n2. 老街\n\n- [ ] 带伞\n\n```txt\n# 原样保留\n```\n\n示例标记 <abbr>KM</abbr>。";
+    let view = render("text/markdown", source.as_bytes(), 0, 0, false, 1.0).unwrap();
+    assert_eq!(view.kind, "text");
+    assert!(!view.partial);
+    let html = &view.html;
+    for markup in [
+        "<h1>旅行指南</h1>",
+        "<blockquote>",
+        "<h2>城市概览</h2>",
+        "<strong>旅行关键词：</strong>",
+        "<span class=\"md-reference\">路线</span>",
+        "<th>季节</th>",
+        "<td>苏堤</td>",
+        "<ol>",
+        "<li>老街</li>",
+        "type=\"checkbox\"",
+        "<code class=\"language-txt\"># 原样保留",
+        "&lt;abbr&gt;KM&lt;/abbr&gt;",
+    ] {
+        assert!(html.contains(markup), "missing {markup}");
+    }
+    assert!(!html.contains("https://example.org/guide"));
+    let plain = render("text/plain", source.as_bytes(), 0, 0, false, 1.0).unwrap();
+    assert!(plain.html.contains("<pre># 旅行指南"));
+}
+
+#[test]
+fn markdown_sidebar_keeps_the_partial_notice_for_a_bounded_text_projection() {
+    let source = "# 阅读清单\n\n".to_owned() + &"- 待办\n".repeat(2_001);
+    let view = render("text/markdown", source.as_bytes(), 0, 0, true, 1.0).unwrap();
+    assert!(view.partial);
+    assert!(view.html.contains("<h1>阅读清单</h1>"));
+    assert!(view.html.contains("<li>待办</li>"));
+}

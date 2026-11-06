@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import YjTooltip from "../../components/yijie/YjTooltip.vue";
+import { documentPreviewClient } from "../../api/chat-document-preview-client";
+import { messageFileWorkspaceKey, messageFileLocationKey, messageFileActionKey } from "../../composables/useChatMessageLink";
 import { provideWebSourceActions } from "../../composables/useWebSources";
 import { useChatTurnTimingDetails } from "../../composables/useChatTurnTiming";
 import { useChatTurnModels } from "../../composables/useChatTurnModels";
 import { isCompletedAnswer, nativeCompletedAt } from "../../domain/chat-answer-actions";
 import ChatAnswerActions from "../../components/chat/ChatAnswerActions.vue";
-import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
+import { computed, inject, provide, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { NCard, NModal } from "naive-ui";
@@ -138,9 +140,36 @@ const previewExpanded = ref(false);
 function restorePreviewTrigger() { void nextTick(() => previewTrigger.value?.focus({ preventScroll: true })); }
 const previewEnabled = computed(() => kimiK31Candidate && !isDraftMode.value && normalPurposeReady.value && chatStore.hasAction("read_sessions"));
 const previewScope = computed(() => `${route.fullPath}:${permissionScope.selectedTenantId ?? ""}:${permissionScope.authorizationRevision ?? ""}:${permissionScope.isReady}:${permissionScope.hasCapability("task.read")}`);
+provide(messageFileActionKey, computed(() => previewEnabled.value ? (target, file) => {
+  if (!previewEnabled.value || !chatStore.context || target.sessionId !== chatStore.selectedSessionId) return;
+  previewWorkspace.value?.openFile({ source: { kind: "messageFile", ...target, reference: file.path },
+    name: file.name, mediaType: "", status: "ready", expiresAt: null });
+} : undefined));
+const locatedWorkspace = shallowRef<{context: string; session: string; path: string} | null>(null);
+const fileWorkspace = computed(() => {
+  const value = locatedWorkspace.value;
+  return value && value.context === chatStore.context?.contextId && value.session === chatStore.selectedSessionId && previewEnabled.value ? value.path : null;
+});
+provide(messageFileWorkspaceKey, fileWorkspace);
+provide(messageFileLocationKey, computed(() => {
+  const context = chatStore.context?.contextId;
+  const session = chatStore.selectedSessionId;
+  if (!context || !session || !previewEnabled.value) return undefined;
+  return async (target, file) => {
+    if (target.sessionId !== session) throw new Error("file_location_unavailable");
+    if (fileWorkspace.value && !file.path.startsWith("/")) return fileWorkspace.value + "/" + file.path;
+    const result = await documentPreviewClient.run(context, { action: "locate", viewId: crypto.randomUUID(),
+      source: { kind: "messageFile", ...target, reference: file.path } });
+    if (!result.path || chatStore.context?.contextId !== context || chatStore.selectedSessionId !== session) throw new Error("file_location_unavailable");
+    if (!file.path.startsWith("/") && result.path.endsWith("/" + file.path)) {
+      locatedWorkspace.value = { context, session, path: result.path.slice(0, -file.path.length - 1) };
+    }
+    return result.path;
+  };
+}));
 function openArtifactFile(artifact: ArtifactProjection) {
-  if (!previewEnabled.value) return;
-  previewWorkspace.value?.openFile({ source: { kind: "artifact", sessionId: artifact.sessionId, turnId: artifact.turnId, artifactId: artifact.artifactId }, name: artifact.displayName ?? "未命名文件", mediaType: artifact.mediaType ?? "", status: artifact.status, expiresAt: artifact.expiresAt });
+  if (!previewEnabled.value || artifact.sessionId !== chatStore.selectedSessionId || ["image", "video"].includes(artifact.kind)) return;
+  previewWorkspace.value?.openFile({ artifact, source: { kind: "artifact", sessionId: artifact.sessionId, turnId: artifact.turnId, artifactId: artifact.artifactId }, name: artifact.displayName ?? "未命名文件", mediaType: artifact.mediaType ?? "", status: artifact.status, expiresAt: artifact.expiresAt });
 }
 function attachmentPreview(block: ConversationTimelineAttachmentReferenceContentBlock): (() => void) | undefined {
   if (!previewEnabled.value || !chatStore.selectedSessionId || !isSidebarFile(block.mediaType, block.name)) return;

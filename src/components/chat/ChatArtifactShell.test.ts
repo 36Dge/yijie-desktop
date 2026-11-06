@@ -71,12 +71,22 @@ describe("ChatArtifactShell", () => {
     const value = artifact(0, {kind:"file",status:"ready",mediaType:"application/pdf",displayName:"normal.pdf"});
     const wrapper = mount(ChatArtifactList, {props:{artifacts:[value],contextId:CONTEXT_ID,openFile,fileNativeClient:FILE_NATIVE_CLIENT}});
     try {
-      await wrapper.get(".artifact-shell__open").trigger("click");
+      await wrapper.get('[role="link"]').trigger("click");
+      await wrapper.get('[aria-label="产物详情与操作"]').trigger("click");
       await wrapper.get(".artifact-file__actions button").trigger("click");
       expect(openFile).toHaveBeenNthCalledWith(1,value);expect(openFile).toHaveBeenNthCalledWith(2,value);
-      expect(wrapper.text()).not.toContain("当前格式不支持应用内预览");
-      await wrapper.setProps({artifacts:[artifact(0,{kind:"file",status:"ready",mediaType:"image/svg+xml",displayName:"normal.svg"})]});
-      expect(wrapper.find(".artifact-shell__open").exists()).toBe(false);
+      for (const [kind, mime, name] of [
+        ["image", "image/svg+xml", "图.svg"], ["video", "video/mp4", "演示.mp4"],
+        ["report", "application/vnd.yijie.report+json;version=1", "分析.json"],
+      ] as const) {
+        const output = artifact(0, {kind, status:"ready", mediaType:mime, displayName:name});
+        await wrapper.setProps({artifacts:[output]});
+        const link = wrapper.get('[role="link"]');
+        expect(link.text()).toBe(`《${name}》`);
+        await link.trigger("click");
+        if (kind === "report") expect(openFile).toHaveBeenLastCalledWith(output);
+        else expect(openFile).toHaveBeenCalledTimes(2);
+      }
     } finally {wrapper.unmount();}
   });
   it("renders safe metadata, all generic states, four kinds, and synthetic provenance", () => {

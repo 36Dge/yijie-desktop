@@ -1,12 +1,14 @@
 <script setup lang="ts">
+import ChatArtifactReport from "./ChatArtifactReport.vue";
+import { chatArtifactReportNativeClient } from "../../api/chat-artifact-report-native-client";
 import YjTooltip from "../yijie/YjTooltip.vue";
-import { NTooltip } from "naive-ui";
+import { NModal, NTooltip } from "naive-ui";
 import YjIcon from "../yijie/YjIcon.vue";
 import { MAX_PREVIEW_TABS } from "../../domain/conversation-file-preview";
 import { useConversationDocumentPreview } from "../../composables/useConversationDocumentPreview";
 const props = defineProps<{ contextId: string | null; scopeKey: string; enabled: boolean }>();
 const emit = defineEmits<{ expanded: [value: boolean]; restoreTrigger: [] }>();
-const { opened, fullscreen, fullscreenTarget, state, active, geometry, metadata, phase, error, notice, dragging, capacityText, toggle, toggleFullscreen, openFile, collapse, createTab, selectTab, closeTab, keyTab, navigate, resetWidth, keyResize, startDrag, moveDrag, endDrag, reload } = useConversationDocumentPreview(props, emit);
+const { opened, media, closeMedia, syncViewport, fullscreen, fullscreenTarget, state, active, geometry, metadata, phase, error, notice, dragging, capacityText, toggle, toggleFullscreen, openFile, collapse, createTab, selectTab, closeTab, keyTab, navigate, resetWidth, keyResize, startDrag, moveDrag, endDrag, reload } = useConversationDocumentPreview(props, emit);
 defineExpose({ toggle, openFile, opened });
 </script>
 
@@ -19,39 +21,42 @@ defineExpose({ toggle, openFile, opened });
       <div class="document-sidebar__tabs" data-tauri-drag-region>
         <div ref="tabStrip" class="document-sidebar__tablist" :style="{ '--preview-tab-count': state.tabs.length }" role="tablist" aria-label="预览标签页">
           <div v-for="tab in state.tabs" :key="tab.id" class="document-sidebar__tab-wrap" :data-preview-tab="tab.id" :class="{ 'is-active': tab.id === state.activeId }">
-            <YjTooltip :text="tab.file ? `${tab.file.name} · ${tab.file.source.kind === 'artifact' ? '生成产物' : '已发送附件'}` : '新标签页'"><button :id="`preview-tab-${tab.id}`" type="button" role="tab" :data-tab-id="tab.id" :aria-selected="tab.id === state.activeId" aria-controls="conversation-file-preview" :tabindex="tab.id === state.activeId ? 0 : -1"  @click="selectTab(tab.id)" @keydown="keyTab($event, tab.id)"><YjIcon name="file" size="sm" :stroke-width="1.5" /><span>{{ tab.file?.name ?? '新标签页' }}</span></button></YjTooltip>
-            <NTooltip arrow-point-to-center placement="top" >
+            <YjTooltip placement="left" :text="tab.file ? `${tab.file.name} · ${tab.file.source.kind === 'attachment' ? '已发送附件' : '生成产物'}` : '新标签页'"><button :id="`preview-tab-${tab.id}`" type="button" role="tab" :data-tab-id="tab.id" :aria-selected="tab.id === state.activeId" aria-controls="conversation-file-preview" :tabindex="tab.id === state.activeId ? 0 : -1"  @click="selectTab(tab.id)" @keydown="keyTab($event, tab.id)"><YjIcon name="file" size="sm" :stroke-width="1.5" /><span>{{ tab.file?.name ?? '新标签页' }}</span></button></YjTooltip>
+            <NTooltip arrow-point-to-center placement="left">
               <template #trigger><button class="document-sidebar__tab-close" type="button" :aria-label="`关闭 ${tab.file?.name ?? '新标签页'}`" @click="closeTab(tab.id)"><YjIcon name="dismiss" size="xs" :stroke-width="1.5" /></button></template>
               关闭
             </NTooltip>
           </div>
         </div>
-        <NTooltip arrow-point-to-center placement="top" >
+        <NTooltip arrow-point-to-center placement="left">
             <template #trigger><span class="document-sidebar__control"><button ref="addButton" type="button" class="yj-control yj-control--icon" aria-label="新标签页" :disabled="state.tabs.length >= MAX_PREVIEW_TABS" @click="createTab"><YjIcon name="plus" size="sm" :stroke-width="1.5" /></button></span></template>
             {{ state.tabs.length >= MAX_PREVIEW_TABS ? capacityText : '新标签页' }}
         </NTooltip>
         <div class="document-sidebar__controls" role="group" aria-label="右侧面板操作">
-          <NTooltip arrow-point-to-center placement="top" >
+          <NTooltip arrow-point-to-center placement="left">
             <template #trigger><button ref="fullscreenButton" type="button" class="yj-control yj-control--icon" :aria-label="fullscreen ? '退出全屏' : '进入全屏'" :aria-pressed="fullscreen" @click="toggleFullscreen"><YjIcon :name="fullscreen ? 'exitFullscreen' : 'enterFullscreen'" size="sm" :stroke-width="1.5" /></button></template>
             {{ fullscreen ? '退出全屏' : '进入全屏' }}
           </NTooltip>
-          <NTooltip arrow-point-to-center placement="top" >
+          <NTooltip arrow-point-to-center placement="left">
             <template #trigger><button type="button" class="yj-control yj-control--icon" aria-label="收起右侧面板" @click="collapse()"><YjIcon name="previewSidebar" size="sm" :stroke-width="1.5" /></button></template>
             收起右侧面板
           </NTooltip>
         </div>
       </div>
-      <div v-if="active?.file" class="document-sidebar__heading"><YjTooltip :text="active.file.name"><span >{{ active.file.name }}</span></YjTooltip><small>只读预览</small></div>
-      <div v-if="metadata && phase === 'ready'" class="document-sidebar__reading" aria-label="阅读选项">
-        <select v-if="metadata.sections.length" :value="metadata.section" :aria-label="metadata.kind === 'xlsx' ? '工作表' : '页码'" @change="navigate(Number(($event.target as HTMLSelectElement).value), 0)"><option v-for="section in metadata.sections" :key="section.id" :value="section.id">{{ section.label }}</option></select>
+      <div v-if="!media && phase === 'ready' && metadata && (metadata.sections.length > 1 || metadata.previousOffset !== null || metadata.nextOffset !== null)"
+        class="document-sidebar__reading" aria-label="阅读选项">
+        <select v-if="metadata.sections.length > 1" :value="metadata.section" :aria-label="metadata.kind === 'xlsx' ? '工作表' : '页码'" @change="navigate(Number(($event.target as HTMLSelectElement).value), 0)"><option v-for="section in metadata.sections" :key="section.id" :value="section.id">{{ section.label }}</option></select>
         <button v-if="metadata.previousOffset !== null" type="button" @click="navigate(metadata!.section, metadata!.previousOffset!)">上一段</button>
         <button v-if="metadata.nextOffset !== null" type="button" @click="navigate(metadata!.section, metadata!.nextOffset!)">下一段</button>
-        <select :value="active?.location.zoom ?? 1" aria-label="阅读缩放" @change="navigate(metadata!.section, metadata!.offset, Number(($event.target as HTMLSelectElement).value))"><option :value="0.75">75%</option><option :value="1">适合宽度</option><option :value="1.5">150%</option><option :value="2">200%</option></select>
       </div>
-      <p v-if="metadata?.notice" class="document-sidebar__notice" role="status">{{ metadata.notice }}</p>
+      <p v-if="!media && metadata?.notice" class="document-sidebar__notice" role="status">{{ metadata.notice }}</p>
       <p v-if="notice && fullscreen" class="document-sidebar__notice" role="status">{{ notice }}</p>
       <div id="conversation-file-preview" ref="viewport" class="document-sidebar__viewport" role="tabpanel" :aria-labelledby="active ? `preview-tab-${active.id}` : undefined" :aria-label="active ? undefined : '空白文件预览'" :aria-busy="phase === 'loading'" tabindex="0">
-        <div v-if="phase === 'empty'" class="document-sidebar__empty"><YjIcon name="file" size="xl" /><strong>当前没有文件展示</strong><p>请尝试在对话流中完成任务，生成一个产物；点击对话中的文件，即可在此预览。</p></div>
+        <div v-if="media" class="document-sidebar__empty">关闭媒体预览后继续阅读</div>
+        <div v-else-if="phase === 'artifact' && active?.file?.artifact && contextId" :key="active.id + contextId" class="document-sidebar__artifact">
+          <ChatArtifactReport :artifact="active.file.artifact" :context-id="contextId" :client="chatArtifactReportNativeClient" preview-only />
+        </div>
+        <div v-else-if="phase === 'empty'" class="document-sidebar__empty"><YjIcon name="file" size="xl" /><strong>当前没有文件展示</strong><p>请尝试在对话流中完成任务，生成一个产物；点击对话中的文件，即可在此预览。</p></div>
         <div v-else-if="phase === 'loading'" class="document-sidebar__empty" role="status"><YjIcon name="loading" size="lg" /><p>正在加载预览…</p></div>
         <div v-else-if="phase === 'paused'" class="document-sidebar__empty" role="status"><p>预览已暂停，恢复后继续</p></div>
         <div v-else-if="phase === 'error'" class="document-sidebar__empty" role="status"><YjIcon name="file" size="xl" /><p>{{ error?.text }}</p><button v-if="error?.retryable" type="button" class="yj-control yj-control--regular" @click="reload(false)">重新加载</button></div>
@@ -59,6 +64,15 @@ defineExpose({ toggle, openFile, opened });
       </div>
     </aside>
     </Teleport>
+    <NModal :show="Boolean(media)" preset="card" class="document-media-dialog" role="dialog" aria-modal="true"
+      :title="media?.file?.name" :aria-label="media?.file?.name" :mask-closable="true"
+      @update:show="show => { if (!show) closeMedia(); }" @after-enter="syncViewport">
+      <div id="conversation-media-preview" ref="mediaViewport" class="document-media-dialog__viewport" :aria-busy="phase === 'loading'">
+        <p v-if="phase === 'loading'" role="status">正在加载预览…</p>
+        <p v-else-if="phase === 'paused'" role="status">预览已暂停，恢复后继续</p>
+        <template v-else-if="phase === 'error'"><p role="status">{{ error?.text }}</p><button v-if="error?.retryable" type="button" class="yj-control" @click="reload(false)">重新加载</button></template>
+      </div>
+    </NModal>
     <div v-if="notice && !fullscreen" class="document-workspace__notice" role="status">{{ notice }}</div>
   </div>
 </template>
@@ -69,7 +83,8 @@ defineExpose({ toggle, openFile, opened });
 .document-workspace__chat { min-width:0; min-height:0; height:100%; container-type:inline-size; }
 .document-workspace__separator { position:relative; z-index:var(--yj-z-preview-separator); background:var(--yj-color-border-default); cursor:col-resize; touch-action:none; outline:none; }
 .document-workspace__separator::before { content:""; position:absolute; inset:0; background:linear-gradient(to bottom, transparent, var(--yj-color-preview-divider-active) 45%, var(--yj-color-preview-divider-active) 55%, transparent); opacity:0; pointer-events:none; transition:opacity var(--yj-motion-fast); }
-.document-workspace__separator::after { content:""; position:absolute; top:0; bottom:0; left:50%; width:var(--yj-space-2); transform:translateX(-50%); }
+/* Keep the grab area in the chat WebView, up to the edge of the native reader. */
+.document-workspace__separator::after { content:""; position:absolute; inset-block:0; inset-inline-end:0; width:var(--yj-space-2); }
 .document-workspace__separator:hover::before,.document-workspace--dragging .document-workspace__separator::before { opacity:1; }
 .document-workspace:not(.document-workspace--dragging) .document-workspace__separator:focus-visible:not(:hover)::before { opacity:1; background:var(--yj-color-focus-ring); width:var(--yj-focus-ring-width); left:50%; transform:translateX(-50%); }
 .document-workspace--dragging { cursor:col-resize; user-select:none; }
@@ -96,12 +111,12 @@ defineExpose({ toggle, openFile, opened });
 .document-sidebar__tab-close:hover { color:var(--yj-color-text-primary); background:var(--yj-color-control-pressed); }
 .document-sidebar__tabs .yj-control :deep(.yj-icon),.document-sidebar__tab-wrap button :deep(.yj-icon) { color:inherit; }
 .document-sidebar button:focus-visible,.document-sidebar select:focus-visible { outline:var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset:calc(var(--yj-space-1) * -1); }
-.document-sidebar__heading { display:flex; align-items:center; gap:var(--yj-space-3); min-height:var(--yj-layout-preview-heading-height); padding-inline:var(--yj-space-4); border-bottom:var(--yj-border-width) solid var(--yj-color-border-subtle); }
-.document-sidebar__heading > span { flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--yj-color-text-primary); }
-.document-sidebar__heading small { flex:none; color:var(--yj-color-text-secondary); }
 .document-sidebar__reading { display:flex; align-items:center; flex-wrap:wrap; gap:var(--yj-space-2); padding:var(--yj-space-2) var(--yj-space-4); }
 .document-sidebar__reading select,.document-sidebar__reading button { max-width:100%; padding:var(--yj-space-1) var(--yj-space-2); border:var(--yj-border-width) solid var(--yj-color-border-default); border-radius:var(--yj-radius-md); background:var(--yj-color-bg-page); color:var(--yj-color-text-primary); font:inherit; }
 .document-sidebar__viewport { flex:1; position:relative; min-height:0; min-width:0; overflow:hidden; }
+.document-media-dialog { width:min(90vw, 960px); }
+.document-media-dialog__viewport { height: min(65vh, 640px); display:grid; align-content:center; justify-items:center; color: var(--yj-color-text-secondary); }
+.document-sidebar__artifact { height:100%; overflow:auto; padding:var(--yj-space-4); }
 .document-sidebar__empty { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:var(--yj-space-3); height:100%; padding:var(--yj-space-8); text-align:center; color:var(--yj-color-text-secondary); }
 .document-sidebar__empty strong { color:var(--yj-color-text-primary); font-weight:var(--yj-font-weight-semibold); }
 .document-sidebar__empty p { max-width:var(--yj-layout-preview-empty-max); margin:0; }

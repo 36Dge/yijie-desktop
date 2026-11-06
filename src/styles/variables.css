@@ -32,6 +32,7 @@
   --yj-color-chat-generation-notice: color-mix(in srgb, var(--yj-color-text-tertiary) 70%, var(--yj-color-bg-page));
   --yj-color-chat-timing: #858585;
   --yj-color-chat-link: #4b651d;
+  --yj-color-chat-file-link: #8538c6;
   --yj-color-text-disabled: #a5abb2;
   --yj-color-text-on-accent: var(--yj-color-on-brand);
   --yj-color-text-selection-bg: #c3f35b;
@@ -241,7 +242,6 @@
   --yj-layout-preview-tabs-height: var(--yj-layout-chat-toolbar-height);
   --yj-color-preview-divider-active: color-mix(in srgb, var(--yj-color-brand-primary) 80%, var(--yj-color-text-primary));
   --yj-color-preview-tab-active: var(--yj-color-chat-user-bg);
-  --yj-layout-preview-heading-height: 48px;
   --yj-layout-preview-tab-max: 240px;
   --yj-layout-preview-tab-min: 120px;
   --yj-layout-preview-empty-max: 320px;
@@ -339,6 +339,7 @@
   --yj-color-text-tertiary: #969ea8;
   --yj-color-chat-timing: var(--yj-color-text-tertiary);
   --yj-color-chat-link: var(--yj-color-brand-primary);
+  --yj-color-chat-file-link: #d2a5ff;
   --yj-color-text-disabled: #69717b;
   --yj-color-text-on-accent: var(--yj-color-on-brand);
   --yj-color-text-on-danger: #ffffff;

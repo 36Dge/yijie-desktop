@@ -6,7 +6,7 @@ import { createPinia, disposePinia } from "pinia";
 import { createMemoryHistory, createRouter } from "vue-router";
 import YjAppShell from "../yijie/YjAppShell.vue";
 import ChatDocumentWorkspace from "./ChatDocumentWorkspace.vue";
-import type { PreviewFile } from "../../domain/conversation-file-preview";
+import { MIN_PREVIEW_WIDTH, MIN_PREVIEW_WORKSPACE, type PreviewFile } from "../../domain/conversation-file-preview";
 const native = vi.hoisted(() => ({ run: vi.fn(), events: new Map<string, (event: { payload: unknown }) => void>() }));
 vi.mock("../../api/chat-document-preview-client", async original => ({ ...await original<object>(), documentPreviewClient: { run: native.run } }));
 vi.mock("@tauri-apps/api/event", () => ({ TauriEvent:{WINDOW_FOCUS:"tauri://focus",WINDOW_BLUR:"tauri://blur"}, listen: vi.fn(async (name, callback) => { native.events.set(name,callback); return () => native.events.delete(name); }) }));
@@ -36,10 +36,10 @@ it("converts pointer movement at 120% zoom while keeping Native viewport coordin
   const w=create(); try {
     w.vm.toggle(); await flushPromises();
     const divider=w.get('[role="separator"]');
-    expect(divider.attributes('aria-valuenow')).toBe('320');
+    expect(divider.attributes('aria-valuenow')).toBe(String(MIN_PREVIEW_WIDTH));
     await divider.trigger('pointerdown',{button:0,pointerId:1,clientX:1000});
     await divider.trigger('pointermove',{pointerId:1,clientX:952});
-    expect(divider.attributes('aria-valuenow')).toBe('360');
+    expect(divider.attributes('aria-valuenow')).toBe(String(MIN_PREVIEW_WIDTH + 40));
     await divider.trigger('pointerup',{pointerId:1});
     w.vm.openFile(file('zoom')); await flushPromises();
     expect(native.run.mock.calls.find(call=>call[1].action==='open')![1].viewport).toMatchObject({x:20,y:40,width:1440,height:600});
@@ -55,15 +55,15 @@ it("preserves tabs and the mounted conversation when navigation or zoom reduces 
     const conversation=w.get('.document-workspace__chat').element;
     w.vm.toggle(); await flushPromises(); await w.get('[aria-label="新标签页"]').trigger('click');
     await w.get('[role="separator"]').trigger('keydown',{key:'Home'});
-    // Rounding clientWidth to 721 must not admit an actually narrower layout.
-    width=720.67; resize([{target:w.element,contentRect:{width}} as ResizeObserverEntry],{} as ResizeObserver); await flushPromises();
+    // clientWidth rounds up to the threshold, but the actual columns do not fit.
+    width=MIN_PREVIEW_WORKSPACE - 0.33; resize([{target:w.element,contentRect:{width}} as ResizeObserverEntry],{} as ResizeObserver); await flushPromises();
     expect(w.find('aside').exists()).toBe(false);
     width=1012; resize([{target:w.element,contentRect:{width}} as ResizeObserverEntry],{} as ResizeObserver); await flushPromises();
     expect(w.find('aside').exists()).toBe(false);
     expect(w.text()).not.toContain('窗口空间不足');
     w.vm.toggle(); await flushPromises();
     expect(w.findAll('[role="tab"]')).toHaveLength(2);
-    expect(w.get('[role="separator"]').attributes('aria-valuenow')).toBe('320');
+    expect(w.get('[role="separator"]').attributes('aria-valuenow')).toBe(String(MIN_PREVIEW_WIDTH));
     expect(w.get('.document-workspace__chat').element).toBe(conversation);
   } finally { w.unmount(); }
 });
@@ -146,7 +146,7 @@ it("keeps the same scope's tabs through expiring Native context and reauthorizes
   } finally {w.unmount();}
 });
 
-it("hides the Native child for the existing image dialog and restores it after close", async () => {
+it("hides the Native child for an overlapping modal and restores it after close", async () => {
   const w=create(); const overlay=globalThis.document.createElement("section");
   overlay.setAttribute("role","dialog"); overlay.setAttribute("aria-modal","true");
   const settle=()=>new Promise(resolve=>setTimeout(resolve,35));
@@ -195,7 +195,7 @@ it("expands the same panel over the app, restores its width and draft, and relea
     const panel=preview.get('aside').element;
     const draft=preview.get('textarea').element;
     await preview.get('[role="separator"]').trigger('keydown',{key:'ArrowLeft'});
-    expect(preview.get('[role="separator"]').attributes('aria-valuenow')).toBe('336');
+    expect(preview.get('[role="separator"]').attributes('aria-valuenow')).toBe(String(MIN_PREVIEW_WIDTH + 16));
     await preview.get('[aria-label="进入全屏"]').trigger('click');await flushPromises();
     expect(w.get('.yj-app-shell__fullscreen aside').element).toBe(panel);
     expect(w.get('main').attributes('inert')).toBeDefined();
@@ -207,7 +207,7 @@ it("expands the same panel over the app, restores its width and draft, and relea
     expect(preview.get('aside').element).toBe(panel);
     expect(w.find('.yj-app-shell__fullscreen aside').exists()).toBe(false);
     expect(w.get('main').attributes('inert')).toBeUndefined();
-    expect(preview.get('[role="separator"]').attributes('aria-valuenow')).toBe('336');
+    expect(preview.get('[role="separator"]').attributes('aria-valuenow')).toBe(String(MIN_PREVIEW_WIDTH + 16));
     expect(globalThis.document.activeElement).toBe(preview.get('[aria-label="进入全屏"]').element);
     await preview.get('[aria-label="进入全屏"]').trigger('click');await flushPromises();
     scope.value='next-session';await flushPromises();
@@ -222,7 +222,8 @@ it("resizes the existing Native view for fullscreen without reopening its file",
   vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(function(this:HTMLElement){
     const isViewport=this.classList.contains('document-sidebar__viewport');
     const wide=!isViewport||Boolean(this.closest('.document-sidebar--fullscreen'));
-    const x=wide?0:708,width=wide?1028:320;
+    const width = wide ? 1028 : MIN_PREVIEW_WIDTH;
+    const x = 1028 - width;
     return {x,y:0,width,height:600,top:0,left:x,right:x+width,bottom:600,toJSON:()=>({})};
   });
   const w=create();try {
@@ -231,7 +232,7 @@ it("resizes the existing Native view for fullscreen without reopening its file",
     native.events.get('chat-document-preview-loaded')!({payload:{viewId:open.viewId}});await flushPromises();
     const viewport=w.get('[role="tabpanel"]').element;
     const latestResize=()=>native.run.mock.calls.filter(c=>c[1].action==='resize').slice(-1)[0]?.[1];
-    expect(open.viewport.width).toBe(320);
+    expect(open.viewport.width).toBe(MIN_PREVIEW_WIDTH);
     await w.get('[aria-label="进入全屏"]').trigger('click');await flushPromises();
     expect(w.get('aside').classes()).toContain('document-sidebar--fullscreen');
     expect(w.get('[role="tabpanel"]').element).toBe(viewport);
@@ -239,7 +240,7 @@ it("resizes the existing Native view for fullscreen without reopening its file",
     await vi.waitFor(()=>expect(latestResize()).toMatchObject({viewId:open.viewId,visible:true,viewport:{x:0,width:1028}}));
     await w.get('[aria-label="退出全屏"]').trigger('click');await flushPromises();
     expect(w.get('[role="tabpanel"]').element).toBe(viewport);
-    await vi.waitFor(()=>expect(latestResize()).toMatchObject({viewId:open.viewId,visible:true,viewport:{x:708,width:320}}));
+    await vi.waitFor(()=>expect(latestResize()).toMatchObject({viewId:open.viewId,visible:true,viewport:{x:1028 - MIN_PREVIEW_WIDTH,width:MIN_PREVIEW_WIDTH}}));
     expect(native.run.mock.calls.filter(c=>c[1].action==='open')).toHaveLength(1);
     expect(native.run.mock.calls.some(c=>c[1].action==='close')).toBe(false);
   } finally {w.unmount();}
@@ -262,17 +263,134 @@ it("keeps a fullscreen panel open in a narrow window and collapses safely when e
   }finally{w.unmount();}
 });
 
-it("keeps Native content visible for a toolbar tooltip outside its viewport", async () => {
-  const rect=(y:number,height:number)=>({x:0,y,width:1028,height,top:y,left:0,right:1028,bottom:y+height,toJSON:()=>({})});
-  vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(function(this:HTMLElement){return this.getAttribute('role')==='tooltip'?rect(8,24):rect(96,504);});
-  const w=create();const tooltip=globalThis.document.createElement('div');
-  tooltip.className='n-popover';tooltip.setAttribute('role','tooltip');tooltip.textContent='新标签页';
-  const settle=()=>new Promise(resolve=>setTimeout(resolve,35));
-  try{
-    w.vm.openFile(file('visible'));await flushPromises();
-    const open=native.run.mock.calls.find(c=>c[1].action==='open')![1];
-    native.events.get('chat-document-preview-loaded')!({payload:{viewId:open.viewId}});await flushPromises();await settle();
-    globalThis.document.body.append(tooltip);await settle();
-    expect(native.run.mock.calls.filter(c=>c[1].action==='resize').slice(-1)[0]![1].visible).toBe(true);
-  }finally{tooltip.remove();w.unmount();}
+it("keeps the loaded document visible and in position through splitter hover, drag and release", async () => {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    const separator = this.closest(".document-workspace")?.querySelector('[role="separator"]');
+    const width = this.id === "conversation-file-preview" ? Number(separator?.getAttribute("aria-valuenow")) : 1028;
+    return { x: 1028 - width, y: 0, left: 1028 - width, right: 1028, top: 0, bottom: 600, width, height: 600, toJSON: () => ({}) };
+  });
+  const w = create();
+  const tooltip = globalThis.document.createElement("div");
+  tooltip.className = "n-popover n-tooltip";
+  const frame = () => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  const calls = () => native.run.mock.calls.map(call => call[1]);
+  try {
+    w.vm.openFile(file("guide")); await flushPromises();
+    const open = calls().find(action => action.action === "open");
+    native.events.get("chat-document-preview-loaded")!({ payload: { viewId: open.viewId } });
+    await vi.waitFor(() => expect(calls()).toContainEqual(expect.objectContaining({ action: "resize", visible: true })));
+    expect(w.find('[aria-label="阅读选项"]').exists()).toBe(false);
+    expect(w.find('[aria-label="阅读缩放"]').exists()).toBe(false);
+    expect(w.get('[role="tab"]').text()).toBe("guide.txt");
+    expect(w.text()).not.toContain("只读预览");
+    const separator = w.get('[role="separator"]');
+    native.run.mockClear();
+    await separator.trigger("pointerenter");
+    globalThis.document.body.append(tooltip);
+    native.events.get("tauri://focus")!({ payload: null });
+    await frame();
+    expect(calls()).toHaveLength(0);
+    await separator.trigger("pointerdown", { button: 0, pointerId: 1, clientX: 600 });
+    await frame();
+    await separator.trigger("pointermove", { pointerId: 1, clientX: 520 });
+    await vi.waitFor(() => expect(calls()).toContainEqual(expect.objectContaining({
+      action: "resize", viewId: open.viewId, visible: true, viewport: expect.objectContaining({ width: MIN_PREVIEW_WIDTH + 80 }),
+    })));
+    await separator.trigger("pointerup", { pointerId: 1 });
+    await frame();
+    expect(calls().every(action => action.action === "resize" && action.visible && action.viewId === open.viewId)).toBe(true);
+  } finally { tooltip.remove(); w.unmount(); }
+});
+
+it("keeps the worksheet and segment controls when there is more content to read", async () => {
+  const sheets = [{ id: 0, label: "春季" }, { id: 1, label: "夏季" }];
+  native.run.mockImplementation(async (_context, action) => ({
+    document: action.action === "open" ? { ...document, kind: "xlsx", sections: sheets, section: action.location.section, nextOffset: 10 } : null,
+    position: null,
+  }));
+  const w = create();
+  try {
+    w.vm.openFile(file("sheets")); await flushPromises();
+    const open = native.run.mock.calls.find(call => call[1].action === "open")![1];
+    native.events.get("chat-document-preview-loaded")!({ payload: { viewId: open.viewId } }); await flushPromises();
+    expect(w.find('[aria-label="阅读缩放"]').exists()).toBe(false);
+    expect(w.get('[aria-label="阅读选项"]').text()).toContain("下一段");
+    await w.get('[aria-label="工作表"]').setValue("1"); await flushPromises();
+    const latestOpen = native.run.mock.calls.filter(call => call[1].action === "open").pop();
+    expect(latestOpen?.[1].location.section).toBe(1);
+  } finally { w.unmount(); }
+});
+
+it("opens a message file with its exact scoped reference and reuses its tab for the same path", async () => {
+  const w = create();
+  const path = "/Users/example/Desktop/杭州旅游介绍.md";
+  const source = {kind: "messageFile" as const, sessionId: "session", turnId: "turn", itemId: "answer", reference: "file://" + path};
+  try {
+    await flushPromises();
+    w.vm.openFile({...file("guide"), name: "杭州旅游介绍.md", source});
+    await flushPromises();
+    expect(w.get('[role="tab"]').text()).toBe("杭州旅游介绍.md");
+    expect(native.run.mock.calls.find(call => call[1].action === "open")?.[1].source).toEqual(source);
+    w.vm.openFile({...file("guide"), name: "杭州旅游介绍.md", source: {...source, reference: path}});
+    expect(w.findAll('[role="tab"]')).toHaveLength(1);
+  } finally { w.unmount(); }
+});
+
+it("opens a published report using its specialized reader in the active tab", async () => {
+  const kind = "report" as const;
+  const w = mount(ChatDocumentWorkspace, {
+    props: {contextId: "scope", scopeKey: "session", enabled: true},
+    global: { stubs: {ChatArtifactReport: true} },
+  });
+  const base = file(kind);
+  const artifact = {sessionId:"s",turnId:"t",artifactId:kind,kind,displayName:base.name,mediaType:base.mediaType,provenance:"tool" as const,
+    status:"ready" as const,ordinal:0,progressStage:null,progressPercent:null,sizeBytes:12,localCommittedAt:0,expiresAt:null,hasPoster:false,errorCode:null,retryable:null};
+  try {
+    await flushPromises(); w.vm.openFile({...base, artifact}); await flushPromises();
+    const viewer = w.getComponent({name: "ChatArtifactReport"});
+    expect(viewer.props("artifact")).toEqual(artifact);
+    expect(w.findAll('[role="tab"]')).toHaveLength(1);
+    expect(native.run).not.toHaveBeenCalled();
+    await w.get('[aria-label="收起右侧面板"]').trigger("click"); await flushPromises();
+    expect(w.find(".document-sidebar__artifact").exists()).toBe(false);
+  } finally {w.unmount();}
+});
+
+
+it.each(["旅行.png", "路线.svg", "演示.mp4"])("opens local media %s in a dialog without adding a sidebar tab", async name => {
+  const w = create();
+  const source = {kind: "messageFile" as const, sessionId: "session", turnId: "turn", itemId: "answer", reference: "/work/" + name};
+  try {
+    await flushPromises();
+    w.vm.openFile({...file("media"), name, mediaType: "", source});
+    await flushPromises();
+    expect(w.find("aside").exists()).toBe(false);
+    expect(globalThis.document.getElementById("conversation-media-preview")).toBeTruthy();
+    expect(native.run.mock.calls.find(call => call[1].action === "open")?.[1].source).toEqual(source);
+    await w.getComponent({name: "Modal"}).vm.$emit("update:show", false);
+    await flushPromises();
+    expect(w.find('[role="tab"]').exists()).toBe(false);
+    expect(native.run.mock.calls.some(call => call[1].action === "close")).toBe(true);
+  } finally { w.unmount(); }
+});
+
+it("returns to the selected document and reading position when a media dialog closes", async () => {
+  const w = create();
+  try {
+    await flushPromises(); w.vm.openFile(file("report")); await flushPromises();
+    const first = native.run.mock.calls.find(call => call[1].action === "open")![1];
+    native.events.get("chat-document-preview-loaded")!({payload:{viewId:first.viewId}});
+    native.run.mockImplementation(async (_context, action) => ({
+      viewId:action.viewId, status:action.action === "open" ? "ready" : "closed", document:action.action === "open" ? document : null,
+      position:action.action === "position" ? {scrollX:0,scrollY:84} : null,
+    }));
+    w.vm.openFile({...file("map"),name:"地图.png",source:{kind:"messageFile",sessionId:"s",turnId:"t",itemId:"answer",reference:"/work/地图.png"}});
+    await flushPromises();
+    expect(w.findAll('[role="tab"]').map(tab=>tab.text())).toEqual(["report.txt"]);
+    w.getComponent({name:"Modal"}).vm.$emit("update:show",false);
+    await flushPromises();
+    const last = native.run.mock.calls.filter(call=>call[1].action === "open").pop()![1];
+    expect(last.source).toEqual(first.source);
+    expect(last.location.scrollY).toBe(84);
+  } finally {w.unmount();}
 });

@@ -1,15 +1,19 @@
+import type { ArtifactProjection } from "./chat-artifact";
+import { messageFileReference } from "./message-file-reference";
 import type { Location, Source } from "./document-preview.generated";
 
 export const MAX_PREVIEW_TABS = 10;
-export const MIN_PREVIEW_WIDTH = 320;
+// At the default 1339px window with 256px navigation, this leaves the composer at its 680px compact breakpoint.
+export const MIN_PREVIEW_WIDTH = 336;
 export const MIN_PREVIEW_CHAT_WIDTH = 400;
 export const MIN_PREVIEW_WORKSPACE = MIN_PREVIEW_WIDTH + MIN_PREVIEW_CHAT_WIDTH + 1;
-export type PreviewFile = Readonly<{ source: Source; name: string; mediaType: string; status: string; expiresAt: number | null }>;
+export type PreviewFile = Readonly<{ source: Source; artifact?: ArtifactProjection; name: string; mediaType: string; status: string; expiresAt: number | null }>;
 export type PreviewTab = { id: string; file: PreviewFile | null; location: Location };
 export type PreviewTabs = { tabs: PreviewTab[]; activeId: string | null };
 export const defaultPreviewLocation = (): Location => ({ section: 0, offset: 0, zoom: 1, scrollX: 0, scrollY: 0, revision: null });
 export function previewFileKey(file: PreviewFile): string {
   const s = file.source;
+  if (s.kind === "messageFile") return JSON.stringify([s.kind, s.sessionId, messageFileReference(s.reference)?.path ?? s.reference.replace(/^\.\//u, "")]);
   return s.kind === "artifact" ? [s.kind, s.sessionId, s.turnId, s.artifactId].join(":") : [s.kind, s.sessionId, s.attachmentId].join(":");
 }
 export function isSidebarFile(mediaType: string, name = ""): boolean {

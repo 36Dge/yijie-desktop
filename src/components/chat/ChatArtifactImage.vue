@@ -180,7 +180,7 @@ async function retryInline(): Promise<void> {
 }
 
 async function openLightbox(event: MouseEvent): Promise<void> {
-  if (inlinePhase.value !== "ready" || lightboxOpen.value || lightboxPhase.value === "opening") return;
+  if (!eligible.value || lightboxOpen.value || lightboxPhase.value === "opening") return;
   lightboxTrigger = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
   lightboxOpen.value = true;
   lightboxPhase.value = "opening";
@@ -374,6 +374,7 @@ onBeforeUnmount(() => {
   void releaseLease(inline);
   void releaseLease(modal);
 });
+defineExpose({ openLightbox });
 </script>
 
 <template>

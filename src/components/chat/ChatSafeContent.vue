@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed, inject, provide, ref } from "vue";
+import { computed, inject, provide, ref, watch } from "vue";
 import type { ConversationTimelineArtifactReferenceContentBlock, ConversationTimelineAttachmentReferenceContentBlock, ConversationTimelineContentBlock } from "../../domain/conversation-timeline";
-import { createChatMarkdownParser, type ChatContentNode } from "../../domain/chat-markdown";
+import { createChatMarkdownParser, type ChatMarkdownDocument, type ChatContentNode } from "../../domain/chat-markdown";
 import { measureChatRender } from "../../domain/chat-render-performance";
 import { chatTextRevealKey, useChatTextReveal } from "../../composables/useChatTextReveal";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatStreamText from "./ChatStreamText.vue";
 import ChatTextLink from "./ChatTextLink.vue";
-import { messageLinkTargetKey, type MessageLinkTarget } from "../../composables/useChatMessageLink";
+import { messageFileWorkspaceKey, messageFileLocationKey, messageLinkTargetKey, type MessageLinkTarget } from "../../composables/useChatMessageLink";
 
 const props = withDefaults(defineProps<{
   blocks?: readonly ConversationTimelineContentBlock[];
@@ -16,6 +16,7 @@ const props = withDefaults(defineProps<{
   streaming?: boolean;
   animate?: boolean;
   linkTarget?: MessageLinkTarget;
+  fileLinks?: boolean;
   /** Internal recursion uses the already parsed tree and the parent's clock. */
   parsedNodes?: readonly ChatContentNode[];
 }>(), { blocks: () => [], mode: "rich", typography: "compact", streaming: false, animate: true });
@@ -27,9 +28,17 @@ defineSlots<{
   "code-actions"(props: { codeIdentity: string; text: string; language: string | null }): unknown;
 }>();
 const root = ref<HTMLElement | null>(null);
-const parse = createChatMarkdownParser();
-const documentView = computed(() => props.parsedNodes ? { nodes: props.parsedNodes, text: "" }
-  : measureChatRender("markdown", () => parse(props.blocks, props.mode, props.streaming)));
+const workspace = inject(messageFileWorkspaceKey, null);
+const locate = inject(messageFileLocationKey, null);
+const parse = computed(() => createChatMarkdownParser(Boolean(props.fileLinks && props.linkTarget), workspace?.value));
+const documentView = computed<ChatMarkdownDocument>(() => props.parsedNodes ? { nodes: props.parsedNodes, text: "" }
+  : measureChatRender("markdown", () => parse.value(props.blocks, props.mode, props.streaming)));
+// A relative link and an absolute path line may denote different files. Fold
+// them only after Native supplies this session's authoritative workspace.
+watch([() => documentView.value.relativeHint?.path, () => props.linkTarget?.itemId, () => locate?.value], () => {
+  const file = documentView.value.relativeHint;
+  if (file && props.linkTarget) void locate?.value?.(props.linkTarget, file).catch(() => {});
+}, { immediate: true });
 const inherited = inject(chatTextRevealKey, null);
 const reveal = props.parsedNodes && inherited ? inherited
   : useChatTextReveal(() => documentView.value.text, () => props.streaming, () => props.animate, root);
@@ -61,7 +70,7 @@ function visibleRows<T extends readonly { startOffset: number }[]>(rows: readonl
           <strong v-else-if="inline.kind === 'strong'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></strong>
           <em v-else-if="inline.kind === 'emphasis'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></em>
           <del v-else-if="inline.kind === 'strikethrough'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></del>
-          <ChatTextLink v-else-if="inline.kind === 'inert_link'" :text="inline.text" :destination="inline.destination" :streaming="streaming" :offset="inline.startOffset" />
+          <ChatTextLink v-else-if="inline.kind === 'inert_link' || inline.kind === 'file_link'" :file="inline.file" :text="inline.text" :destination="inline.destination" :streaming="streaming" :offset="inline.startOffset" />
           <span v-else><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></span>
         </template>
       </p>
@@ -76,7 +85,7 @@ function visibleRows<T extends readonly { startOffset: number }[]>(rows: readonl
           <strong v-else-if="inline.kind === 'strong'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></strong>
           <em v-else-if="inline.kind === 'emphasis'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></em>
           <del v-else-if="inline.kind === 'strikethrough'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></del>
-          <ChatTextLink v-else-if="inline.kind === 'inert_link'" :text="inline.text" :destination="inline.destination" :streaming="streaming" :offset="inline.startOffset" />
+          <ChatTextLink v-else-if="inline.kind === 'inert_link' || inline.kind === 'file_link'" :file="inline.file" :text="inline.text" :destination="inline.destination" :streaming="streaming" :offset="inline.startOffset" />
           <span v-else><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></span>
         </template>
       </component>
@@ -150,7 +159,7 @@ function visibleRows<T extends readonly { startOffset: number }[]>(rows: readonl
                   <strong v-else-if="inline.kind === 'strong'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></strong>
                   <em v-else-if="inline.kind === 'emphasis'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></em>
                   <del v-else-if="inline.kind === 'strikethrough'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></del>
-                  <ChatTextLink v-else-if="inline.kind === 'inert_link'" :text="inline.text" :destination="inline.destination" :streaming="streaming" :offset="inline.startOffset" />
+                  <ChatTextLink v-else-if="inline.kind === 'inert_link' || inline.kind === 'file_link'" :file="inline.file" :text="inline.text" :destination="inline.destination" :streaming="streaming" :offset="inline.startOffset" />
                   <span v-else><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></span>
                 </template>
               </th>
@@ -164,7 +173,7 @@ function visibleRows<T extends readonly { startOffset: number }[]>(rows: readonl
                   <strong v-else-if="inline.kind === 'strong'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></strong>
                   <em v-else-if="inline.kind === 'emphasis'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></em>
                   <del v-else-if="inline.kind === 'strikethrough'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></del>
-                  <ChatTextLink v-else-if="inline.kind === 'inert_link'" :text="inline.text" :destination="inline.destination" :streaming="streaming" :offset="inline.startOffset" />
+                  <ChatTextLink v-else-if="inline.kind === 'inert_link' || inline.kind === 'file_link'" :file="inline.file" :text="inline.text" :destination="inline.destination" :streaming="streaming" :offset="inline.startOffset" />
                   <span v-else><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></span>
                 </template>
               </td>
@@ -362,6 +371,8 @@ h3.chat-safe-content__heading {
   color: var(--yj-color-text-body);
   background: var(--yj-color-bg-subtle);
 }
+
+.chat-safe-content__reference:has(.artifact-list__link) { padding: 0; border: 0; background: transparent; }
 
 .chat-safe-content__unknown {
   color: var(--yj-color-text-body);

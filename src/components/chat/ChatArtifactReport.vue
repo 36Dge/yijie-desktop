@@ -30,6 +30,7 @@ type ChartDisplay = Readonly<{
 
 const props = defineProps<{
   artifact: ArtifactProjection;
+  previewOnly?: boolean;
   contextId: string;
   client?: ChatArtifactReportNativeClient;
 }>();
@@ -205,7 +206,7 @@ async function openPreview(): Promise<void> {
     phase.value = "previewed";
     loadChartRendererIfNeeded();
     await nextTick();
-    previewRegion.value?.focus();
+    if (!props.previewOnly) previewRegion.value?.focus();
   } catch (error: unknown) {
     if (disposed || request !== previewRequest || epoch !== identityEpoch) return;
     clearAuthorizedContent();
@@ -273,7 +274,10 @@ function replaceIdentity(): void {
   saving.value = false;
 }
 
-watch(identityKey, replaceIdentity);
+watch([identityKey, available, () => props.previewOnly], () => {
+  replaceIdentity();
+  if (props.previewOnly && available.value) void openPreview();
+}, { immediate: true });
 
 onBeforeUnmount(() => {
   disposed = true;
@@ -293,7 +297,7 @@ onBeforeUnmount(() => {
     aria-label="结构化报告预览与保存"
     :aria-busy="busy ? 'true' : 'false'"
   >
-    <div v-if="available" class="artifact-report__actions">
+    <div v-if="available && !previewOnly" class="artifact-report__actions">
       <button class="yj-control"
         ref="previewTrigger"
         data-testid="artifact-report-open"
@@ -316,7 +320,7 @@ onBeforeUnmount(() => {
         {{ saving ? "保存中" : "保存 JSON" }}
       </button>
     </div>
-    <p v-else class="artifact-report__unavailable" role="note">报告预览与保存暂不可用。</p>
+    <p v-else-if="!available" class="artifact-report__unavailable" role="note">报告预览与保存暂不可用。</p>
 
     <p
       v-if="busy"
@@ -350,6 +354,7 @@ onBeforeUnmount(() => {
       <header class="artifact-report__preview-header">
         <h3 :id="previewTitleId">{{ projection.title }}</h3>
         <button class="yj-control"
+          v-if="!previewOnly"
           data-testid="artifact-report-close"
           type="button"
           aria-label="关闭报告预览"

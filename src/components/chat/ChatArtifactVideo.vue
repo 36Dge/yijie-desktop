@@ -56,6 +56,7 @@ const saveFeedback = ref<string | null>(null);
 const saveTone = ref<SaveTone>("muted");
 let identityEpoch = 0;
 let openRequest = 0;
+let playbackRequested = false;
 let saveRequest = 0;
 let disposed = false;
 let restoreFocusAfterRetry = false;
@@ -152,6 +153,7 @@ async function openVideo(): Promise<void> {
   } catch (error: unknown) {
     if (disposed || request !== openRequest || epoch !== identityEpoch) return;
     lease.value = null;
+    playbackRequested = false;
     previewError.value = safePreviewError(nativeError(error));
     phase.value = "error";
   }
@@ -160,6 +162,7 @@ async function openVideo(): Promise<void> {
 async function handleMetadataReady(): Promise<void> {
   if (!lease.value || !eligible.value) return;
   phase.value = "ready";
+  if (playbackRequested) void playWhenReady();
   if (restoreFocusAfterRetry) {
     restoreFocusAfterRetry = false;
     await nextTick();
@@ -170,6 +173,7 @@ async function handleMetadataReady(): Promise<void> {
 async function handleFatalError(): Promise<void> {
   if (!lease.value) return;
   const releasing = lease.value;
+  playbackRequested = false;
   lease.value = null;
   ++openRequest;
   await stopPlayback(releasing);
@@ -222,6 +226,7 @@ async function replaceIdentity(): Promise<void> {
   ++openRequest;
   ++saveRequest;
   const releasing = lease.value;
+  playbackRequested = false;
   lease.value = null;
   phase.value = "idle";
   previewError.value = null;
@@ -240,10 +245,27 @@ onBeforeUnmount(() => {
   ++openRequest;
   ++saveRequest;
   const releasing = lease.value;
+  playbackRequested = false;
   lease.value = null;
   detachMedia();
   void releaseLease(releasing);
 });
+async function playWhenReady() {
+  const player = media.value;
+  if (!playbackRequested || !player || phase.value !== "ready") return;
+  playbackRequested = false;
+  player.focus();
+  try { await player.play(); }
+  catch { /* WebKit may require a gesture on the now-focused native controls. */ }
+}
+
+function play() {
+  if (!eligible.value) return;
+  playbackRequested = true;
+  if (phase.value === "ready") void playWhenReady();
+  else void openVideo();
+}
+defineExpose({ play });
 </script>
 
 <template>

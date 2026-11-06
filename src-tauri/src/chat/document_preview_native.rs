@@ -1,10 +1,11 @@
-//! FEAT-166 private, identity-only presentation of existing Native files.
+//! Scoped, read-only presentation of conversation files.
 use super::artifact_file_native::{authorized_file, ArtifactLocator};
 use super::artifact_native::{
     ArtifactNativeCode as Code, ArtifactNativeError, ArtifactNativeResponse,
 };
 use super::authorization::{AuthorizationFailure, ChatAction};
 use super::document_preview_content::{self as content, Section, SOURCE_BUDGET};
+use super::message_file_preview::MessageFile;
 use super::{ChatRuntime, ConversationApplication};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -15,6 +16,7 @@ use uuid::Uuid;
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub(super) enum DocumentSource {
+    MessageFile(MessageFile),
     #[serde(rename_all = "camelCase")]
     Artifact {
         session_id: Uuid,
@@ -35,8 +37,9 @@ fn required_optional_uuid<'de, D: serde::Deserializer<'de>>(
     Option::<Uuid>::deserialize(d)
 }
 impl DocumentSource {
-    pub fn ids(&self) -> (Uuid, Option<Uuid>, Uuid) {
-        match *self {
+    pub fn stored_ids(&self) -> Option<(Uuid, Option<Uuid>, Uuid)> {
+        Some(match *self {
+            Self::MessageFile(_) => return None,
             Self::Artifact {
                 session_id,
                 turn_id,
@@ -47,7 +50,7 @@ impl DocumentSource {
                 message_id,
                 attachment_id,
             } => (session_id, message_id, attachment_id),
-        }
+        })
     }
 }
 pub(super) struct StoredDocument {
@@ -79,6 +82,11 @@ struct Location {
 #[serde(tag = "action", rename_all = "camelCase", deny_unknown_fields)]
 enum Action {
     #[serde(rename_all = "camelCase")]
+    Locate {
+        view_id: Uuid,
+        source: DocumentSource,
+    },
+    #[serde(rename_all = "camelCase")]
     Open {
         view_id: Uuid,
         source: DocumentSource,
@@ -98,9 +106,22 @@ enum Action {
     Close { view_id: Uuid },
 }
 impl Action {
+    fn available_in_media_profile(&self, file_candidate: bool) -> bool {
+        // The fixed daily client can read conversation outputs. Admission of
+        // candidate attachments and the associated storage migration stay separate.
+        file_candidate
+            || !matches!(
+                self,
+                Self::Open {
+                    source: DocumentSource::Attachment { .. },
+                    ..
+                }
+            )
+    }
     fn view_id(&self) -> Uuid {
         match *self {
-            Self::Open { view_id, .. }
+            Self::Locate { view_id, .. }
+            | Self::Open { view_id, .. }
             | Self::Resize { view_id, .. }
             | Self::Position { view_id }
             | Self::Close { view_id } => view_id,
@@ -138,6 +159,8 @@ pub struct Position {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResultData {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
     status: &'static str,
     view_id: Uuid,
     document: Option<DocumentMetadata>,
@@ -149,7 +172,16 @@ fn now() -> Result<i64, Code> {
         .map(|d| d.as_secs() as i64)
         .map_err(|_| Code::Unavailable)
 }
-fn authorize(runtime: &ChatRuntime, context: Uuid) -> Result<(), Code> {
+pub(super) fn authorize(runtime: &ChatRuntime, context: Uuid) -> Result<(), Code> {
+    // Closing the app waits for database owners. Let the active viewer release
+    // its read monitor even when its sidebar or media dialog is still visible.
+    use super::lifecycle::Phase;
+    if matches!(
+        runtime.lifecycle.phase(),
+        Phase::Stopping | Phase::StopPending | Phase::Stopped
+    ) {
+        return Err(Code::Unavailable);
+    }
     let manager = runtime
         .authorization_manager()
         .map_err(|_| Code::Unavailable)?;
@@ -165,21 +197,30 @@ async fn read_source(
     runtime: &ChatRuntime,
     context: Uuid,
     source: &DocumentSource,
+    desktop: Option<std::path::PathBuf>,
 ) -> Result<StoredDocument, Code> {
     authorize(runtime, context)?;
-    let (session, second, id) = source.ids();
-    if session.is_nil() || id.is_nil() || second.is_some_and(|id| id.is_nil()) {
+    if source.stored_ids().is_some_and(|(session, second, id)| {
+        session.is_nil() || id.is_nil() || second.is_some_and(|id| id.is_nil())
+    }) {
         return Err(Code::InvalidRequest);
     }
     match source {
-        DocumentSource::Artifact { .. } => {
+        DocumentSource::MessageFile(target) => {
+            super::message_file_preview::open(runtime, context, target, desktop, now()?).await
+        }
+        DocumentSource::Artifact {
+            session_id,
+            turn_id,
+            artifact_id,
+        } => {
             let content = authorized_file(
                 runtime,
                 context,
                 ArtifactLocator {
-                    session_id: session,
-                    turn_id: second.ok_or(Code::InvalidRequest)?,
-                    artifact_id: id,
+                    session_id: *session_id,
+                    turn_id: *turn_id,
+                    artifact_id: *artifact_id,
                 },
                 now()?,
                 SOURCE_BUDGET,
@@ -192,13 +233,17 @@ async fn read_source(
                 revision: content.sha256.iter().map(|b| format!("{b:02x}")).collect(),
             })
         }
-        DocumentSource::Attachment { .. } => {
+        DocumentSource::Attachment {
+            session_id,
+            message_id,
+            attachment_id,
+        } => {
             let application = runtime
                 .local_offline_conversation_application()
                 .await
                 .map_err(|_| Code::Unavailable)?;
             application
-                .bound_document_preview(session, second, id)
+                .bound_document_preview(*session_id, *message_id, *attachment_id)
                 .await
                 .map_err(|_| Code::Unavailable)?
                 .map_err(|e| match e {
@@ -225,7 +270,10 @@ pub async fn chat_document_preview_v1(
         .and_then(Value::as_str)
         .and_then(|s| Uuid::parse_str(s).ok());
     let fail = |code| ArtifactNativeError::new(request_id, code);
-    if webview.label() != "main" || !super::artifact_media::files_enabled() {
+    if webview.label() != "main"
+        || !cfg!(feature = "kimi-k31-pro-candidate")
+        || !super::artifact_media::enabled()
+    {
         return Err(fail(Code::Forbidden));
     }
     if serde_json::to_vec(&request).map_or(true, |v| v.len() > 8192) {
@@ -233,6 +281,12 @@ pub async fn chat_document_preview_v1(
     }
     let request: Request =
         serde_json::from_value(request).map_err(|_| fail(Code::InvalidRequest))?;
+    if !request
+        .payload
+        .available_in_media_profile(super::artifact_media::files_enabled())
+    {
+        return Err(fail(Code::Forbidden));
+    }
     if request.schema_version != 1
         || request.request_id.is_nil()
         || request.context_id.is_nil()
@@ -250,6 +304,30 @@ pub async fn chat_document_preview_v1(
         let id = request.payload.view_id();
         let context = request.context_id;
         let data = match request.payload {
+            Action::Locate { source, .. } => {
+                let DocumentSource::MessageFile(target) = source else {
+                    return Err(fail(Code::InvalidRequest));
+                };
+                let (path, _) = super::message_file_preview::locate(
+                    &chat_runtime,
+                    context,
+                    &target,
+                    webview.path().desktop_dir().ok(),
+                )
+                .await
+                .map_err(fail)?;
+                ResultData {
+                    path: Some(
+                        path.to_str()
+                            .ok_or_else(|| fail(Code::InvalidRequest))?
+                            .to_owned(),
+                    ),
+                    status: "located",
+                    view_id: id,
+                    document: None,
+                    position: None,
+                }
+            }
             Action::Open {
                 source,
                 viewport,
@@ -276,9 +354,14 @@ pub async fn chat_document_preview_v1(
                     return Err(fail(Code::InvalidRequest));
                 }
                 let _read_lease = image_runtime.borrow_read(SOURCE_BUDGET).map_err(fail)?;
-                let stored = read_source(&chat_runtime, context, &source)
-                    .await
-                    .map_err(fail)?;
+                let stored = read_source(
+                    &chat_runtime,
+                    context,
+                    &source,
+                    webview.path().desktop_dir().ok(),
+                )
+                .await
+                .map_err(fail)?;
                 if stored.expires <= now().map_err(fail)? {
                     return Err(fail(Code::Expired));
                 }
@@ -368,6 +451,7 @@ pub async fn chat_document_preview_v1(
                     live,
                 );
                 ResultData {
+                    path: None,
                     status: "ready",
                     view_id: id,
                     document: Some(metadata),
@@ -390,6 +474,7 @@ pub async fn chat_document_preview_v1(
                     .map_err(|_| fail(Code::Unavailable))?
                     .map_err(fail)?;
                 ResultData {
+                    path: None,
                     status: "resized",
                     view_id: id,
                     document: None,
@@ -408,6 +493,7 @@ pub async fn chat_document_preview_v1(
                     .map_err(|_| fail(Code::Unavailable))?
                     .map_err(|_| fail(Code::Unavailable))?;
                 ResultData {
+                    path: None,
                     status: "position",
                     view_id: id,
                     document: None,
@@ -425,6 +511,7 @@ pub async fn chat_document_preview_v1(
                     .map_err(|_| fail(Code::Unavailable))?;
                 rx.await.map_err(|_| fail(Code::Unavailable))?;
                 ResultData {
+                    path: None,
                     status: "closed",
                     view_id: id,
                     document: None,
@@ -640,6 +727,7 @@ mod platform {
         let root = "yijie-document://preview/document";
         let html = p.html.into_bytes();
         let assets = p.assets;
+        let video = p.kind == "video";
         let readonly = format!(
             r#"(() => {{
 const stop=e=>{{e.preventDefault();e.stopImmediatePropagation();}};
@@ -658,7 +746,10 @@ window.addEventListener('load',()=>window.scrollTo({},{}),{{once:true}});
         );
         let load_app = app.clone();
         let view=wry::WebViewBuilder::new().with_incognito(true).with_devtools(false).with_focused(false).with_visible(false).with_bounds(rect)
-            .with_initialization_script(readonly)
+            .with_initialization_script(if video {
+                // Native-generated video page has only WebKit's own playback controls.
+                "window.addEventListener('contextmenu', e => e.preventDefault())".to_owned()
+            } else { readonly })
             .with_navigation_handler(move|url|url==root)
             .with_new_window_req_handler(|_,_|wry::NewWindowResponse::Deny)
             .with_download_started_handler(|_,_|false)
@@ -668,7 +759,7 @@ window.addEventListener('load',()=>window.scrollTo({},{}),{{once:true}});
                     else if resource_live.load(Ordering::Acquire)&&request.method()=="GET"{uri.strip_prefix("yijie-document://preview/").and_then(|k|assets.get(k)).map(|b|("image/png",b.clone())).unwrap_or(("text/plain",vec![]))}
                     else{("text/plain",vec![])};
                 wry::http::Response::builder().status(if body.is_empty(){404}else{200}).header("Content-Type",mime).header("Cache-Control","no-store").header("X-Content-Type-Options","nosniff")
-                    .header("Content-Security-Policy","sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: yijie-document:; font-src data:; connect-src 'none'; media-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'")
+                    .header("Content-Security-Policy",if video { "sandbox; default-src 'none'; style-src 'unsafe-inline'; media-src data:; base-uri 'none'; form-action 'none'" } else { "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: yijie-document:; font-src data:; connect-src 'none'; media-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" })
                     .body(std::borrow::Cow::Owned(body)).expect("constant resource headers")
             })
             .with_on_page_load_handler(move|event,_|{if matches!(event,wry::PageLoadEvent::Finished){let app=load_app.clone();let _=load_app.run_on_main_thread(move||{CURRENT.with(|s|{if let Some(v)=s.borrow_mut().as_mut().filter(|v|v.id==id){v.loaded=true;let _=v.webview.set_visible(v.visible);}});let _=app.emit_to("main","chat-document-preview-loaded",serde_json::json!({"viewId":id}));});}})
@@ -698,6 +789,11 @@ mod tests {
         .unwrap();
         for value in fixtures["requests"].as_array().unwrap() {
             let request: Request = serde_json::from_value(value.clone()).unwrap();
+            assert!(request.payload.available_in_media_profile(true));
+            assert_eq!(
+                request.payload.available_in_media_profile(false),
+                value["payload"]["source"]["kind"] != "attachment"
+            );
             assert_eq!(serde_json::to_value(request).unwrap(), *value);
         }
     }

@@ -1,10 +1,12 @@
+import { bareFileAt, markdownFileDestination, standaloneFileLine, possibleRepeatedPath, isPendingFileLine, type MessageFileReference } from "./message-file-reference";
 import type { ConversationTimelineArtifactReferenceContentBlock, ConversationTimelineAttachmentReferenceContentBlock, ConversationTimelineContentBlock } from "./conversation-timeline";
 
 type SafeInlineNode = Readonly<{
   key: string;
-  kind: "text" | "strong" | "emphasis" | "strikethrough" | "inline_code" | "inert_link";
+  kind: "text" | "strong" | "emphasis" | "strikethrough" | "inline_code" | "inert_link" | "file_link";
   text: string;
   destination: string | null;
+  file?: MessageFileReference;
 }>;
 
 type SafeInlineGroup = Readonly<{
@@ -16,6 +18,8 @@ type SafeContentNode =
   | Readonly<{
       key: string;
       kind: "paragraph";
+      pathLine?: string;
+      possibleRepeat?: MessageFileReference;
       inlines: readonly SafeInlineNode[];
     }>
   | Readonly<{
@@ -65,7 +69,7 @@ function stableKey(...parts: readonly string[]): string {
   return parts.map((part) => `${part.length}:${part}`).join("|");
 }
 
-function inlineNodes(source: string, keyBase: string, plain: boolean, streaming: boolean): readonly SafeInlineNode[] {
+function inlineNodes(source: string, keyBase: string, plain: boolean, streaming: boolean, fileLinks: boolean): readonly SafeInlineNode[] {
   if (source.length === 0) return Object.freeze([]);
   if (plain) {
     return Object.freeze([Object.freeze({
@@ -84,6 +88,7 @@ function inlineNodes(source: string, keyBase: string, plain: boolean, streaming:
     kind: SafeInlineNode["kind"],
     text: string,
     destination: string | null = null,
+    file?: MessageFileReference,
   ): void {
     if (text.length === 0) return;
     nodes.push(Object.freeze({
@@ -91,7 +96,25 @@ function inlineNodes(source: string, keyBase: string, plain: boolean, streaming:
       kind,
       text,
       destination,
+      ...(file && { file }),
     }));
+  }
+
+  function appendFile(file: MessageFileReference): void {
+    append("file_link", `《${file.name}》`, file.raw, file);
+  }
+
+  function appendFormatted(kind: "strong" | "emphasis" | "strikethrough", value: string): void {
+    // A styled run can contain a file link. Keep the surrounding emphasis
+    // while giving the link its own interactive node and reveal offsets.
+    if (fileLinks && (value.includes("[") || value.includes("/") || value.includes("`"))) {
+      const parts = inlineNodes(value, keyBase, false, streaming, fileLinks);
+      if (parts.some(part => part.file || part.kind === "inert_link")) {
+        for (const part of parts) append(part.kind === "text" ? kind : part.kind, part.text, part.destination, part.file);
+        return;
+      }
+    }
+    append(kind, value);
   }
 
   function flushPlain(end: number): void {
@@ -108,20 +131,32 @@ function inlineNodes(source: string, keyBase: string, plain: boolean, streaming:
     }
 
     if (source[cursor] === "`") {
-      const closing = source.indexOf("`", cursor + 1);
-      if (closing > cursor + 1) {
+      let count = 1;
+      while (source[cursor + count] === "`") count++;
+      const marker = "`".repeat(count);
+      let closing = source.indexOf(marker, cursor + count);
+      while (closing !== -1 && source[closing + count] === "`") {
+        while (source[closing] === "`") closing++;
+        closing = source.indexOf(marker, closing);
+      }
+      if (closing >= cursor + count) {
         flushPlain(cursor);
-        append("inline_code", source.slice(cursor + 1, closing));
-        cursor = closing + 1;
-        plainStart = cursor;
+        const value = source.slice(cursor + count, closing);
+        const file = fileLinks && count === 1 && standaloneFileLine(value);
+        if (file && file.raw === value) appendFile(file);
+        else append("inline_code", value);
+        plainStart = cursor = closing + count;
         continue;
       }
-      if (streaming && closing === -1) {
+      if (streaming) {
         flushPlain(cursor);
-        append("inline_code", source.slice(cursor + 1));
+        const suffix = source.slice(cursor + count);
+        if (!fileLinks || count !== 1 || !/^(?:\/|file:)/iu.test(suffix)) append("inline_code", suffix);
         plainStart = cursor = source.length;
         continue;
       }
+      cursor += count;
+      continue;
     }
 
     const delimiter = source.startsWith("**", cursor) ? "**"
@@ -131,7 +166,7 @@ function inlineNodes(source: string, keyBase: string, plain: boolean, streaming:
       const closing = source.indexOf(delimiter, cursor + 2);
       if (closing > cursor + 2) {
         flushPlain(cursor);
-        append(delimiter === "~~" ? "strikethrough" : "strong", source.slice(cursor + 2, closing));
+        appendFormatted(delimiter === "~~" ? "strikethrough" : "strong", source.slice(cursor + 2, closing));
         cursor = closing + 2;
         plainStart = cursor;
         continue;
@@ -141,7 +176,7 @@ function inlineNodes(source: string, keyBase: string, plain: boolean, streaming:
       if (streaming && closing === -1) {
         flushPlain(cursor);
         const suffix = source.slice(cursor + 2);
-        append(delimiter === "~~" ? "strikethrough" : "strong",
+        appendFormatted(delimiter === "~~" ? "strikethrough" : "strong",
           suffix.endsWith(delimiter[0]!) ? suffix.slice(0, -1) : suffix);
         plainStart = cursor = source.length;
         continue;
@@ -153,46 +188,63 @@ function inlineNodes(source: string, keyBase: string, plain: boolean, streaming:
       const closing = source.indexOf(source[cursor]!, cursor + 1);
       if (closing > cursor + 1) {
         flushPlain(cursor);
-        append("emphasis", source.slice(cursor + 1, closing));
+        appendFormatted("emphasis", source.slice(cursor + 1, closing));
         cursor = closing + 1;
         plainStart = cursor;
         continue;
       }
     }
 
-    if (source[cursor] === "[" && source[cursor - 1] !== "!") {
-      const separator = source.indexOf("](", cursor + 1);
-      if (separator === -1) {
-        const labelEnd = source.indexOf("]", cursor + 1);
-        if (streaming && (labelEnd === -1 || labelEnd === source.length - 1)) {
-          flushPlain(cursor);
-          append("inert_link", source.slice(cursor + 1, labelEnd === -1 ? undefined : labelEnd));
-          plainStart = source.length;
-        }
-        break;
+    const imageLink = fileLinks && source.startsWith("![", cursor);
+    if (imageLink || (source[cursor] === "[" && source[cursor - 1] !== "!")) {
+      const labelStart = cursor + (imageLink ? 2 : 1);
+      let brackets = 1;
+      let end = labelStart;
+      while (end < source.length) {
+        const ch = source[end];
+        if (ch === "\\") end++;
+        else if (ch === "[") brackets++;
+        else if (ch === "]" && --brackets === 0) break;
+        end++;
       }
-      let depth = 1;
-      let closing = separator + 2;
-      for (; closing < source.length; closing++) {
-        if (source[closing] === "(") depth++;
-        else if (source[closing] === ")" && --depth === 0) break;
-      }
-      if (closing === source.length) {
+      const label = source.slice(labelStart, end);
+      const incomplete = end >= source.length || (end === source.length - 1 && streaming);
+      if (incomplete) {
         if (streaming) {
           flushPlain(cursor);
-          append("inert_link", source.slice(cursor + 1, separator));
+          append("inert_link", label);
           plainStart = source.length;
         }
         break;
       }
-      if (separator > cursor + 1 && closing > separator + 2) {
+      if (source[end + 1] === "(") {
+        const start = end + 2;
+        const closing = destinationEnd(source, start);
+        if (closing < 0) {
+          if (streaming) {
+            flushPlain(cursor);
+            append("inert_link", label);
+            plainStart = source.length;
+          }
+          break;
+        }
+        const destination = source.slice(start, closing);
+        const file = fileLinks && markdownFileDestination(destination);
         flushPlain(cursor);
-        append(
-          "inert_link",
-          source.slice(cursor + 1, separator),
-          source.slice(separator + 2, closing),
-        );
-        cursor = closing + 1;
+        if (file) appendFile(file);
+        else if (imageLink || !label || !destination) append("text", source.slice(cursor, closing + 1));
+        else append("inert_link", label, destination);
+        plainStart = cursor = closing + 1;
+        continue;
+      }
+    }
+
+    if (fileLinks && (source[cursor] === "/" || (source[cursor] === "f" || source[cursor] === "F") && source.slice(cursor, cursor + 5).toLowerCase() === "file:")) {
+      const file = bareFileAt(source, cursor);
+      if (file) {
+        flushPlain(cursor);
+        appendFile(file);
+        cursor += file.raw.length;
         plainStart = cursor;
         continue;
       }
@@ -202,7 +254,30 @@ function inlineNodes(source: string, keyBase: string, plain: boolean, streaming:
   }
 
   flushPlain(source.length);
-  return Object.freeze(nodes);
+  // The link already supplies book-title marks. Consume a pair written around
+  // it by the author, while keeping punctuation and unrelated prose intact.
+  for (let i = 0; i < nodes.length; i++) {
+    if (!nodes[i]!.file) continue;
+    const left = nodes[i - 1], right = nodes[i + 1];
+    if (left?.kind === "text" && left.text.endsWith("《")) nodes[i - 1] = { ...left, text: left.text.slice(0, -1) };
+    if (right?.kind === "text" && right.text.startsWith("》")) nodes[i + 1] = { ...right, text: right.text.slice(1) };
+  }
+  return Object.freeze(nodes.filter(node => node.text.length > 0));
+}
+
+/** Destinations can contain balanced parentheses, angle-quoted paths, and a title. */
+function destinationEnd(source: string, start: number): number {
+  let depth = 1;
+  let quote = source[start] === "<" ? ">" : "";
+  for (let i = start + (quote ? 1 : 0); i < source.length; i++) {
+    const ch = source[i]!;
+    if (quote) {
+      if (ch === quote) quote = "";
+    } else if ((ch === '"' || ch === "'") && /\s/u.test(source[i - 1] ?? "")) quote = ch;
+    else if (ch === "(") depth++;
+    else if (ch === ")" && --depth === 0) return i;
+  }
+  return -1;
 }
 
 function safeLanguage(value: string | null): string | null {
@@ -248,19 +323,25 @@ function listMarker(line: string): { indent: number; width: number; ordered: boo
   };
 }
 
-function fenceLanguage(line: string): string | null | undefined {
-  const match = line.match(/^ {0,3}```([^\s`]*)\s*$/);
-  return match === null ? undefined : safeLanguage(match[1] ?? null);
+function fence(line: string) {
+  const match = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line);
+  if (!match || (match[1]![0] === "`" && match[2]!.includes("`"))) return null;
+  return { marker: match[1]!, info: match[2]!.trim() };
 }
 
 function nextClosingFenceIndexes(lines: readonly string[]): readonly number[] {
   const indexes = new Array<number>(lines.length).fill(-1);
-  let nextClosing = -1;
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    indexes[index] = nextClosing;
-    if (/^ {0,3}```\s*$/.test(lines[index] ?? "")) nextClosing = index;
+  let open: { marker: string; index: number } | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const next = fence(lines[i]!);
+    if (!next) continue;
+    if (!open) open = { marker: next.marker, index: i };
+    else if (!next.info && next.marker.startsWith(open.marker)) {
+      indexes[open.index] = i;
+      open = null;
+    }
   }
-  return Object.freeze(indexes);
+  return indexes;
 }
 
 function startsBlock(
@@ -268,17 +349,19 @@ function startsBlock(
   closingFenceIndexes: readonly number[],
   index: number,
   streaming: boolean,
+  fileLinks: boolean,
 ): boolean {
   const line = lines[index] ?? "";
-  if (line.trim().length === 0) return true;
-  if (fenceLanguage(line) !== undefined && (closingFenceIndexes[index] !== -1 || streaming)) return true;
+  if (line.trim().length === 0 || (fileLinks && (standaloneFileLine(line) || possibleRepeatedPath(line) ||
+      streaming && index === lines.length - 1 && isPendingFileLine(line)))) return true;
+  if (fence(line) !== null && (closingFenceIndexes[index] !== -1 || streaming)) return true;
   if (heading(line) || isRule(line) || /^ {0,3}>/.test(line) || listMarker(line)) return true;
   const header = tableCells(line);
   return header !== null && isTableDelimiter(tableCells(lines[index + 1] ?? ""));
 }
 
-function inlineGroup(text: string, key: string, plain: boolean, streaming: boolean): SafeInlineGroup {
-  return Object.freeze({ key, inlines: inlineNodes(text, key, plain, streaming) });
+function inlineGroup(text: string, key: string, plain: boolean, streaming: boolean, fileLinks: boolean): SafeInlineGroup {
+  return Object.freeze({ key, inlines: inlineNodes(text, key, plain, streaming, fileLinks) });
 }
 
 function markdownNodes(
@@ -286,6 +369,7 @@ function markdownNodes(
   keyBase: string,
   plain: boolean,
   streaming: boolean,
+  fileLinks: boolean,
   baseIndex = 0,
   starts: number[] = [],
 ): readonly SafeContentNode[] {
@@ -295,7 +379,7 @@ function markdownNodes(
       : Object.freeze([Object.freeze({
           key: stableKey(keyBase, "paragraph", "0"),
           kind: "paragraph" as const,
-          inlines: inlineNodes(text, stableKey(keyBase, "paragraph", "0"), true, streaming),
+          inlines: inlineNodes(text, stableKey(keyBase, "paragraph", "0"), true, streaming, false),
         })]);
   }
 
@@ -315,15 +399,15 @@ function markdownNodes(
     }
 
     starts.push(offsets[index]!);
-    const language = fenceLanguage(line);
-    const closingFence = language === undefined ? -1 :
+    const openingFence = fence(line);
+    const closingFence = !openingFence ? -1 :
       (closingFenceIndexes[index] === -1 && streaming ? lines.length : (closingFenceIndexes[index] ?? -1));
-    if (language !== undefined && closingFence !== -1) {
+    if (openingFence && closingFence !== -1) {
       const key = stableKey(keyBase, "code", String(baseIndex + nodes.length));
       nodes.push(Object.freeze({
         key,
         kind: "code" as const,
-        language,
+        language: safeLanguage(openingFence.info),
         text: lines.slice(index + 1, closingFence).join("\n"),
       }));
       index = closingFence + 1;
@@ -338,7 +422,7 @@ function markdownNodes(
         key,
         kind: "heading" as const,
         level: title?.level ?? (underline![1]![0] === "=" ? 1 : 2),
-        inlines: inlineNodes(title?.text ?? line.trim(), key, false, streaming),
+        inlines: inlineNodes(title?.text ?? line.trim(), key, false, streaming, fileLinks),
       }));
       index += title ? 1 : 2;
       continue;
@@ -373,7 +457,7 @@ function markdownNodes(
     ) {
       const key = stableKey(keyBase, "table", String(baseIndex + nodes.length));
       const headers = Object.freeze(headerCells.map((cell, cellIndex) =>
-        inlineGroup(cell, stableKey(key, "header", String(cellIndex)), false, streaming)));
+        inlineGroup(cell, stableKey(key, "header", String(cellIndex)), false, streaming, fileLinks)));
       const rows: (readonly SafeInlineGroup[])[] = [];
       let rowIndex = index + 2;
       while (rowIndex < lines.length) {
@@ -383,7 +467,7 @@ function markdownNodes(
           inlineGroup(
             cell,
             stableKey(key, "row", String(rows.length), String(cellIndex)),
-            false, streaming,
+            false, streaming, fileLinks,
           ))));
         rowIndex += 1;
       }
@@ -423,7 +507,7 @@ function markdownNodes(
           }
           if (nextLine.startsWith(" ".repeat(marker.width))) {
             body.push(nextLine.slice(marker.width));
-          } else if (!startsBlock(lines, closingFenceIndexes, index, streaming)) {
+          } else if (!startsBlock(lines, closingFenceIndexes, index, streaming, fileLinks)) {
             body.push(nextLine);
           } else break;
           index += 1;
@@ -440,15 +524,36 @@ function markdownNodes(
       continue;
     }
 
+    if (fileLinks && streaming && index === lines.length - 1 && isPendingFileLine(line)) {
+      starts.pop();
+      break;
+    }
+    const pathLine = fileLinks && standaloneFileLine(line);
+    if (pathLine) {
+      const key = stableKey(keyBase, "paragraph", String(baseIndex + nodes.length));
+      nodes.push({ key, kind: "paragraph", pathLine: pathLine.path, inlines: [{
+        key: stableKey(key, "file_link", "0"), kind: "file_link", text: `《${pathLine.name}》`,
+        destination: pathLine.raw, file: pathLine,
+      }] });
+      index++;
+      continue;
+    }
+    const possibleRepeat = fileLinks && possibleRepeatedPath(line);
+    if (possibleRepeat) {
+      const key = stableKey(keyBase, "paragraph", String(baseIndex + nodes.length));
+      nodes.push({key, kind: "paragraph", possibleRepeat, inlines: inlineNodes(line.trim(),key,false,streaming,fileLinks)});
+      index++;
+      continue;
+    }
     const paragraphLines: string[] = [line];
     index += 1;
-    while (index < lines.length && !startsBlock(lines, closingFenceIndexes, index, streaming)) {
+    while (index < lines.length && !startsBlock(lines, closingFenceIndexes, index, streaming, fileLinks)) {
       paragraphLines.push(lines[index] ?? "");
       index += 1;
     }
     const key = stableKey(keyBase, "paragraph", String(baseIndex + nodes.length));
     const literalFallback = paragraphLines.some((paragraphLine) =>
-      fenceLanguage(paragraphLine) !== undefined);
+      fence(paragraphLine) !== null);
     const paragraphText = literalFallback ? paragraphLines.join("\n") : paragraphLines
       .map((paragraphLine, lineIndex) => {
         const hardBreak = /(?: {2,}|\\)$/.test(paragraphLine);
@@ -458,7 +563,7 @@ function markdownNodes(
     nodes.push(Object.freeze({
       key,
       kind: "paragraph" as const,
-      inlines: inlineNodes(paragraphText, key, literalFallback, streaming),
+      inlines: inlineNodes(paragraphText, key, literalFallback, streaming, fileLinks),
     }));
   }
 
@@ -479,18 +584,18 @@ export type ChatContentNode = ContentRange & (
 );
 interface ParsedMarkdown { text: string; plain: boolean; streaming: boolean; nodes: readonly SafeContentNode[]; starts: number[] }
 interface IndexedMarkdown { startOffset: number; streaming: boolean; node: ChatContentNode; text: string }
-export interface ChatMarkdownDocument { readonly nodes: readonly ChatContentNode[]; readonly text: string }
+export interface ChatMarkdownDocument { readonly nodes: readonly ChatContentNode[]; readonly text: string; readonly relativeHint?: MessageFileReference }
 
 /** Component-local cache: completed blocks retain identity; only the last open
  * block is reparsed on append. Replacements and mode changes use the full parser. */
-export function createChatMarkdownParser() {
+export function createChatMarkdownParser(fileLinks = false, workspace: string | null = null) {
   let cache = new Map<string, ParsedMarkdown>();
   const indexed = new WeakMap<SafeContentNode, IndexedMarkdown>();
   return (blocks: readonly ConversationTimelineContentBlock[], mode: "rich" | "plain", streaming: boolean): ChatMarkdownDocument => {
     const nextCache = new Map<string, ParsedMarkdown>();
     function parse(text: string, key: string, plain: boolean): readonly SafeContentNode[] {
       if (!plain) text = text.replace(/\r\n?/g, "\n");
-      const prior = cache.get(key);
+      const prior = nextCache.get(key) ?? cache.get(key);
       if (prior && prior.text === text && prior.plain === plain && prior.streaming === streaming) {
         nextCache.set(key, prior); return prior.nodes;
       }
@@ -502,17 +607,21 @@ export function createChatMarkdownParser() {
       const kept = append ? Math.max(0, prior.nodes.length - rewind) : 0;
       const startOffset = kept ? prior!.starts[kept]! : 0;
       const starts: number[] = [];
-      const nodes = [...(kept ? prior!.nodes.slice(0, kept) : []), ...markdownNodes(text.slice(startOffset), key, plain, streaming, kept, starts)];
+      const nodes = [...(kept ? prior!.nodes.slice(0, kept) : []), ...markdownNodes(text.slice(startOffset), key, plain, streaming, fileLinks, kept, starts)];
       nextCache.set(key, { text, plain, streaming, nodes, starts: [...(kept ? prior!.starts.slice(0, kept) : []), ...starts.map(offset => offset + startOffset)] });
       return nodes;
     }
     function indexNodes(nodes: readonly SafeContentNode[], startOffset: number): { nodes: readonly ChatContentNode[]; text: string } {
       let offset = startOffset;
       const texts: string[] = [];
-      const result = nodes.map(node => {
-        const previous = indexed.get(node);
+      const result: ChatContentNode[] = [];
+      for (const node of nodes) {
+        if (hiddenPaths.has(node.key)) continue;
+        const cacheable = !hiddenPaths.size || (node.kind !== "list" && node.kind !== "quote");
+        const previous = cacheable ? indexed.get(node) : undefined;
         if (previous?.startOffset === offset && previous.streaming === streaming) {
-          offset += previous.text.length; texts.push(previous.text); return previous.node;
+          offset += previous.text.length; texts.push(previous.text); result.push(previous.node);
+          continue;
         }
         const nodeStart = offset;
         let text = "";
@@ -526,8 +635,10 @@ export function createChatMarkdownParser() {
           });
         }
         function children(source: string, key: string) {
-          const result = indexNodes(parse(source, key, false), offset);
-          consume(result.text); return result.nodes;
+          const original = parse(source, key, false);
+          const child = indexNodes(original, offset);
+          consume(child.text);
+          return original.length && !child.nodes.length ? null : child.nodes;
         }
         function group(value: SafeInlineGroup): ChatInlineGroup {
           const startOffset = offset; const values = inlines(value.inlines);
@@ -535,16 +646,26 @@ export function createChatMarkdownParser() {
         }
         let output: ChatContentNode;
         if (node.kind === "paragraph" || node.kind === "heading") output = { ...node, startOffset: nodeStart, endOffset: 0, inlines: inlines(node.inlines) };
-        else if (node.kind === "quote") output = { ...node, startOffset: nodeStart, endOffset: 0, children: children(node.text, node.key) };
-        else if (node.kind === "list") output = { ...node, startOffset: nodeStart, endOffset: 0, items: node.items.map(item => {
-          const startOffset = offset; const values = children(item.text, item.key); return { key: item.key, startOffset, endOffset: offset, children: values };
-        }) };
+        else if (node.kind === "quote") {
+          const values = children(node.text, node.key);
+          if (!values) continue;
+          output = { ...node, startOffset: nodeStart, endOffset: offset, children: values };
+        } else if (node.kind === "list") {
+          const items = node.items.flatMap(item => {
+            const startOffset = offset;
+            const values = children(item.text, item.key);
+            return values ? [{ key: item.key, startOffset, endOffset: offset, children: values }] : [];
+          });
+          if (!items.length) continue;
+          output = { ...node, startOffset: nodeStart, endOffset: offset, items };
+        }
         else if (node.kind === "table") output = { ...node, startOffset: nodeStart, endOffset: 0, headers: node.headers.map(group), rows: node.rows.map(row => row.map(group)) };
         else { if (node.kind === "code") consume(node.text); output = { ...node, startOffset: nodeStart, endOffset: 0 }; }
         output = { ...output, endOffset: offset };
-        indexed.set(node, { startOffset: nodeStart, streaming, node: output, text });
-        texts.push(text); return output;
-      });
+        if (cacheable) indexed.set(node, { startOffset: nodeStart, streaming, node: output, text });
+        texts.push(text);
+        result.push(output);
+      }
       return { nodes: result, text: texts.join("") };
     }
     const nodes: SafeContentNode[] = [];
@@ -555,8 +676,45 @@ export function createChatMarkdownParser() {
       else if (block.type === "attachment_reference") nodes.push({ key: block.identity, kind: block.type, block });
       else nodes.push({ key: block.identity, kind: "unknown", code: "unsupported_content" });
     }
+    // Resolve duplicates across all blocks and nested containers in this one
+    // answer before assigning reveal offsets. Keep named links in real prose.
+    const hiddenPaths = new Set<string>();
+    let relativeHint: MessageFileReference | undefined;
+    if (fileLinks && mode === "rich") {
+      const contextual = new Set<string>();
+      const standalone: { key: string; path: string; pathLine: boolean }[] = [];
+      const possibleRepeats: {key: string; path: string}[] = [];
+      let relative: MessageFileReference | undefined;
+      let hasAbsolute = false;
+      function identity(file: MessageFileReference) {
+        if (file.path.startsWith("/")) hasAbsolute = true;
+        else relative ??= file;
+        return !workspace || file.path.startsWith("/") ? file.path : workspace + "/" + file.path;
+      }
+      function remember(inlines: readonly SafeInlineNode[]) {
+        for (const link of inlines) if (link.file) contextual.add(identity(link.file));
+      }
+      function visit(node: SafeContentNode) {
+        if (node.kind === "paragraph" && node.possibleRepeat) {
+          possibleRepeats.push({ key: node.key, path: identity(node.possibleRepeat) });
+        } else if (node.kind === "paragraph" && node.inlines.length === 1 && node.inlines[0]!.file) {
+          standalone.push({key: node.key, path: identity(node.inlines[0]!.file), pathLine: Boolean(node.pathLine)});
+        } else if (node.kind === "paragraph" || node.kind === "heading") remember(node.inlines);
+        else if (node.kind === "table") for (const cell of [...node.headers, ...node.rows.flat()]) remember(cell.inlines);
+        else if (node.kind === "list") for (const item of node.items) parse(item.text, item.key, false).forEach(visit);
+        else if (node.kind === "quote") parse(node.text, node.key, false).forEach(visit);
+      }
+      nodes.forEach(visit);
+      // Prefer a named link to its redundant "路径" line regardless of source order.
+      for (const item of standalone.sort((a,b) => Number(a.pathLine) - Number(b.pathLine))) {
+        if (contextual.has(item.path)) hiddenPaths.add(item.key);
+        else contextual.add(item.path);
+      }
+      for (const item of possibleRepeats) if (contextual.has(item.path)) hiddenPaths.add(item.key);
+      if (!workspace && hasAbsolute && (standalone.length || possibleRepeats.length)) relativeHint = relative;
+    }
     const result = indexNodes(nodes, 0);
     cache = nextCache;
-    return result;
+    return relativeHint ? { ...result, relativeHint } : result;
   };
 }

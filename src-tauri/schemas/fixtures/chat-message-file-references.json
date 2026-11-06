@@ -1,0 +1,161 @@
+[
+  {
+    "label": "原始粗体交付和重复路径",
+    "source": "已保存。\n\n**[出行指南](file:///Users/example/Desktop/杭州旅游介绍.md)**\n\n路径：`/Users/example/Desktop/杭州旅游介绍.md`",
+    "targets": [
+      "/Users/example/Desktop/杭州旅游介绍.md"
+    ],
+    "visible": "已保存。《杭州旅游介绍.md》"
+  },
+  {
+    "label": "粗体裸路径",
+    "source": "**/Users/example/Desktop/杭州旅游介绍.md**",
+    "targets": [
+      "/Users/example/Desktop/杭州旅游介绍.md"
+    ],
+    "visible": "《杭州旅游介绍.md》"
+  },
+  {
+    "label": "紧凑表格",
+    "source": "|文档|版本|\n|---|---|\n|/work/A/分析.pdf|定稿|",
+    "targets": [
+      "/work/A/分析.pdf"
+    ],
+    "visible": "文档版本《分析.pdf》定稿"
+  },
+  {
+    "label": "方括号是文件名的一部分",
+    "source": "已保存 /work/说明.md[定稿].pdf。",
+    "targets": [
+      "/work/说明.md[定稿].pdf"
+    ],
+    "visible": "已保存 《说明.md[定稿].pdf》。",
+    "distinct": [
+      "/work/说明.md"
+    ]
+  },
+  {
+    "label": "未编码图片目标",
+    "source": "![封面](file:///work/行程 封面.png)",
+    "targets": [
+      "/work/行程 封面.png"
+    ],
+    "visible": "《行程 封面.png》"
+  },
+  {
+    "label": "UTF8 编码的媒体",
+    "source": "![海报](/work/%E6%B5%B7%E6%8A%A5%20A.png)",
+    "targets": [
+      "/work/海报 A.png"
+    ],
+    "visible": "《海报 A.png》"
+  },
+  {
+    "label": "带标题与括号",
+    "source": "[行程](</work/Trip%20(2).md> \"查看行程\")",
+    "targets": [
+      "/work/Trip (2).md"
+    ],
+    "visible": "《Trip (2).md》"
+  },
+  {
+    "label": "工作区相对地址",
+    "source": "[周报](./outputs/Trip%20Plan.md)",
+    "targets": [
+      "outputs/Trip Plan.md"
+    ],
+    "visible": "《Trip Plan.md》"
+  },
+  {
+    "label": "字面百分号",
+    "source": "`/work/Trip%20Plan.md`",
+    "targets": [
+      "/work/Trip%20Plan.md"
+    ],
+    "visible": "《Trip%20Plan.md》"
+  },
+  {
+    "label": "同名不同目录",
+    "source": "[A](/work/A/分析.pdf) 和 [B](/work/B/分析.pdf)",
+    "targets": [
+      "/work/A/分析.pdf",
+      "/work/B/分析.pdf"
+    ],
+    "visible": "《分析.pdf》 和 《分析.pdf》"
+  },
+  {
+    "label": "命令保留原样",
+    "source": "执行 `/usr/bin/python3 generate.py` 生成报告。",
+    "targets": [],
+    "visible": "执行 /usr/bin/python3 generate.py 生成报告。"
+  },
+  {
+    "label": "句子保留原样",
+    "source": "/work/旧稿.md 已另存为 新稿.pdf",
+    "targets": [
+      "/work/旧稿.md"
+    ],
+    "visible": "《旧稿.md》 已另存为 新稿.pdf"
+  },
+  {
+    "label": "已有书名号",
+    "source": "《[杭州](file:///Users/example/Desktop/杭州旅游介绍.md)》已完成。",
+    "targets": [
+      "/Users/example/Desktop/杭州旅游介绍.md"
+    ],
+    "visible": "《杭州旅游介绍.md》已完成。"
+  },
+  {
+    "label": "嵌套列表重复路径",
+    "source": "[杭州](file:///Users/example/Desktop/杭州旅游介绍.md)\n\n- 路径：`/Users/example/Desktop/杭州旅游介绍.md`",
+    "targets": [
+      "/Users/example/Desktop/杭州旅游介绍.md"
+    ],
+    "visible": "《杭州旅游介绍.md》"
+  },
+  {
+    "label": "引用中先列路径",
+    "source": "> - 路径：`/Users/example/Desktop/杭州旅游介绍.md`\n\n《**[杭州](file:///Users/example/Desktop/杭州旅游介绍.md)**》",
+    "targets": [
+      "/Users/example/Desktop/杭州旅游介绍.md"
+    ],
+    "visible": "《杭州旅游介绍.md》"
+  },
+  {
+    "label": "独立重复链接",
+    "source": "[杭州](file:///Users/example/Desktop/杭州旅游介绍.md)\n\n- [旅行](/Users/example/Desktop/杭州旅游介绍.md)",
+    "targets": [
+      "/Users/example/Desktop/杭州旅游介绍.md"
+    ],
+    "visible": "《杭州旅游介绍.md》"
+  },
+  {
+    "label": "波浪围栏",
+    "source": "~~~md\n[指南](/Users/example/Desktop/杭州旅游介绍.md)\n~~~",
+    "targets": [],
+    "visible": "[指南](/Users/example/Desktop/杭州旅游介绍.md)"
+  },
+  {
+    "label": "长反引号围栏",
+    "source": "````md\n```\n[指南](/Users/example/Desktop/杭州旅游介绍.md)\n````",
+    "targets": [],
+    "visible": "```\n[指南](/Users/example/Desktop/杭州旅游介绍.md)"
+  },
+  {
+    "label": "圆括号属于完整文件名",
+    "source": "已保存 /work/说明.md(定稿).pdf。",
+    "targets": [
+      "/work/说明.md(定稿).pdf"
+    ],
+    "visible": "已保存 《说明.md(定稿).pdf》。",
+    "distinct": [
+      "/work/说明.md"
+    ]
+  },
+  {
+    "label": "双反引号保留为代码",
+    "source": "这里的代码是 ``/work/说明.md``。",
+    "targets": [],
+    "visible": "这里的代码是 /work/说明.md。"
+  }
+]

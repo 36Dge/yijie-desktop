@@ -2,11 +2,42 @@
 import { computed, inject, ref, useId, watch } from "vue";
 import { NTooltip } from "naive-ui";
 import { chatTextRevealKey } from "../../composables/useChatTextReveal";
-import { useChatMessageLink } from "../../composables/useChatMessageLink";
+import { isSidebarFile } from "../../domain/conversation-file-preview";
+import ChatFileLink from "./ChatFileLink.vue";
+import type { MessageFileReference } from "../../domain/message-file-reference";
+import { messageFileActionKey, messageFileLocationKey, messageFileWorkspaceKey, messageLinkTargetKey, useChatMessageLink } from "../../composables/useChatMessageLink";
 import ChatStreamText from "./ChatStreamText.vue";
 
-const props = defineProps<{ text: string; destination: string | null; offset: number; streaming: boolean }>();
+const props = defineProps<{ text: string; file?: MessageFileReference; destination: string | null; offset: number; streaming: boolean }>();
 const {href, pending, error, open} = useChatMessageLink(() => props.destination);
+const fileAction = inject(messageFileActionKey, null);
+const target = inject(messageLinkTargetKey, () => undefined);
+function openFile() {
+  const scope = target();
+  if (scope && props.file) fileAction?.value?.(scope, props.file);
+}
+const fileLocation = inject(messageFileLocationKey, null);
+const workspace = inject(messageFileWorkspaceKey, null);
+const absoluteHint = ref("");
+const fileHint = computed(() => {
+  const path = props.file?.path ?? "";
+  return workspace?.value && !path.startsWith("/") ? workspace.value + "/" + path : absoluteHint.value || path;
+});
+let locationRequest: Promise<void> | undefined;
+let generation = 0;
+watch([() => props.file?.path, target, () => fileLocation?.value], () => {
+  generation++;
+  locationRequest = undefined;
+  absoluteHint.value = "";
+}, { flush: "sync" });
+function locateFile() {
+  const scope = target(), file = props.file, locate = fileLocation?.value;
+  if (!scope || !file || file.path.startsWith("/") || workspace?.value || !locate || absoluteHint.value || locationRequest) return;
+  const request = generation;
+  locationRequest = locate(scope, file).then(path => {
+    if (request === generation) absoluteHint.value = path;
+  }).catch(() => {}).finally(() => { if (request === generation) locationRequest = undefined; });
+}
 const reveal = inject(chatTextRevealKey, null);
 const shown = computed(() => !reveal || reveal.frame.value.cursor > props.offset);
 const hovered = ref(false), focused = ref(false);
@@ -17,7 +48,10 @@ watch(() => props.destination, dismiss);
 </script>
 
 <template>
-  <NTooltip arrow-point-to-center v-if="shown" :show="tooltipVisible" trigger="manual" placement="top">
+  <ChatFileLink v-if="shown && file" :disabled="!fileAction || !target()" :tooltip="fileHint" @hint="locateFile" :controls="isSidebarFile('', file.name) ? 'conversation-file-preview' : 'conversation-media-preview'" @open="openFile">
+    <ChatStreamText :text="text" :streaming="streaming" :offset="offset" />
+  </ChatFileLink>
+  <NTooltip arrow-point-to-center v-else-if="shown" :show="tooltipVisible" trigger="manual" placement="top">
     <template #trigger>
       <component :is="href ? 'a' : 'span'" class="chat-text-link" :class="{'chat-text-link--enabled': href}"
         :href="href" :target="href ? '_blank' : undefined" :rel="href ? 'noopener noreferrer' : undefined"

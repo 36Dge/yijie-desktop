@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import YjTooltip from "../yijie/YjTooltip.vue";
-import { computed } from "vue";
+import ChatFileLink from "./ChatFileLink.vue";
+import { computed, useTemplateRef } from "vue";
 import { isSidebarFile } from "../../domain/conversation-file-preview";
 import { chatFilePresentation } from "../../domain/chat-file-presentation";
 import { NProgress, NTag } from "naive-ui";
@@ -25,6 +26,13 @@ const props = defineProps<{
   reportNativeClient?: ChatArtifactReportNativeClient;
 }>();
 
+const image = useTemplateRef<InstanceType<typeof ChatArtifactImage>>("image");
+const video = useTemplateRef<InstanceType<typeof ChatArtifactVideo>>("video");
+const mediaLink = computed(() => props.artifact.status === "ready" && ["image", "video"].includes(props.artifact.kind));
+function openMedia(event: MouseEvent) {
+  if (props.artifact.kind === "image") void image.value?.openLightbox(event);
+  else void video.value?.play();
+}
 const kindPresentation = computed(() => props.artifact.mediaType && props.artifact.kind !== "report" ? chatFilePresentation(props.artifact.mediaType) : ({
   image: { label: "图片", icon: "image" as const },
   video: { label: "视频", icon: "file" as const },
@@ -85,26 +93,27 @@ const progressLabel = computed(() => `${displayName.value}处理进度`);
     :aria-labelledby="titleId"
     tabindex="0"
   >
-    <header class="artifact-shell__header">
-      <span class="artifact-shell__kind-icon" aria-hidden="true">
+    <header class="artifact-shell__header" :class="{ 'artifact-shell__header--linked': mediaLink }">
+      <span v-if="!mediaLink" class="artifact-shell__kind-icon" aria-hidden="true">
         <YjIcon :name="kindPresentation.icon" size="lg" tone="muted" />
       </span>
       <span class="artifact-shell__identity">
-        <YjTooltip v-if="sidebarFile" :text="displayName"><button  :id="titleId" type="button" class="artifact-shell__name artifact-shell__open"  @click="openFile?.(artifact)">{{ displayName }}</button></YjTooltip>
+        <ChatFileLink v-if="mediaLink" :id="titleId" :tooltip="displayName" @open="openMedia">《{{ displayName }}》</ChatFileLink>
+        <YjTooltip v-else-if="sidebarFile" :text="displayName"><button  :id="titleId" type="button" class="artifact-shell__name artifact-shell__open"  @click="openFile?.(artifact)">{{ displayName }}</button></YjTooltip>
         <strong v-else :id="titleId" class="artifact-shell__name">{{ displayName }}</strong>
         <span class="artifact-shell__kind">{{ kindPresentation.label }}<template v-if="sizeLabel"> · {{ sizeLabel }}</template></span>
       </span>
       <NTag size="small" :bordered="false">{{ provenanceLabel }}</NTag>
     </header>
 
-    <ChatArtifactImage
+    <ChatArtifactImage ref="image"
       v-if="artifact.kind === 'image' && artifact.status === 'ready'"
       :artifact="artifact"
       :context-id="contextId"
       :client="nativeClient"
     />
 
-    <ChatArtifactVideo
+    <ChatArtifactVideo ref="video"
       v-if="artifact.kind === 'video' && artifact.status === 'ready'"
       :artifact="artifact"
       :context-id="contextId"
@@ -202,6 +211,8 @@ const progressLabel = computed(() => `${displayName.value}处理进度`);
   align-items: center;
   gap: var(--yj-space-3);
 }
+
+.artifact-shell__header--linked { grid-template-columns: minmax(0, 1fr) auto; }
 
 .artifact-shell__kind-icon {
   display: inline-flex;

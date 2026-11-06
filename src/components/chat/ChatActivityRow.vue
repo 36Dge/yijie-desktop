@@ -272,6 +272,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange) { emit("app
             <ChatSafeContent
               v-else-if="item.presentation !== 'unknown' && item.presentation !== 'command' && item.presentation !== 'tool' && item.contentBlocks.length > 0"
               :blocks="skillMessages.get(item.identity)?.blocks ?? item.contentBlocks"
+              :file-links="item.kind === 'assistant_message'"
               :link-target="item.kind === 'assistant_message' ? {sessionId: item.threadId, turnId: item.turnId, itemId: item.itemId} : undefined"
               :mode="item.presentation === 'user_message' ? 'plain' : item.contentMode"
               :typography="!processPresentation && (answerCandidate || ['final_answer', 'assistant_unclassified'].includes(item.presentation)) ? 'answer' : 'compact'"

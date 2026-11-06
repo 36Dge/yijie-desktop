@@ -36,16 +36,21 @@ describe("FEAT-166 conversation preview rules", () => {
     openPreviewFile(s, { ...a, source: { kind: "attachment", sessionId: "s", messageId: null, attachmentId: "same" } }, () => "3");
     expect(s.tabs).toHaveLength(2);
   });
-  it.each([[720,false,0],[720.67,false,0],[721,true,320],[800,true,320],[924,true,320],[940,true,320],[1012,true,320],[1028,true,320],[1108,true,320],[2400,true,320]])("width %s opens at the panel minimum while respecting both columns", (width, available, right) => {
-    const g = previewWidths(Number(width)); expect(g.available).toBe(available); expect(g.right).toBe(right);
-    if (g.available) { expect(g.chat).toBeGreaterThanOrEqual(400); expect(g.chat + g.right + 1).toBe(width); }
+  it.each([736, 736.67])("keeps the full %s px for chat when both columns cannot fit", width => {
+    expect(previewWidths(width)).toMatchObject({ available: false, right: 0, chat: width });
+  });
+  it.each([737, 800, 924, 940, 1012, 1028, 1083, 1108, 2400])("width %s opens at the panel minimum while respecting both columns", width => {
+    const geometry = previewWidths(width);
+    expect(geometry).toMatchObject({ available: true, min: 336, right: 336 });
+    expect(geometry.chat).toBeGreaterThanOrEqual(400);
+    expect(geometry.chat + geometry.right + 1).toBe(width);
   });
   it("clamps a preference without rewriting it and resets to default", () => {
     expect(previewWidths(2000,1000).right).toBe(1000);
     expect(previewWidths(940,1000).right).toBe(539);
     expect(previewWidths(2000,1000).right).toBe(1000);
-    expect(previewWidths(2000).right).toBe(320);
-    expect(previewWidths(940,0).right).toBe(320);
+    expect(previewWidths(2000).right).toBe(336);
+    expect(previewWidths(1083,335).right).toBe(336);
   });
   it.each([["image/png","a.bin"],["video/mp4","a.bin"],["text/plain","figure.SVG"],["","movie.mov"]])("excludes media %s/%s from the sidebar", (mime,name) => expect(isSidebarFile(mime,name)).toBe(false));
   it("allows actual non-media files and makes integrity failures nonretryable", () => {

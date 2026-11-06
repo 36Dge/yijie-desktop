@@ -82,6 +82,23 @@ afterEach(() => {
 });
 
 describe("ChatArtifactVideo", () => {
+  it("plays once after the first filename click while the Native preview is opening", async () => {
+    const opening = deferred<{status: "opened"; previewUrl: string}>();
+    const client = nativeClient();
+    vi.mocked(client.openVideoPreview).mockReturnValue(opening.promise);
+    const playback = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const wrapper = await mountedReady(client);
+    try {
+      wrapper.vm.play();
+      expect(client.openVideoPreview).toHaveBeenCalledTimes(1);
+      opening.resolve({status: "opened", previewUrl: URL_A});
+      await flushPromises();
+      await wrapper.get("video").trigger("loadedmetadata");
+      expect(playback).toHaveBeenCalledOnce();
+      await wrapper.get("video").trigger("loadedmetadata");
+      expect(playback).toHaveBeenCalledOnce();
+    } finally { wrapper.unmount(); }
+  });
   it("fails closed for non-video and non-ready Artifacts", async () => {
     const client = nativeClient();
     const image = mount(ChatArtifactVideo, {
