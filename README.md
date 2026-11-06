@@ -10,6 +10,12 @@ FEAT-164 原主工作目录日常模式：在本仓用 `pnpm daily:prepare --gen
 
 2026-10-13：FEAT-158接入普通canonical本地客户端，保留原应用身份、数据和会话；日常“扩展”入口提供技能与专家。启动、同构建重开及关闭专家后的兼容读取方式见 [本地开发](docs/local-development.md)。
 
+## FEAT-168 本机生图
+
+日常客户端从原「易界.app」或 `pnpm client:dev` 打开。正常退出后，在本仓执行 `python3 -B scripts/development-client.py images-enable` 启用内置生图，再次打开即可使用。需要暂停时，正常退出后执行同一脚本的 `images-pause`，再打开原入口。两个操作仅切换本机启动设置，使用同一会话库。首次使用内置生图时，如果日常账户缺少方舟 Key，系统会弹出掩码输入框。
+
+在本仓运行 `pnpm client:images:prepare` 构建独立应用，再用 `pnpm client:images:open` 打开。应用身份为 `com.yijie.ai.feat168-images`，使用自己的会话和 Host 数据目录。直接描述想画的图片，或附上一张人物参考图；结果沿用对话中的预览和保存。选中自带生图工具的专家后，优先级一直保持到移除或切换。
+
 ## 仓库职责
 
 - 卖家登录和店铺授权引导；

@@ -11,6 +11,22 @@ development = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(development)
 
 class DevelopmentClientTest(unittest.TestCase):
+    def test_daily_images_can_be_paused_without_changing_the_database(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder).resolve()
+            selected = {"output": base / "development", "native": base / "native"}
+            selected["output"].mkdir()
+            (selected["native"] / "chat").mkdir(parents=True)
+            database = selected["native"] / "chat/conversations.db"
+            self.assertFalse(development.daily_images_setting(selected["output"]))
+            with self.assertRaises(ValueError):
+                development.set_daily_images(selected, True)
+            database.write_bytes(b"retained normal fixture")
+            for enabled in (True, True, False):
+                development.set_daily_images(selected, enabled)
+                self.assertEqual(development.daily_images_setting(selected["output"]), enabled)
+                self.assertEqual(database.read_bytes(), b"retained normal fixture")
+
     def test_fixed_output_keeps_original_daily_homes(self):
         root = Path("/workspace/yijie-desktop")
         selected = development.paths(root, Path("/Users/owner"))
@@ -41,10 +57,13 @@ class DevelopmentClientTest(unittest.TestCase):
         root = Path("/workspace/yijie-desktop")
         original = {"PATH": "/usr/bin", "HOME": str(Path.home()), "YIJIE_FEAT164_PRIMARY_GENERATION": "20261031-01",
                     "YIJIE_FEAT162_OBSERVATION_PROFILE": "old-profile", "TAURI_CONFIG": "old-config",
-                    "YIJIE_AGENT_HOST_HOME": "/old-profile", "VITE_YIJIE_EXPERTS_ENABLED": "false"}
+                    "YIJIE_AGENT_HOST_HOME": "/old-profile", "VITE_YIJIE_EXPERTS_ENABLED": "false",
+                    "YIJIE_FEAT168_DAILY_IMAGES": "true", "YIJIE_FEAT168_HOST_IMAGES": "true"}
         with patch.object(development, "supported_go", return_value="/existing/toolchain/bin"):
             env = development.environment(root, original)
         self.assertEqual(env["YIJIE_DEVELOPMENT_CLIENT"], "true")
+        self.assertEqual(env["YIJIE_FEAT168_DAILY_IMAGES"], "false")
+        self.assertNotIn("YIJIE_FEAT168_HOST_IMAGES", env)
         self.assertEqual(env["CARGO_TARGET_DIR"], str(root / ".local/development/target"))
         self.assertEqual(env["PATH"], "/existing/toolchain/bin:/usr/bin")
         for key in ("TAURI_CONFIG", "YIJIE_FEAT164_PRIMARY_GENERATION", "YIJIE_FEAT162_OBSERVATION_PROFILE", "YIJIE_AGENT_HOST_HOME", "VITE_YIJIE_EXPERTS_ENABLED"):

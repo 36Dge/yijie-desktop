@@ -54,7 +54,7 @@ describe("local demo launcher profiles", () => {
       fail() { exit 1; }
       scheduled_daily="$1"
       chat_models_enabled="$2"
-      image_generation_enabled="true"
+      image_generation_enabled="false"
       workflow_requested="false"
       experts_requested=""
       reopen_app="false"
@@ -64,7 +64,7 @@ describe("local demo launcher profiles", () => {
       ${runner.slice(start, selectionEnd)}
       printf '%s:%s:%s' "$YIJIE_MARKET_CONNECTORS_ENABLED" "$VITE_YIJIE_MARKET_CONNECTORS_ENABLED" "$image_generation_enabled"
     `, "connector-profile", daily, models, override]);
-    expect(stdout).toBe(`${expected}:${expected}:${expected === "true" ? "false" : "true"}`);
+    expect(stdout).toBe(`${expected}:${expected}:false`);
   });
 
   it.each([
@@ -122,7 +122,7 @@ describe("local demo launcher profiles", () => {
 
   it("maps the exact stable argument to image=false while retaining the legacy image profile", async () => {
     const runner = await readFile(runnerPath, "utf8");
-    const argumentStart = runner.indexOf('image_generation_enabled="true"');
+    const argumentStart = runner.indexOf('image_generation_enabled="false"');
     const argumentEnd = runner.indexOf(
       '[[ -f "$codex_binary" && -x "$codex_binary" && ! -L "$codex_binary" ]]',
     );
@@ -130,7 +130,7 @@ describe("local demo launcher profiles", () => {
     expect(argumentEnd).toBeGreaterThan(argumentStart);
     const argumentBoundary = runner.slice(argumentStart, argumentEnd);
 
-    expect(argumentBoundary).toContain('image_generation_enabled="true"');
+    expect(argumentBoundary).toContain('image_generation_enabled="false"');
     expect(argumentBoundary).toContain('[[ "$1" == "--stable-api-only" ]]');
     expect(argumentBoundary).toContain('image_generation_enabled="false"');
     expect(argumentBoundary).toContain('stable_api_only="true"');
@@ -299,7 +299,7 @@ describe("local demo launcher profiles", () => {
     ["daily default reopen", "", ["--packaged", "--reopen"], "true:daily:true:false"],
   ])("selects only explicit content isolation for %s", async (_label, experts, args, expected) => {
     const runner = await readFile(runnerPath, "utf8");
-    const start = runner.indexOf('image_generation_enabled="true"');
+    const start = runner.indexOf('image_generation_enabled="false"');
     const end = runner.indexOf("# The normal local entry", start);
     const { stdout } = await exec("/bin/bash", ["-c", `
       set -euo pipefail

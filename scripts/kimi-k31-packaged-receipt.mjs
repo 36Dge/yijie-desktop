@@ -11,16 +11,17 @@ import {workerBuildInputs} from "./expert-packaged-receipt.mjs";
 import {kimiCallSurfaces} from "./kimi-k31-build-candidate.mjs";
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const hash=v=>createHash("sha256").update(v).digest("hex");
+const hostImages=process.env.YIJIE_FEAT168_HOST_IMAGES==="true";
 const qualification=process.env.YIJIE_FEAT164_QUALIFICATION==="true";
 const daily=process.env.YIJIE_FEAT164_DAILY==="true";
 const primaryGeneration=process.env.YIJIE_FEAT164_PRIMARY_GENERATION;
 assert(!primaryGeneration || daily,"Primary requires the daily profile");
 const primary=primaryGeneration?JSON.parse(execFileSync("python3",["-B",path.join(root,"scripts/feat164_primary.py"),"layout","--generation",primaryGeneration],{encoding:"utf8"})):null;
 assert(!(daily&&qualification),"Daily and qualification receipts cannot be mixed");
-const runtimeRoot=primary?path.relative(root,primary.output_root):daily?".local/feat164-daily":qualification?".local/feat164-qualification":".local/feat164-kimi-k31";
+const runtimeRoot=hostImages?".local/feat168-images":primary?path.relative(root,primary.output_root):daily?".local/feat164-daily":qualification?".local/feat164-qualification":".local/feat164-kimi-k31";
 const receipt=primary?.receipt??path.join(root,runtimeRoot,"packaged-launch-receipt.json");
-const bundleName=daily?"易界 AI.app":qualification?"易界 AI FEAT-164 验收.app":"易界 AI FEAT-164.app";
-const identifier=daily?"com.yijie.ai":qualification?"com.yijie.ai.feat164-qualification-v1":"com.yijie.ai.feat164-kimi-k31-r1";
+const bundleName=hostImages?"易界 AI FEAT-168.app":daily?"易界 AI.app":qualification?"易界 AI FEAT-164 验收.app":"易界 AI FEAT-164.app";
+const identifier=hostImages?"com.yijie.ai.feat168-images":daily?"com.yijie.ai":qualification?"com.yijie.ai.feat164-qualification-v1":"com.yijie.ai.feat164-kimi-k31-r1";
 async function fileRecord(file){
  const stat=await lstat(file);assert(stat.isFile(),"Regular file required");
  const digest=createHash("sha256");for await(const bytes of createReadStream(file))digest.update(bytes);
@@ -58,10 +59,12 @@ if(action==="--inputs-digest"){
   const content=files=>Object.fromEntries(Object.entries(files).map(([name,v])=>[name,{sha256:v.sha256,bytes:v.bytes}]));
   assert.deepEqual(content(actual),content(expected),"Packaged expert resources differ from the checked slot");
  }
- const current={schema_version:1,feature:"FEAT-164",mode:"local_worktree_candidate",release:false,...(daily?{deployment_policy:"feat164-daily-existing-homes-v1",activation_policy:"feat164-daily-activated-homes-v2"}:{}),inputs:source,artifacts:{bundle:bundleFiles,host:await fileRecord(path.join(root,runtimeRoot,"bin/yijie-agent-host")),runtime:await fileRecord(runtimeBinary),runtimeManifest:await fileRecord(runtimeManifest)}};
+ const current={schema_version:1,feature:hostImages?"FEAT-168":"FEAT-164",mode:"local_worktree_candidate",release:false,...(daily?{deployment_policy:"feat164-daily-existing-homes-v1",activation_policy:"feat164-daily-activated-homes-v2"}:{}),inputs:source,artifacts:{bundle:bundleFiles,host:await fileRecord(path.join(root,runtimeRoot,"bin/yijie-agent-host")),runtime:await fileRecord(runtimeBinary),runtimeManifest:await fileRecord(runtimeManifest)}};
  if(primary){current.primary_policy="feat164-primary-existing-homes-v3";current.primary_source=primary;}
  if(kimiCallSurfaces().market){
-  const manifest=primary?.worker_manifest??path.resolve(root,"../yijie-connectors/bin/market-worker/current.json");
+  const manifest=hostImages
+    ? path.join(root,runtimeRoot,"worker",hash(JSON.stringify(source.workerSources)),"current.json")
+    : primary?.worker_manifest??path.resolve(root,"../yijie-connectors/bin/market-worker/current.json");
   assert.equal(process.env.YIJIE_MARKET_WORKER_MANIFEST,manifest);
   const worker=JSON.parse(await readFile(manifest,"utf8"));
   assert.equal(worker.schemaVersion,2);assert.equal(worker.candidateOnly,true);assert.match(worker.sha256,/^[a-f0-9]{64}$/);
@@ -83,12 +86,12 @@ if(action==="--inputs-digest"){
  assert(current.artifacts.host.mode&0o111);assert(current.artifacts.runtime.mode&0o111);
  if(action==="--check"){
   assert.deepEqual(JSON.parse(await readFile(receipt,"utf8")),current,"Candidate sources/environment/artifacts changed; rebuild through the canonical entry");
-  process.stdout.write("FEAT-164 same-build reopen verified; local provenance only.\n");
+  process.stdout.write(`${current.feature} same-build reopen verified; local provenance only.\n`);
  }else{
   assert.equal(hash(JSON.stringify(source)),expected,"Candidate inputs changed during build");
   if(kimiCallSurfaces().market)assert.equal(hash(JSON.stringify(source.workerSources)),expectedWorker,"Worker inputs changed during build");
   const temporary=receipt+`.tmp-${process.pid}`;
   await writeFile(temporary,JSON.stringify(current,null,2)+"\n",{flag:"wx",mode:0o600});await rename(temporary,receipt);
-  process.stdout.write("FEAT-164 canonical candidate build recorded; local provenance only.\n");
+  process.stdout.write(`${current.feature} canonical candidate build recorded; local provenance only.\n`);
  }
 }

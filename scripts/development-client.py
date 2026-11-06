@@ -13,6 +13,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import feat164_primary as primary
@@ -95,13 +96,41 @@ def environment(root, environ):
     env = primary.build_environment(environ)
     env["PATH"] = supported_go(root, env) + os.pathsep + env["PATH"]
     selected = paths(root, Path(env["HOME"]))
-    return {**env, "YIJIE_DEVELOPMENT_CLIENT": "true",
+    images = daily_images_setting(selected["output"])
+    return {**env, "YIJIE_DEVELOPMENT_CLIENT": "true", "YIJIE_FEAT168_DAILY_IMAGES": "true" if images else "false",
             "CARGO_TARGET_DIR": str(selected["target"]), "YIJIE_WORKER_TARGET_DIR": str(selected["worker_target"])}
+
+
+def daily_images_setting(output):
+    record = output / "host-images.json"
+    if not os.path.lexists(record):
+        return False
+    value, _ = primary.read_json(record)
+    primary.require(isinstance(value, dict) and set(value) == {"schemaVersion", "enabled"}
+                    and type(value["schemaVersion"]) is int and value["schemaVersion"] == 1
+                    and type(value["enabled"]) is bool, "日常生图配置格式无效。")
+    return value["enabled"]
+
+
+def set_daily_images(selected, enabled):
+    database = selected["native"] / "chat/conversations.db"
+    primary.require(database.is_file() and database.resolve(strict=True) == database, "缺少原日常会话库。")
+    output = selected["output"]
+    primary.directory(output)
+    if daily_images_setting(output) == enabled:
+        return
+    # Publish a complete preference atomically, outside all three data Homes.
+    with tempfile.TemporaryDirectory(dir=output) as temporary:
+        stage = Path(temporary) / "host-images.json"
+        primary.write_new(stage, {"schemaVersion": 1, "enabled": enabled})
+        os.replace(stage, output / "host-images.json")
 
 
 def start(bundle_for_ui=False):
     selected = check()
     env = environment(ROOT, os.environ)
+    if env["YIJIE_FEAT168_DAILY_IMAGES"] == "true":
+        primary.require((selected["native"] / "chat/conversations.db").is_file(), "缺少原日常会话库，已停止启动。")
     if bundle_for_ui:
         env["YIJIE_DEVELOPMENT_UI_BUNDLE"] = "true"
     cache = build_cache.discover(ROOT, env)
@@ -132,8 +161,12 @@ def start(bundle_for_ui=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["start", "start-ui", "check", "ready"], default="start", nargs="?")
+    parser.add_argument("action", choices=["start", "start-ui", "check", "ready", "images-enable", "images-pause"], default="start", nargs="?")
     args = parser.parse_args()
+    if args.action in ("images-enable", "images-pause"):
+        set_daily_images(check(), args.action == "images-enable")
+        print("已保存日常生图设置，下次从原入口打开时生效。")
+        return 0
     if args.action == "check":
         check()
         print("Fixed development data roots verified; no database opened.")

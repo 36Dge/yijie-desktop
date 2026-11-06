@@ -33,6 +33,20 @@ pub(crate) fn daily_admitted(identifier: &str) -> bool {
 }
 
 pub(crate) fn admitted(identifier: &str) -> bool {
+    let image_candidate = std::env::var("YIJIE_FEAT168_HOST_IMAGES").as_deref() == Ok("true");
+    if image_candidate && daily_selected() {
+        return daily_admitted(identifier)
+            && std::env::var("YIJIE_DEVELOPMENT_CLIENT").as_deref() == Ok("true")
+            && std::env::var("YIJIE_FEAT168_DAILY_IMAGES").as_deref() == Ok("true")
+            && std::env::var("YIJIE_KIMI_K31_CALL_SURFACES").as_deref() == Ok("media");
+    }
+    if image_candidate || identifier == "com.yijie.ai.feat168-images" {
+        return image_candidate && identifier == "com.yijie.ai.feat168-images"
+            && crate::chat::models::v2_enabled() && !daily_selected()
+            && std::env::var("YIJIE_KIMI_K31_CALL_SURFACES").as_deref() == Ok("media")
+            && std::env::var("YIJIE_FEAT155_SCHEDULED_CANDIDATE").as_deref() == Ok("true")
+            && std::env::var("YIJIE_FEAT155_SCHEDULED_DAILY").as_deref() == Ok("false");
+    }
     if !matches!(
         std::env::var("YIJIE_FEAT164_DAILY").ok().as_deref(),
         None | Some("false") | Some("true")

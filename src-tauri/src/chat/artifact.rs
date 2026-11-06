@@ -3204,9 +3204,18 @@ mod tests {
             .map(|(kind, mime, name)| (kind, mime, name, fs::read(root.join(name)).unwrap()))
             .collect();
         }
+        let mut cases: Vec<_> = cases.into_iter()
+            .map(|(kind, mime, name, bytes)| (kind, mime, name, bytes, ArtifactProvenance::Tool))
+            .collect();
+        if let Some(path) = std::env::var_os("YIJIE_TEST_FEAT128_PROVIDER_JPEG") {
+            // Public synthetic cat saved by the original image-01 acceptance run.
+            let bytes = fs::read(path).unwrap();
+            assert_eq!(format!("{:x}", Sha256::digest(&bytes)), "5f5901c9a724c30cdf671025dce53c6adca079355dd0d0bd4c1d0c00c800a4f5");
+            cases.push((ArtifactKind::Image, "image/jpeg", "generated-image", bytes, ArtifactProvenance::Provider));
+        }
         let committed_at = unix_seconds().unwrap();
         let mut records = Vec::new();
-        for (ordinal, (kind, mime, name, bytes)) in cases.into_iter().enumerate() {
+        for (ordinal, (kind, mime, name, bytes, provenance)) in cases.into_iter().enumerate() {
             let id = Uuid::now_v7();
             let digest = format!("{:x}", Sha256::digest(&bytes));
             let identity = ArtifactIdentity {
@@ -3214,7 +3223,7 @@ mod tests {
                 local_session_id: session,
                 local_turn_id: turn,
                 kind,
-                provenance: ArtifactProvenance::Tool,
+                provenance,
                 ordinal,
                 display_name: Some(name.into()),
             };
@@ -3224,7 +3233,7 @@ mod tests {
                 local_session_id: session,
                 local_turn_id: turn,
                 kind,
-                provenance: ArtifactProvenance::Tool,
+                provenance,
                 ordinal,
                 display_name: Some(name.into()),
                 media_type: mime.into(),

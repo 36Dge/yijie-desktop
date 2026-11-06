@@ -20,6 +20,9 @@ export function expertErrorMessage(code: ErrorCode): string {
     case "unsupported_capability": return "当前客户端尚未接通专家服务，暂不可用。";
     case "not_found":
     case "version_unavailable": return "此专家版本当前不可用，请重新读取。";
+    case "model_unavailable": return "当前对话模型尚未就绪，请等模型状态更新后发送。";
+    case "permission_mode_unavailable": return "当前权限模式不支持这次专家操作，请核对会话权限。";
+    case "resource_unavailable": return "所选专家资源尚未就绪，请重新读取资源状态。";
     case "temporarily_unavailable": return "专家服务暂不可用，请重新读取。";
     default: return "专家操作未完成，请重新读取状态。";
   }

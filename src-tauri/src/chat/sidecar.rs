@@ -404,6 +404,11 @@ impl SidecarConfig {
                 ),
             ]);
         }
+        if std::env::var("YIJIE_FEAT168_HOST_IMAGES").as_deref() == Ok("true")
+            && self.chat_models_enabled && self.artifact_v3_enabled
+            && cfg!(feature = "kimi-k31-pro-candidate") {
+            values.push(("YIJIE_FEAT168_HOST_IMAGES", "true".to_owned()));
+        }
         if self.image_generation_enabled {
             values.push((FEAT128_IMAGE_GENERATION_ENV, "true".to_owned()));
         }

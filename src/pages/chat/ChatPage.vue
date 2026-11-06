@@ -32,6 +32,7 @@ import ChatShopControl from "../../components/chat/ChatShopControl.vue";
 import ChatConnectorControl from "../../components/chat/ChatConnectorControl.vue";
 import ChatSkillControl from "../../components/chat/ChatSkillControl.vue";
 import ChatExpertControl from "../../components/chat/ChatExpertControl.vue";
+import { explicitExpertInvocation } from "../../domain/explicit-expert";
 import { useChatExpertPicker } from "../../composables/useChatExpertPicker";
 import type { CatalogEntry } from "../../domain/experts-v2.generated";
 import { skillMarketplaceUiEnabled } from "../../authorization/skill-marketplace-ui-config";
@@ -862,8 +863,9 @@ async function pickProject(): Promise<void> {
   }
 }
 
+let resolvingNamedExpert = false;
 async function submit(recoverExpert = false): Promise<void> {
-  if (submitting.value || (!recoverExpert && !models.ready.value)) return;
+  if (resolvingNamedExpert || submitting.value || (!recoverExpert && !models.ready.value)) return;
   if (isDraftMode.value) {
     const target = composerDraftTargetKey.value;
     const result = await draft.submit(prompt.value, models.intent.value);
@@ -878,6 +880,42 @@ async function submit(recoverExpert = false): Promise<void> {
   if (!recoverExpert && !expertSendReady.value) return;
   if (recoverExpert && !expertSubmission.value) return;
   if (!recoverExpert && !workspaceSelectionValid.value) { transientNotice.value = "所选工作空间已不可用，请重新选择或取消工作空间后发送。"; return; }
+  if (!recoverExpert && expertsUiEnabled) {
+    const text = prompt.value;
+    const target = composerDraftTargetKey.value;
+    const contextId = chatStore.context?.contextId;
+    const named = explicitExpertInvocation(text, expertResources.entries, selectedExpert.value);
+    if (named.kind === "ambiguous") {
+      transientNotice.value = "请从专家选择器中选定要使用的专家，再发送这条消息。";
+      return;
+    }
+    if (named.kind === "select") {
+      const profile = models.profile.value;
+      const attachments = chatStore.draftAttachments.map(item => item.attachmentId).join(",");
+      resolvingNamedExpert = true;
+      try {
+        if (!await expertPicker.select(named.entry)) {
+          transientNotice.value = expertPicker.error.value ?? "专家选择未完成，请检查专家状态后再发送。";
+          return;
+        }
+        // Completing resource preparation clears the busy flag and starts the
+        // normal model-catalog refresh. Wait for an authoritative intent before
+        // freezing the new turn. No model call occurs during a catalog read.
+        await nextTick();
+        if (!models.ready.value) await models.refresh();
+        if (composerDraftTargetKey.value !== target || chatStore.context?.contextId !== contextId ||
+          text !== prompt.value || chatStore.draftAttachments.map(item => item.attachmentId).join(",") !== attachments ||
+          !expertSendReady.value || !permissionCanSend.value || !models.ready.value || models.profile.value !== profile ||
+          selectedExpert.value?.expertId !== named.entry.display.expertId ||
+          selectedExpert.value.version !== named.entry.display.version) {
+          transientNotice.value = "已保留草稿，请核对当前专家、模型和附件后发送。";
+          return;
+        }
+      } finally {
+        resolvingNamedExpert = false;
+      }
+    }
+  }
   if (!recoverExpert && !prepareConnectorSubmit()) return;
   const focusSnapshot: ChatComposerFocusSnapshot | null = composer.value?.captureInputFocus() ?? null;
   submitting.value = true;

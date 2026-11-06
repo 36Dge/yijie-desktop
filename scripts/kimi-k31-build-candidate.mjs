@@ -11,6 +11,17 @@ const contracts=path.resolve(desktop,"../yijie-contracts"),host=path.resolve(des
 const hash=b=>createHash("sha256").update(b).digest("hex");
 const commit="62070251d0da84ce4c5eba0c7b25d9a48e5d5929";
 const lockFile="contracts/kimi-k31-host-build.candidate.json";
+const imageLock="contracts/host-images-build.candidate.json";
+function imageHostSnapshot(hostRoot, contractsRoot, hostCommit) {
+ const pin = JSON.parse(readFileSync(path.join(hostRoot, "api/runtime-host-images.candidate.json")));
+ assert.match(pin.source_commit, /^[a-f0-9]{40}$/);
+ const lockPath = "compatibility/runtime-host-images/source.lock.json";
+ const lock = execFileSync("git", ["-C", contractsRoot, "show", pin.source_commit + ":" + lockPath]);
+ assert.equal(hash(lock), pin.source_lock_sha256);
+ const {sources} = inputs(hostRoot, hostCommit);
+ return {feature:"FEAT-168", mode:"immutable_local_candidate", release:false, host_commit:hostCommit,
+   host_sources_sha256:hash(JSON.stringify(sources)), contracts_commit:pin.source_commit, runtime_lock_sha256:hash(lock)};
+}
 function inputs(hostRoot,ref){
  const git=(...args)=>execFileSync("git",["-C",hostRoot,...args],{encoding:"utf8",maxBuffer:16*1024*1024}).trim();
  if(ref){assert.match(ref,/^[a-f0-9]{40}$/);assert.equal(git("rev-parse",`${ref}^{commit}`),ref);}
@@ -69,6 +80,25 @@ export function verifyKimiK31BuildCandidate(desktopRoot,contractsRoot,hostRoot,e
  assert.equal(planLock.source_commit,"2dd214d6a702064edae78510c035442854bf9789");
  execFileSync(process.execPath,["scripts/sync-scheduled-plan-v2.mjs","--check"],{cwd:contractsRoot,stdio:"pipe"});
  execFileSync(process.execPath,["scripts/generate-scheduled-ipc-v2.mjs","--check"],{cwd:desktopRoot,stdio:"pipe"});
+ const fixedDaily = env.YIJIE_DEVELOPMENT_CLIENT === "true" && env.YIJIE_FEAT164_DAILY === "true";
+ if(fixedDaily || env.YIJIE_FEAT168_HOST_IMAGES==="true"){
+  assert.equal(env.YIJIE_KIMI_K31_CALL_SURFACES,"media");
+  if(fixedDaily) {
+   assert(["true","false"].includes(env.YIJIE_FEAT168_DAILY_IMAGES));
+   assert.equal(env.YIJIE_FEAT168_HOST_IMAGES,env.YIJIE_FEAT168_DAILY_IMAGES);
+  } else assert.notEqual(env.YIJIE_FEAT164_DAILY,"true");
+  checkPins(desktopRoot,hostRoot);
+  const frozen=JSON.parse(readFileSync(path.join(desktopRoot,imageLock)));
+  assert.deepEqual(frozen,imageHostSnapshot(hostRoot,contractsRoot,frozen.host_commit));
+  const hostPin=readFileSync(path.join(hostRoot,"api/runtime-host-images.candidate.json"));
+  assert.deepEqual(readFileSync(path.join(desktopRoot,"contracts/host-images-contracts.pin.json")),hostPin);
+  if(env.YIJIE_FEAT168_HOST_IMAGES==="true") {
+   execFileSync(process.execPath,["scripts/generate-runtime-host-images.mjs","--check","--pin="+frozen.contracts_commit],{cwd:contractsRoot});
+  }
+  const {sources}=inputs(hostRoot);
+  assert.equal(hash(JSON.stringify(sources)),frozen.host_sources_sha256,"Host build inputs differ from their committed source");
+  return sources;
+ }
  const actual=JSON.parse(readFileSync(path.join(desktopRoot,lockFile)));
  assert.equal(actual.feature,"FEAT-164");assert(["local_worktree_candidate","immutable_local_candidate"].includes(actual.mode));assert.equal(actual.release,false);
  assert.equal(actual.contracts_commit,commit);
@@ -80,7 +110,23 @@ export function verifyKimiK31BuildCandidate(desktopRoot,contractsRoot,hostRoot,e
 }
 if(process.argv[1]===fileURLToPath(import.meta.url)){
  const args=process.argv.slice(2);
- if(args[0]==="--freeze-commit"){
+ if(args[0]==="--freeze-host-images"){
+  assert.equal(args.length,1);
+  const hostCommit=execFileSync("git",["-C",host,"rev-parse","HEAD"],{encoding:"utf8"}).trim();
+  const snapshot=imageHostSnapshot(host,contracts,hostCommit);
+  assert.equal(hash(JSON.stringify(inputs(host).sources)),snapshot.host_sources_sha256);
+  execFileSync(process.execPath,["scripts/generate-runtime-host-images.mjs","--check","--pin="+snapshot.contracts_commit],{cwd:contracts});
+  writeFileSync(path.join(desktop,imageLock),JSON.stringify(snapshot,null,2)+"\n");
+ }else if(args[0]==="--check-image-worker"){
+  assert.equal(args.length,2);
+  const dir = path.resolve(args[1]);
+  assert.equal(path.dirname(dir),path.join(desktop,".local/feat168-images/worker"));
+  assert.match(path.basename(dir),/^[0-9a-f]{64}$/);
+  const m=JSON.parse(readFileSync(path.join(dir,"current.json")));
+  assert.equal(m.schemaVersion,2);assert.equal(m.candidateOnly,true);
+  assert.match(m.sha256,/^[0-9a-f]{64}$/);assert.equal(m.binary,path.join(dir,m.sha256,"yijie-mcp-worker"));
+  assert(lstatSync(m.binary).isFile());assert.equal(hash(readFileSync(m.binary)),m.sha256);
+ }else if(args[0]==="--freeze-commit"){
   assert.equal(args.length,2);
   writeFileSync(path.join(desktop,lockFile),JSON.stringify({schema_version:1,feature:"FEAT-164",mode:"immutable_local_candidate",release:false,contracts_commit:commit,contracts:checkPins(desktop,host),host:inputs(host,args[1])},null,2)+"\n");
   console.log("FEAT-164 committed Host inputs frozen; actual build checkout must independently match.");

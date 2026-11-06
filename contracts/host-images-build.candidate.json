@@ -1,0 +1,9 @@
+{
+  "feature": "FEAT-168",
+  "mode": "immutable_local_candidate",
+  "release": false,
+  "host_commit": "435747780feaec2b8e914a97081024dc26730e0c",
+  "host_sources_sha256": "6171a42fdfd84d35821fd7324b890d838f3930a146d8952d2e4da5437b87d88d",
+  "contracts_commit": "c24d73fde83a01b5dd2a9ded8defb5bbef34e311",
+  "runtime_lock_sha256": "eff26a148a3a04ca120e62f028cc9af0fc0ccb7f8d488aa988eb5ea7b79947d6"
+}

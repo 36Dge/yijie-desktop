@@ -36,7 +36,7 @@ sha256_file() {
   shasum -a 256 "$1" | awk '{ print $1 }'
 }
 
-image_generation_enabled="true"
+image_generation_enabled="false"
 stable_api_only="false"
 packaged_app="false"
 development_app="false"
@@ -94,6 +94,24 @@ if [[ "$#" -ge 1 && "$1" == "--feat164-qualification" ]]; then
 elif [[ "${YIJIE_FEAT164_QUALIFICATION:-false}" != "false" ]]; then
   fail "qualification requires its explicit canonical selector"
 fi
+# FEAT-168 reuses the complete isolated K31 media profile with its own roots,
+# app identity, checked source receipt and matched Runtime + Host candidate.
+host_images=false
+if [[ "${1:-}" == "--host-images" ]]; then
+  [[ "$packaged_app" == "true" && "$development_app" == "false" && "$kimi_k31_daily" == "false" && "$feat164_qualification" == "false" ]] || fail "images require a dedicated packaged candidate"
+  shift
+  [[ "$#" == 0 || ( "$#" == 1 && ( "$1" == "--prepare-only" || "$1" == "--reopen" ) ) ]] || fail "unsupported image candidate action"
+  host_images=true
+  export YIJIE_KIMI_K31_CALL_SURFACES=media
+  set -- --kimi-k31-pro "$@"
+elif [[ "${YIJIE_FEAT168_HOST_IMAGES:-false}" != false ]]; then
+  fail "Host images require the explicit candidate entry"
+fi
+daily_images="${YIJIE_FEAT168_DAILY_IMAGES:-false}"
+[[ "$daily_images" == false || ( "$daily_images" == true && "$development_app" == true && "$kimi_k31_daily" == true ) ]] || fail "daily images require the fixed development entry"
+export YIJIE_FEAT168_HOST_IMAGES="$host_images"
+if [[ "$daily_images" == true ]]; then export YIJIE_FEAT168_HOST_IMAGES=true; fi
+
 # FEAT-164 uses the same canonical bootstrap with a separate app identity and
 # data/binary roots. Prepare-only builds the reviewable candidate without launch.
 kimi_k31_candidate="false"
@@ -123,6 +141,7 @@ if [[ "$#" -ge 1 && "$1" == "--kimi-k31-pro" ]]; then
     export YIJIE_KIMI_K31_ALLOW_MANAGED_PREDECESSOR="${YIJIE_KIMI_K31_ALLOW_MANAGED_PREDECESSOR:-true}"
   fi
   host_port="${YIJIE_DEMO_FAST_HOST_PORT:-18086}"
+  if [[ "$host_images" == true ]]; then host_port=18088; fi
   if [[ "$kimi_k31_daily" == "true" ]]; then host_port="${YIJIE_DEMO_FAST_HOST_PORT:-18081}"; fi
   shift
   if [[ "$#" -ge 1 && "$1" == "--prepare-only" ]]; then prepare_only="true"; shift; fi
@@ -310,6 +329,11 @@ if [[ "$chat_models_enabled" == "true" ]]; then
     candidate_lock="$desktop_root/contracts/runtime-kimi-k31-pro.candidate.json"
     export VITE_YIJIE_NATIVE_SKILL_INPUT_ENABLED=true
     codex_runtime_root="$workspace_root/yijie-codex/.yijie/build/native-public-messages-r3/aarch64-apple-darwin"
+    if [[ "$YIJIE_FEAT168_HOST_IMAGES" == true ]]; then
+      node "$workspace_root/yijie-contracts/scripts/generate-runtime-host-images.mjs" --check
+      candidate_lock="$desktop_root/contracts/runtime-host-images.candidate.json"
+      codex_runtime_root="$workspace_root/yijie-codex/.yijie/build/host-images-v1/aarch64-apple-darwin"
+    fi
   else
   node "$workspace_root/yijie-contracts/scripts/generate-runtime-chat-models.mjs" --check
   node "$workspace_root/yijie-contracts/scripts/sync-runtime-chat-models.mjs" --check
@@ -332,6 +356,7 @@ if [[ "$chat_models_enabled" == "true" ]]; then
   if [[ "$kimi_k31_candidate" == "true" ]]; then
     node "$workspace_root/yijie-contracts/scripts/generate-chat-models-v2.mjs" --check
     runtime_root="$desktop_root/.local/feat164-kimi-k31"
+    if [[ "$host_images" == true ]]; then runtime_root="$desktop_root/.local/feat168-images"; fi
     host_home="$runtime_root/host-home"
     codex_home="$runtime_root/codex-home"
     host_binary="$runtime_root/bin/yijie-agent-host"
@@ -416,6 +441,12 @@ if [[ "$market_connectors_enabled" == "true" ]]; then
     fi
   fi
   export YIJIE_MARKET_WORKER_MANIFEST="${primary_worker_manifest:-$workspace_root/yijie-connectors/bin/market-worker/current.json}"
+  if [[ "$host_images" == true ]]; then
+    image_worker_digest="$(node "$desktop_root/scripts/expert-packaged-receipt.mjs" --worker-inputs-digest)"
+    [[ "$image_worker_digest" =~ ^[a-f0-9]{64}$ ]] || fail "invalid image worker provenance"
+    image_worker_dir="$runtime_root/worker/$image_worker_digest"
+    export YIJIE_MARKET_WORKER_MANIFEST="$image_worker_dir/current.json"
+  fi
 fi
 market_provider_only="false"
 provider_environment=(YIJIE_MODEL_PROVIDER=minimax "YIJIE_MINIMAX_API_KEY_FILE=$provider_key_file")
@@ -539,7 +570,14 @@ if [[ "$reopen_app" == "false" ]]; then
     node --input-type=module -e 'import {verifyScheduledHostCandidate} from "./scripts/scheduled-host-build-candidate.mjs"; await verifyScheduledHostCandidate(process.cwd(), process.argv[1], process.argv[2]);' "$workspace_root/yijie-contracts" "$host_root"
   fi
   if [[ "$market_connectors_enabled" == "true" ]]; then
-    if [[ -n "$primary_output" ]]; then
+    if [[ "$host_images" == true ]]; then
+      mkdir -p "$image_worker_dir"
+      if [[ ! -f "$YIJIE_MARKET_WORKER_MANIFEST" ]]; then
+        bash "$workspace_root/yijie-connectors/scripts/build-market-worker.sh" --output-root "$image_worker_dir"
+      else
+        node "$desktop_root/scripts/kimi-k31-build-candidate.mjs" --check-image-worker "$image_worker_dir"
+      fi
+    elif [[ -n "$primary_output" ]]; then
       bash "$workspace_root/yijie-connectors/scripts/build-market-worker.sh" --output-root "$primary_output/worker"
     else
       bash "$workspace_root/yijie-connectors/scripts/build-market-worker.sh"
@@ -592,6 +630,8 @@ elif [[ "$packaged_app" == "true" ]]; then
       pnpm tauri:build:demo-fast "${qualification_features[@]+"${qualification_features[@]}"}" "${experts_tauri_config[@]+"${experts_tauri_config[@]}"}" --config src-tauri/tauri.feat164-qualification.conf.json
     elif [[ "$kimi_k31_daily" == "true" ]]; then
       pnpm tauri:build:demo-fast --features kimi-k31-pro-candidate "${workflow_tauri_config[@]+"${workflow_tauri_config[@]}"}" "${experts_tauri_config[@]+"${experts_tauri_config[@]}"}"
+    elif [[ "$host_images" == true ]]; then
+      pnpm tauri:build:demo-fast --features kimi-k31-pro-candidate "${experts_tauri_config[@]+"${experts_tauri_config[@]}"}" --config src-tauri/tauri.feat168-images.conf.json
     elif [[ "$kimi_k31_candidate" == "true" ]]; then
       pnpm tauri:build:demo-fast --features kimi-k31-pro-candidate "${experts_tauri_config[@]+"${experts_tauri_config[@]}"}" --config src-tauri/tauri.feat164-kimi-k31.conf.json
     else
@@ -604,6 +644,7 @@ elif [[ "$packaged_app" == "true" ]]; then
   if [[ "$experts_requested" == "true" && "$kimi_k31_candidate" != "true" ]]; then
     bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/$expert_product_name.app/Contents/MacOS/yijie-desktop"
   fi
+  if [[ "$host_images" == true ]]; then bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/易界 AI FEAT-168.app/Contents/MacOS/yijie-desktop"; fi
   if [[ "$feat164_qualification" == "true" ]]; then bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/易界 AI FEAT-164 验收.app/Contents/MacOS/yijie-desktop"; fi
   [[ -x "$bundle_binary" && ! -L "$bundle_binary" ]] || fail "Desktop app bundle is missing"
   launch_command=("$bundle_binary")
@@ -671,7 +712,7 @@ if [[ "$migrate_isolated_k3" == "true" ]]; then
 fi
 
 if [[ "$prepare_only" == "true" ]]; then
-  printf 'FEAT-164 candidate built; no App launch or model request: %s\n' "$bundle_binary"
+  printf 'Isolated candidate built; no App launch or model request: %s\n' "$bundle_binary"
   exit 0
 fi
 

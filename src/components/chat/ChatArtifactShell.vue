@@ -64,6 +64,14 @@ const provenanceLabel = computed(() => ({
 const displayName = computed(() => props.artifact.displayName ?? `未命名${kindPresentation.value.label}`);
 const failureGuidance = computed(() => {
   if (props.artifact.status !== "failed") return null;
+  if (props.artifact.kind === "image" && props.artifact.provenance === "provider") {
+    switch (props.artifact.errorCode) {
+      case "limit_exceeded": return "图片生成或暂存额度受限。请检查方舟模型的用量上限，稍后可重新提交。";
+      case "unsupported_provider": return "图片服务鉴权或账户额度不可用，请核对方舟凭据、模型开通状态和余额。";
+      case "integrity_failed": return "图片服务的结果未通过校验，无法展示。";
+      case "resource_unavailable": return "暂时无法取得图片；原请求可能已受理，重新生成将发起新请求。";
+    }
+  }
   return props.artifact.retryable
     ? `${kindPresentation.value.label}生成失败，可在输入框重新提交需求。`
     : `${kindPresentation.value.label}生成失败，请调整需求后重新提交。`;
