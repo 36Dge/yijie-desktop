@@ -22,6 +22,27 @@ body {
   margin: 0;
 }
 
+/* Apply to the whole window, including menus and dialogs mounted under body. */
+body,
+button,
+select,
+summary,
+[role="button"],
+[role="tooltip"] {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Native editors, code and reading surfaces keep normal text selection. */
+:read-write,
+input[readonly],
+textarea[readonly],
+pre,
+.yj-selectable-text {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 button,
 input,
 textarea {

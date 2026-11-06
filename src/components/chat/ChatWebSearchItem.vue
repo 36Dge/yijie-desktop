@@ -62,7 +62,7 @@ watch(() => props.item.identity, () => { expanded.value = false; });
     <div v-if="expanded" class="chat-web-search__details">
       <div class="chat-web-search__scroll-frame">
         <div :id="contentId" ref="viewport" class="chat-web-search__viewport" role="region" aria-label="网页活动详情" tabindex="0">
-          <div ref="content" class="chat-web-search__content">
+          <div ref="content" class="chat-web-search__content yj-selectable-text">
           <section v-if="item.webSearch?.sources?.length" :aria-describedby="sourceNoteId" aria-label="搜索来源">
             <p :id="sourceNoteId" class="chat-web-search__sr-only">以下页面由搜索返回，不代表回答已逐项引用或核验。</p>
             <ul class="chat-web-search__sources">

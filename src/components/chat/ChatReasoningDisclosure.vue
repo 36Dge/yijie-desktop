@@ -84,7 +84,7 @@ watch(() => props.defaultExpanded, (value) => {
         <div
           v-for="part in liveParts"
           :key="`${part.itemOrdinal}:${part.contentIndex}`"
-          class="reasoning__part"
+          class="reasoning__part yj-selectable-text"
         >{{ part.text }}</div>
         <p v-if="liveParts.length === 0" class="reasoning__state">正在等待推理文字…</p>
       </template>
@@ -94,7 +94,7 @@ watch(() => props.defaultExpanded, (value) => {
             <YjIcon name="warning" size="sm" tone="warning" />
             {{ reasoningStatusLabel(item.status, item.reasonCode) }}
           </p>
-          <div v-for="part in item.parts" :key="part.contentIndex" class="reasoning__part">{{ part.text }}</div>
+          <div v-for="part in item.parts" :key="part.contentIndex" class="reasoning__part yj-selectable-text">{{ part.text }}</div>
         </article>
       </template>
       <p v-else class="reasoning__state" :class="{ 'reasoning__state--error': overallStatus === 'unavailable' }">

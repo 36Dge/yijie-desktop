@@ -6,7 +6,7 @@ const result = computed(() => readWebRetrievalResult(props.tool, props.text));
 const labels = { available: "正文可用", unavailable: "未取得正文", truncated: "正文已截断" } as const;
 </script>
 <template>
-  <div class="web-result" aria-label="网页检索材料">
+  <div class="web-result yj-selectable-text" aria-label="网页检索材料">
     <pre v-if="!result">{{ text }}</pre>
     <p v-else-if="'error' in result" role="status">{{ result.error.message }}</p>
     <template v-else-if="'results' in result">

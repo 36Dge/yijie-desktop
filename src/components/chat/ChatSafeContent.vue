@@ -51,7 +51,7 @@ function visibleRows<T extends readonly { startOffset: number }[]>(rows: readonl
 </script>
 
 <template>
-  <div ref="root" class="chat-safe-content" :class="{ 'chat-safe-content--attachments': hasAttachments, 'chat-safe-content--answer': typography === 'answer' && mode === 'rich' }">
+  <div ref="root" class="chat-safe-content yj-selectable-text" :class="{ 'chat-safe-content--attachments': hasAttachments, 'chat-safe-content--answer': typography === 'answer' && mode === 'rich' }">
     <p v-if="$slots['text-prefix'] && !firstParagraphKey" class="chat-safe-content__paragraph"><slot name="text-prefix" /></p>
     <template v-for="node in displayNodes" :key="node.key">
       <p v-if="node.kind === 'paragraph'" class="chat-safe-content__paragraph">
@@ -291,6 +291,8 @@ h3.chat-safe-content__heading {
 }
 
 .chat-safe-content__code-header {
+  -webkit-user-select: none;
+  user-select: none;
   display: flex;
   min-width: 0;
   align-items: center;

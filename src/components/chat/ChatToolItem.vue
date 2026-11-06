@@ -108,7 +108,7 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
       aria-atomic="true"
     >{{ statusPresentation.summary }}</span>
 
-    <div class="chat-tool-item__details">
+    <div class="chat-tool-item__details yj-selectable-text">
       <section class="chat-tool-item__identity" aria-label="工具身份">
         <div>
           <span>{{ identityState }}</span>

@@ -339,7 +339,7 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
           {{ {read: '读取文件', listFiles: '查看目录', search: '搜索文件', unknown: '运行命令'}[action.kind] }}<span v-if="action.label"> · {{ action.label }}</span><span v-if="action.query"> · {{ action.query }}</span>
         </li>
       </ul>
-      <dl class="chat-command-item__facts">
+      <dl class="chat-command-item__facts yj-selectable-text">
         <div>
           <dt>安全摘要</dt>
           <dd>{{ commandSummary || "命令执行" }}</dd>

@@ -341,7 +341,7 @@ onBeforeUnmount(() => {
     <section
       v-else-if="projection"
       ref="previewRegion"
-      class="artifact-report__preview"
+      class="artifact-report__preview yj-selectable-text"
       data-testid="artifact-report-preview-region"
       role="region"
       :aria-labelledby="previewTitleId"

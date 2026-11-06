@@ -82,7 +82,7 @@ function toggle(): void {
       <YjIcon :name="expanded ? 'chevronDown' : 'chevronRight'" size="sm" tone="muted" />
     </button>
 
-    <div v-if="expanded" :id="contentId" class="chat-turn-plan__content">
+    <div v-if="expanded" :id="contentId" class="chat-turn-plan__content yj-selectable-text">
       <p v-if="plan.explanation" class="chat-turn-plan__explanation">
         {{ plan.explanation }}
       </p>

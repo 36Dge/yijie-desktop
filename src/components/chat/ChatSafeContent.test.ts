@@ -26,6 +26,27 @@ function textBlock(
 }
 
 describe("ChatSafeContent", () => {
+  it("keeps message text selectable while the window and embedded copy controls are not selectable", async () => {
+    const style = document.createElement("style");
+    style.textContent = readFileSync("src/styles/main.css", "utf8");
+    document.head.append(style);
+    const wrapper = mount(ChatSafeContent, {
+      attachTo: document.body,
+      props: { blocks: [{ identity: "snippet", blockIndex: 0, type: "code", text: "const count = 3;", language: "js" }] },
+      slots: { "code-actions": () => h("button", "复制代码") },
+    });
+    try {
+      expect(getComputedStyle(document.body).userSelect).toBe("none");
+      expect(getComputedStyle(wrapper.element).userSelect).toBe("text");
+      expect(getComputedStyle(wrapper.get("button").element).userSelect).toBe("none");
+      await wrapper.setProps({ mode: "plain", blocks: [textBlock("用户消息")] });
+      expect(getComputedStyle(wrapper.element).userSelect).toBe("text");
+    } finally {
+      wrapper.unmount();
+      style.remove();
+    }
+  });
+
   it("renders answer sections, nested lists, quotes and explicit line breaks as Markdown", () => {
     const wrapper = mount(ChatSafeContent, {
       props: { blocks: [textBlock([

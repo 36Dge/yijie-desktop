@@ -54,10 +54,10 @@ defineExpose({ allowLeave });
       <NButton :disabled="writing || !readable" @click="query">查证原请求</NButton>
       <NButton :disabled="writing || !readable" @click="retry">重试同一请求</NButton>
     </div>
-    <template v-if="clarification"><strong>请补充信息</strong><p>{{ clarification.question }}</p></template>
+    <template v-if="clarification"><strong>请补充信息</strong><p class="yj-selectable-text">{{ clarification.question }}</p></template>
     <template v-else-if="candidate">
-      <h2 class="scheduled-draft-panel__title">{{ candidate.name }}</h2>
-      <p class="scheduled-draft-panel__content">{{ candidate.content }}</p>
+      <h2 class="scheduled-draft-panel__title yj-selectable-text">{{ candidate.name }}</h2>
+      <p class="scheduled-draft-panel__content yj-selectable-text">{{ candidate.content }}</p>
       <p>{{ ruleLabel(candidate.schedule) }} · {{ targetLabels[candidate.target.mode] }}</p>
       <p v-if="candidate.target.existing_chat_label">建议聊天：{{ candidate.target.existing_chat_label }}。确认时需要选择实际聊天。</p>
       <NButton type="primary" :disabled="!canConfirm" @click="review">审阅并保存</NButton>

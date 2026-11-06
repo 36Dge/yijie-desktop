@@ -31,8 +31,8 @@ function approvalName(approval: MarketApproval): string {
     <p v-if="error" class="market-activity__notice" role="alert">{{ error }} <button class="yj-control" type="button" :disabled="refreshing || !!deciding" @click="$emit('refresh')">{{ refreshing ? '正在核对' : '刷新状态' }}</button></p>
     <article v-for="approval in observation?.approvals?.requests ?? []" :key="approval.approvalId" class="market-activity__card" :aria-label="approval.review.title">
       <header><YjIcon name="shield" size="md" /><strong>{{ labels[approval.state] }}</strong><span>{{ approvalName(approval) }}</span></header>
-      <strong>{{ approval.review.title }}</strong>
-      <p>{{ approval.review.summary }}</p>
+      <strong class="yj-selectable-text">{{ approval.review.title }}</strong>
+      <p class="yj-selectable-text">{{ approval.review.summary }}</p>
       <pre v-if="approval.review.argumentsJson" aria-label="本次工具调用完整参数">{{ approval.review.argumentsJson }}</pre>
       <p class="market-activity__meta">{{ approval.review.risk === 'read' ? '读取数据' : '修改数据' }} · {{ approval.identity.toolName }} · {{ approval.decisionExpiresAtUnixMs ? '最晚批准时间' : '有效期至' }} {{ new Date(approval.decisionExpiresAtUnixMs ?? approval.expiresAtUnixMs).toLocaleTimeString('zh-CN') }}</p>
       <p v-if="approval.state === 'approved'" class="market-activity__meta">本次批准已确认，执行结果以实际工具返回为准。</p>
