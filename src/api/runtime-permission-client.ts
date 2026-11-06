@@ -1,10 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ChatPermissionState, PermissionMode } from "./generated/chat-permission-state.gen";
 import type { components } from "./generated/runtime-permissions-v2.gen";
+import type { components as approvalChoices } from "./generated/runtime-approvals-v3.gen";
 
 export type { ChatPermissionState, PermissionMode };
-export type RuntimeApproval = components["schemas"]["RuntimeApproval"];
-export type RuntimeApprovalDecision = components["schemas"]["RuntimeApprovalDecision"]["decision"];
+type CommandPrefix = approvalChoices["schemas"]["RuntimeApprovalChoices"]["commandPrefixes"][string];
+export type RuntimeApproval = components["schemas"]["RuntimeApproval"] & { commandPrefix?: CommandPrefix };
+export type RuntimeApprovalDecision = components["schemas"]["RuntimeApprovalDecision"]["decision"] | approvalChoices["schemas"]["SimilarCommandDecision"]["decision"];
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("审批数据暂不可用，请重试。");
@@ -31,10 +33,27 @@ export function parseRuntimeApproval(value: unknown): RuntimeApproval {
   return v as unknown as RuntimeApproval;
 }
 
-async function call(command: string, contextId: string, payload: Record<string, unknown>): Promise<unknown> {
+export function parseApprovalSnapshot(value: unknown): RuntimeApproval[] {
+  const snapshot = record(value);
+  if (!Array.isArray(snapshot.requests) || snapshot.requests.length > 128) throw new Error("审批状态暂不可用，请重试。");
+  const requests = snapshot.requests.map(parseRuntimeApproval);
+  const byId = new Map(requests.map(r => [r.id, r]));
+  if (byId.size !== requests.length) throw new Error("审批状态暂不可用，请重试。");
+  if (snapshot.commandPrefixes !== undefined) {
+    for (const [id, prefix] of Object.entries(record(snapshot.commandPrefixes))) {
+      const request = byId.get(id);
+      if (request?.kind !== "command" || request.status !== "pending" || !Array.isArray(prefix) || !prefix.length || prefix.length > 64 ||
+        !prefix.every((arg): arg is string => typeof arg === "string" && arg.length > 0 && arg.length <= 256)) throw new Error("命令审批范围不可用。");
+      byId.set(id, { ...request, commandPrefix: prefix });
+    }
+  }
+  return [...byId.values()];
+}
+
+async function call(command: string, contextId: string, payload: Record<string, unknown>, options?: { includeCommandOptions: true }): Promise<unknown> {
   const requestId = crypto.randomUUID();
   try {
-    const response = record(await invoke(command, { request: { schemaVersion: 1, requestId, contextId, payload } }));
+    const response = record(await invoke(command, { ...options, request: { schemaVersion: 1, requestId, contextId, payload } }));
     if (response.schemaVersion !== 1 || response.requestId !== requestId) throw new Error("权限响应不匹配，请重试。");
     return response.data;
   } catch {
@@ -50,11 +69,7 @@ export const runtimePermissionClient = {
     return parsePermissionState(await call("chat_set_permissions_v1", contextId, { sessionId, mode, confirmFullAccess }));
   },
   async approvals(contextId: string, sessionId: string): Promise<RuntimeApproval[]> {
-    const snapshot = record(await call("chat_runtime_approvals_v2", contextId, { sessionId }));
-    if (!Array.isArray(snapshot.requests) || snapshot.requests.length > 128) throw new Error("审批状态暂不可用，请重试。");
-    const requests = snapshot.requests.map(parseRuntimeApproval);
-    if (new Set(requests.map((r) => r.id)).size !== requests.length) throw new Error("审批状态暂不可用，请重试。");
-    return requests;
+    return parseApprovalSnapshot(await call("chat_runtime_approvals_v2", contextId, { sessionId }, { includeCommandOptions: true }));
   },
   async decide(contextId: string, sessionId: string, approvalId: string, decision: RuntimeApprovalDecision): Promise<RuntimeApproval> {
     const result = parseRuntimeApproval(await call("chat_decide_runtime_approval_v2", contextId, { sessionId, approvalId, decision }));

@@ -228,7 +228,7 @@ describe("ChatCommandItem", () => {
     ["cancelled_current_turn" as const, "cancel_current_turn" as const, "已取消本轮"],
     ["expired" as const, null, "确认已过期"],
     ["resolved_elsewhere" as const, null, "已由运行状态解决"],
-  ])("renders resolved outcome %s as read-only", (outcome, decision, label) => {
+  ])("keeps resolved approval %s out of command details", (outcome, decision, label) => {
     const command = execution();
     const resolved = approval({
       revision: 2,
@@ -250,7 +250,8 @@ describe("ChatCommandItem", () => {
     });
     expect(wrapper.find(".chat-approval-card").exists()).toBe(false);
     return wrapper.get(".chat-timeline-item-shell__disclosure").trigger("click").then(() => {
-      expect(wrapper.get(".chat-approval-card__status").text()).toContain(label);
+      expect(wrapper.find(".chat-approval-card").exists()).toBe(false);
+      expect(wrapper.text()).not.toContain(label);
       expect(wrapper.findAll(".chat-approval-card__button")
         .every((button) => button.attributes("disabled") !== undefined)).toBe(true);
     });

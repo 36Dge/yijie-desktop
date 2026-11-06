@@ -116,22 +116,7 @@ const approvalNeedsAttention = computed(() => props.approval?.status === "pendin
 
 const approvalCardStatus = computed<ChatApprovalCardStatus | null>(() => {
   const approval = props.approval;
-  if (approval === null) return null;
-  if (approval.status === "resolved") {
-    switch (approval.outcome) {
-      case "accepted_once":
-        return "accepted";
-      case "cancelled_current_turn":
-        return "cancelled";
-      case "expired":
-        return "expired";
-      case "resolved_elsewhere":
-        return "resolved_elsewhere";
-      case null:
-      default:
-        return "error";
-    }
-  }
+  if (!approval || approval.status !== "pending") return null;
   switch (props.approvalTransient?.phase) {
     case "submitting":
       return "submitting";

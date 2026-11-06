@@ -1202,6 +1202,14 @@ impl ConversationApplication {
         &self,
         session_id: Uuid,
     ) -> Result<super::runtime_permissions::RuntimeApprovalSnapshot, ChatError> {
+        self.runtime_approval_snapshot(session_id, false).await
+    }
+
+    pub async fn runtime_approval_snapshot(
+        &self,
+        session_id: Uuid,
+        include_choices: bool,
+    ) -> Result<super::runtime_permissions::RuntimeApprovalSnapshot, ChatError> {
         let Some(id) = self
             .database
             .runtime_approval_session_id(session_id)
@@ -1212,7 +1220,7 @@ impl ConversationApplication {
             return Ok(super::runtime_permissions::RuntimeApprovalSnapshot::default());
         };
         self.host()?
-            .runtime_approvals(id)
+            .runtime_approval_snapshot(id, include_choices)
             .await
             .map_err(map_host_error)
     }

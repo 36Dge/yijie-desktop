@@ -1,35 +1,45 @@
 <script setup lang="ts">
+import { computed, ref, watch } from "vue";
 import type { RuntimeApproval, RuntimeApprovalDecision } from "../../api/runtime-permission-client";
-import YjIcon from "../yijie/YjIcon.vue";
-defineProps<{ requests: readonly RuntimeApproval[]; deciding: string | null; connected: boolean }>();
+import ChatApprovalPrompt from "./ChatApprovalPrompt.vue";
+
+const props = defineProps<{ requests: readonly RuntimeApproval[]; deciding: string | null; connected: boolean }>();
 defineEmits<{ decision: [id: string, decision: RuntimeApprovalDecision] }>();
-const labels = { pending: "需要你的批准", approved: "已批准本次", rejected: "已拒绝", unavailable: "请求已失效", cancelled: "已取消本次" };
+// The Host snapshot also contains receipts, including read-only legacy MCP.
+// Only a live, undecided callback belongs beside the composer.
+const pending = computed(() => props.requests.filter(r => r.status === "pending" && r.kind !== "mcp" && !r.mcp));
+const current = computed(() => pending.value[0]);
+const scopeOpen = ref(false);
+watch(() => current.value?.id, () => { scopeOpen.value = false; }, { flush: "sync" });
+const sources = {
+  command: { name: "终端", icon: "terminal", question: "允许运行这条命令吗？" },
+  file_change: { name: "文件更改", icon: "file", question: "允许这次文件更改吗？" },
+  permissions: { name: "权限请求", icon: "shield", question: "允许这次访问吗？" },
+  auto_review: { name: "自动审核需人工确认", icon: "shield", question: "允许这次操作吗？" },
+  mcp: { name: "工具调用", icon: "connector", question: "" },
+} as const;
 </script>
+
 <template>
-  <section v-if="requests.length" class="runtime-approvals" aria-label="操作审批" aria-live="polite">
-    <article v-for="request in requests" :key="request.id" class="runtime-approval">
-      <header><YjIcon name="shield" size="md" /><strong>{{ request.kind === 'mcp' && request.status === 'pending' ? '旧版审批记录' : labels[request.status] }}</strong><span v-if="request.kind === 'auto_review'">自动审核需人工确认</span></header>
-      <p class="runtime-approval-summary yj-selectable-text">{{ request.summary }}</p>
-      <div v-if="request.scope"><strong>{{ request.kind === 'command' ? '工作目录' : '影响范围' }}</strong><pre>{{ request.scope }}</pre></div>
-      <div v-if="request.mcp" aria-label="本次实际工具参数"><strong>{{ request.mcp.server }} / {{ request.mcp.tool }}</strong><pre>ASIN: {{ request.mcp.asin }}
-站点: {{ request.mcp.marketplace }}</pre></div>
-      <p v-if="request.reason" class="runtime-approval-reason yj-selectable-text">{{ request.reason }}</p>
-      <p v-if="request.kind === 'auto_review' && request.status === 'approved'" class="runtime-approval-reason">本次操作已获得批准；若当前轮已结束，可继续任务以执行。</p>
-      <p v-if="request.kind === 'mcp'" class="runtime-approval-reason">旧版工具审批仅供查看，不适用于连接器的新调用。</p>
-      <footer v-if="request.status === 'pending' && request.kind !== 'mcp' && !request.mcp"><button class="yj-control yj-control--regular" type="button" :disabled="!!deciding || !connected" @click="$emit('decision', request.id, 'reject')">拒绝</button><button class="yj-control yj-control--regular" type="button" :disabled="!!deciding || !connected" @click="$emit('decision', request.id, 'approve_once')">{{ deciding === request.id ? '正在提交' : '批准本次' }}</button></footer>
-    </article>
+  <section v-if="current" class="runtime-approvals" aria-label="待处理审批" aria-live="polite">
+    <ChatApprovalPrompt v-for="request in pending.slice(0, 1)" :key="request.id" :source="sources[request.kind].name" :icon="sources[request.kind].icon"
+      :question="request.reason || sources[request.kind].question" :command-prefix="request.commandPrefix"
+      :disabled="!!deciding || !connected" :submitting="deciding === request.id"
+      @once="$emit('decision', request.id, 'approve_once')" @similar="$emit('decision', request.id, 'approve_similar')" @reject="$emit('decision', request.id, 'reject')">
+      <template #context>
+        <span v-if="pending.length > 1">待处理 {{ pending.length }} 项</span>
+        <button v-if="request.kind === 'command' && request.scope && !request.scope.includes('\n')" type="button" class="runtime-approvals__scope-toggle" :aria-expanded="scopeOpen" @click="scopeOpen = !scopeOpen">工作目录</button>
+      </template>
+      <pre v-if="request.summary">{{ request.summary }}</pre>
+      <pre v-if="request.scope && (request.kind !== 'command' || scopeOpen || request.scope.includes('\n'))" class="runtime-approvals__scope">{{ request.scope }}</pre>
+    </ChatApprovalPrompt>
   </section>
 </template>
+
 <style scoped>
-.runtime-approvals { display:grid; gap:var(--yj-space-3); margin-block:var(--yj-space-4); }
-.runtime-approval { border:1px solid var(--yj-color-border-default); border-radius:var(--yj-radius-lg); padding:var(--yj-space-4); background:var(--yj-color-bg-card); color:var(--yj-color-text-primary); }
-header,footer { display:flex; align-items:center; gap:var(--yj-space-2); flex-wrap:wrap; }
-header > span,.runtime-approval-reason { color:var(--yj-color-text-secondary); font-size:var(--yj-font-size-caption); }
-.runtime-approval-summary,pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:180px; overflow:auto; }
-pre { font-size:var(--yj-font-size-caption); }
-footer { justify-content:flex-end; }
-button { background:var(--yj-color-bg-card); border:1px solid var(--yj-color-border-control); color:inherit; cursor:pointer; }
-button:last-child { background:var(--yj-color-brand-primary); color:var(--yj-color-on-brand); }
-button:disabled { opacity:.5; cursor:default; }
-button:focus-visible { outline:var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset:2px; }
+.runtime-approvals { width:min(100%, var(--yj-layout-chat-composer-max)); margin-block-end:var(--yj-space-2); }
+.runtime-approvals__scope-toggle { margin-inline-start:auto; padding:0 var(--yj-space-1); border:0; border-radius:var(--yj-radius-xs); background:transparent; color:inherit; cursor:pointer; font:inherit; }
+.runtime-approvals__scope-toggle:hover { color:var(--yj-color-text-primary); text-decoration:underline; }
+.runtime-approvals__scope-toggle:focus-visible { outline:var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); }
+.runtime-approvals__scope { margin-block-start:var(--yj-space-2); }
 </style>

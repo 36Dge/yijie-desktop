@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import type { Decision, MarketApproval, NativeObservation } from "../../domain/market-host-v2-native.generated";
 import WebRetrievalResult from "./WebRetrievalResult.vue";
+import ChatApprovalPrompt from "./ChatApprovalPrompt.vue";
 import YjIcon from "../yijie/YjIcon.vue";
 const props = defineProps<{
   observation: NativeObservation | null;
@@ -16,7 +17,7 @@ const props = defineProps<{
   historyError?: string | null;
 }>();
 defineEmits<{ refresh: []; decision: [approvalId: string, decision: Decision]; selectTurn: [turnId: string | null] }>();
-const labels = { pending: "需要你的批准", approved: "已批准本次", rejected: "已拒绝", cancelled: "已取消本次", expired: "请求已过期", unavailable: "请求已失效" };
+const pending = computed(() => props.observation?.approvals?.requests.filter(item => item.state === "pending") ?? []);
 const toolLabels = { in_progress: "执行中", completed: "已完成", failed: "执行失败" };
 const names = computed(() => new Map(props.observation?.selectionDisplay.map(item => [item.serviceId, item.displayName])));
 const displayed = computed(() => props.toolObservation === undefined ? props.observation : props.toolObservation);
@@ -29,19 +30,14 @@ function approvalName(approval: MarketApproval): string {
 <template>
   <section v-if="observation?.managed || error" class="market-activity" aria-label="连接器调用" :aria-busy="refreshing" aria-live="polite">
     <p v-if="error" class="market-activity__notice" role="alert">{{ error }} <button class="yj-control" type="button" :disabled="refreshing || !!deciding" @click="$emit('refresh')">{{ refreshing ? '正在核对' : '刷新状态' }}</button></p>
-    <article v-for="approval in observation?.approvals?.requests ?? []" :key="approval.approvalId" class="market-activity__card" :aria-label="approval.review.title">
-      <header><YjIcon name="shield" size="md" /><strong>{{ labels[approval.state] }}</strong><span>{{ approvalName(approval) }}</span></header>
-      <strong class="yj-selectable-text">{{ approval.review.title }}</strong>
-      <p class="yj-selectable-text">{{ approval.review.summary }}</p>
+    <ChatApprovalPrompt v-for="approval in pending" :key="approval.approvalId" :source="approvalName(approval)" icon="connector" :question="approval.review.title"
+      :submitting="deciding === approval.approvalId" :disabled="!actionable(approval)"
+      @reject="$emit('decision', approval.approvalId, 'reject')" @once="$emit('decision', approval.approvalId, 'approve_once')">
+      <p>{{ approval.review.summary }}</p>
       <pre v-if="approval.review.argumentsJson" aria-label="本次工具调用完整参数">{{ approval.review.argumentsJson }}</pre>
       <p class="market-activity__meta">{{ approval.review.risk === 'read' ? '读取数据' : '修改数据' }} · {{ approval.identity.toolName }} · {{ approval.decisionExpiresAtUnixMs ? '最晚批准时间' : '有效期至' }} {{ new Date(approval.decisionExpiresAtUnixMs ?? approval.expiresAtUnixMs).toLocaleTimeString('zh-CN') }}</p>
-      <p v-if="approval.state === 'approved'" class="market-activity__meta">本次批准已确认，执行结果以实际工具返回为准。</p>
-      <footer v-if="approval.state === 'pending'">
-        <button class="yj-control yj-control--regular" type="button" :disabled="!actionable(approval)" @click="$emit('decision', approval.approvalId, 'cancel')">取消本次</button>
-        <button class="yj-control yj-control--regular" type="button" :disabled="!actionable(approval)" @click="$emit('decision', approval.approvalId, 'reject')">拒绝</button>
-        <button class="yj-control yj-control--regular market-activity__approve" type="button" :disabled="!actionable(approval)" @click="$emit('decision', approval.approvalId, 'approve_once')">{{ deciding === approval.approvalId ? '正在提交' : '批准本次' }}</button>
-      </footer>
-    </article>
+      <template #extra-action><button class="approval-secondary" type="button" :disabled="!actionable(approval)" @click="$emit('decision', approval.approvalId, 'cancel')">取消本次</button></template>
+    </ChatApprovalPrompt>
     <label v-if="observation?.availableTurns?.length" class="market-activity__history">
       <span>工具调用记录</span>
       <select class="yj-control" aria-label="查看连接器调用轮次" :value="selectedTurnId ?? ''" @change="$emit('selectTurn', ($event.target as HTMLSelectElement).value || null)">
@@ -69,13 +65,11 @@ function approvalName(approval: MarketApproval): string {
 <style scoped>
 .market-activity { display:grid; gap:var(--yj-space-3); margin-block:var(--yj-space-4); min-width:0; }
 .market-activity__card { display:grid; gap:var(--yj-space-2); border:var(--yj-border-width) solid var(--yj-color-border-default); border-radius:var(--yj-radius-lg); padding:var(--yj-space-4); background:var(--yj-color-bg-card); color:var(--yj-color-text-primary); min-width:0; }
-header,footer,.market-activity__notice { display:flex; align-items:center; gap:var(--yj-space-2); flex-wrap:wrap; }
+header,.market-activity__notice { display:flex; align-items:center; gap:var(--yj-space-2); flex-wrap:wrap; }
 header > span,.market-activity__meta { color:var(--yj-color-text-secondary); font-size:var(--yj-font-size-caption); }
 p,pre { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
 pre { max-height:var(--yj-layout-chat-entry-max); overflow:auto; font-size:var(--yj-font-size-caption); }
-footer { justify-content:flex-end; }
 button { background:var(--yj-color-bg-card); border:var(--yj-border-width) solid var(--yj-color-border-default); color:var(--yj-color-text-primary); cursor:pointer; }
-.market-activity__approve { background:var(--yj-color-brand-primary); color:var(--yj-color-on-brand); }
 button:disabled { background:var(--yj-color-control-disabled-bg); color:var(--yj-color-text-disabled); cursor:default; }
 button:focus-visible { outline:var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset:var(--yj-space-1); }
 .market-activity__history { display:grid; gap:var(--yj-space-2); min-width:0; }

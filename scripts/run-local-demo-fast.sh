@@ -497,6 +497,9 @@ fi
 cd "$desktop_root"
 node scripts/check-native-conversation.mjs --require-committed
 node scripts/check-native-mcp.mjs --require-committed
+if [[ "${YIJIE_RUNTIME_PERMISSIONS_ENABLED:-false}" == "true" ]]; then
+  node "$workspace_root/yijie-contracts/scripts/sync-runtime-approval-choices.mjs" --check
+fi
 node scripts/check-native-process.mjs --require-committed
 YIJIE_DESKTOP_CONTRACTS_DIR="$workspace_root/yijie-contracts" \
 YIJIE_DESKTOP_AGENT_HOST_DIR="$host_root" \

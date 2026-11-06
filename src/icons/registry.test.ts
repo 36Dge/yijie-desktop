@@ -25,6 +25,7 @@ describe("iconRegistry", () => {
       "arrowRight",
       "arrowUpRight",
       "assistant",
+      "info",
       "backToBottom",
       "check",
       "checkmark",

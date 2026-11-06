@@ -8,7 +8,7 @@ describe("market review and result presentation", () => {
     const wrapper = mount(MarketChatActivity, { props: { observation: marketObservation(), connected: true, refreshing: false, deciding: null, error: null, actionable: () => true } });
     expect(wrapper.text()).toContain("读取合成标的指定日期的一条行情数据。");
     expect(wrapper.text()).toContain("正在等待工具返回");
-    const approve = wrapper.findAll("button").find(b => b.text() === "批准本次")!;
+    const approve = wrapper.get('button[aria-keyshortcuts="Enter"]');
     await approve.trigger("click");
     expect(wrapper.emitted("decision")).toEqual([[id(2), "approve_once"]]);
     expect(wrapper.text()).not.toContain("已完成"); wrapper.unmount();
@@ -27,7 +27,7 @@ describe("market review and result presentation", () => {
     expect(parameters.findAll("*")).toHaveLength(0);
     expect(wrapper.text()).toContain("尚未确认只读，可能修改外部数据");
     expect(wrapper.emitted("decision")).toBeUndefined();
-    await wrapper.findAll("button").find(button => button.text() === "拒绝")!.trigger("click");
+    await wrapper.get('button[aria-keyshortcuts="Escape"]').trigger("click");
     expect(wrapper.emitted("decision")).toEqual([[id(2), "reject"]]);
     wrapper.unmount();
   });
@@ -36,6 +36,16 @@ describe("market review and result presentation", () => {
     expect(wrapper.findAll("footer button").every(b => b.attributes("disabled") !== undefined)).toBe(true);
     await wrapper.get(".market-activity__notice button").trigger("click");
     expect(wrapper.emitted("refresh")).toHaveLength(1); expect(wrapper.emitted("decision")).toBeUndefined(); wrapper.unmount();
+  });
+  it("removes resolved approval cards while preserving the tool result", async () => {
+    const observation = marketObservation();
+    observation.approvals!.requests[0]!.state = "approved";
+    const item = observation.tools!.items[0]!;
+    item.state = "completed"; item.resultText = "本次查询结果";
+    const wrapper = mount(MarketChatActivity, { props: { observation, connected: true, refreshing: false, deciding: null, error: null, actionable: () => false } });
+    expect(wrapper.find(".approval-prompt").exists()).toBe(false);
+    expect(wrapper.text()).toContain("本次查询结果");
+    wrapper.unmount();
   });
   it("shows original names in history while decisions stay on the live observation", async () => {
     const live = marketObservation(), history = marketObservation();

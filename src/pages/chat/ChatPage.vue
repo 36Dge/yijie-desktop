@@ -1380,7 +1380,6 @@ onBeforeUnmount(() => {
             <button v-if="cleanup.actionLabel" class="chat-notice__action yj-control" type="button" @click="refreshCleanup">{{ cleanup.actionLabel }}</button>
           </div>
           <MarketChatActivity v-if="!isDraftMode && marketConnectorsEnabled" :observation="marketChat.observation.value" :connected="marketChat.connected.value" :refreshing="marketChat.refreshing.value" :deciding="marketChat.deciding.value" :error="marketChat.error.value" :actionable="marketChat.actionable" :tool-observation="marketChat.toolObservation.value" :selected-turn-id="marketChat.selectedTurnId.value" :history-refreshing="marketChat.historyRefreshing.value" :history-error="marketChat.historyError.value" @refresh="marketChat.refresh" @decision="marketChat.decide" @select-turn="marketChat.selectTurn" />
-          <RuntimeApprovalList v-if="!isDraftMode && runtimePermissionsEnabled" :requests="permissions.approvals.value" :deciding="permissions.deciding.value" :connected="permissions.approvalsConnected.value" @decision="permissions.decide" />
         </div>
       </div>
 
@@ -1392,6 +1391,7 @@ onBeforeUnmount(() => {
     </div>
 
     <footer class="chat-workspace__composer">
+      <RuntimeApprovalList v-if="!isDraftMode && runtimePermissionsEnabled && chatStore.selectedAccessMode === 'live'" :requests="permissions.approvals.value" :deciding="permissions.deciding.value" :connected="permissions.approvalsConnected.value && chatStore.hasAction('submit_turn')" @decision="permissions.decide" />
       <p
         v-if="chatStore.selectedAccessMode === 'history-only'"
         class="chat-workspace__composer-note"

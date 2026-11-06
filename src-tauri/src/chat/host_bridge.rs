@@ -761,25 +761,43 @@ impl HostBridge {
         &self,
         session_id: Uuid,
     ) -> Result<super::runtime_permissions::RuntimeApprovalSnapshot, HostBridgeError> {
+        self.runtime_approval_snapshot(session_id, false).await
+    }
+
+    pub async fn runtime_approval_snapshot(
+        &self,
+        session_id: Uuid,
+        include_choices: bool,
+    ) -> Result<super::runtime_permissions::RuntimeApprovalSnapshot, HostBridgeError> {
         require_non_nil(session_id)?;
-        let response = self
-            .authorized_request(
-                Method::GET,
-                &format!("/v2/agent-sessions/{session_id}/runtime-approvals"),
-            )
-            .await?
-            .timeout(REQUEST_TIMEOUT)
-            .send()
-            .await
-            .map_err(|_| transport_error())?;
-        if response.status() != StatusCode::OK {
-            return Err(parse_rejection(response).await);
+        let versions: &[u8] = if include_choices { &[3, 2] } else { &[2] };
+        for &version in versions {
+            let response = self
+                .authorized_request(
+                    Method::GET,
+                    &format!("/v{version}/agent-sessions/{session_id}/runtime-approvals"),
+                )
+                .await?
+                .timeout(REQUEST_TIMEOUT)
+                .send()
+                .await
+                .map_err(|_| transport_error())?;
+            if version == 3 && response.status() == StatusCode::NOT_FOUND {
+                continue; // Older Host: read its original snapshot, without a broader choice.
+            }
+            if response.status() != StatusCode::OK {
+                return Err(parse_rejection(response).await);
+            }
+            let bytes = read_json_body(response).await?;
+            let snapshot: super::runtime_permissions::RuntimeApprovalSnapshot =
+                serde_json::from_slice(&bytes).map_err(|_| protocol_error())?;
+            if snapshot.command_prefixes.is_some() != (version == 3) {
+                return Err(protocol_error());
+            }
+            snapshot.validate().map_err(|_| protocol_error())?;
+            return Ok(snapshot);
         }
-        let bytes = read_json_body(response).await?;
-        let snapshot: super::runtime_permissions::RuntimeApprovalSnapshot =
-            serde_json::from_slice(&bytes).map_err(|_| protocol_error())?;
-        snapshot.validate().map_err(|_| protocol_error())?;
-        Ok(snapshot)
+        Err(protocol_error())
     }
 
     pub async fn decide_runtime_approval(
@@ -790,13 +808,15 @@ impl HostBridge {
     ) -> Result<super::runtime_permissions::RuntimeApproval, HostBridgeError> {
         require_non_nil(session_id)?;
         require_non_nil(approval_id)?;
-        if !["approve_once", "reject", "cancel"].contains(&decision) {
-            return Err(protocol_error());
-        }
+        let version = match decision {
+            "approve_once" | "reject" | "cancel" => 2,
+            "approve_similar" => 3,
+            _ => return Err(protocol_error()),
+        };
         let response = self
             .send_json(
                 Method::POST,
-                &format!("/v2/agent-sessions/{session_id}/runtime-approvals/{approval_id}"),
+                &format!("/v{version}/agent-sessions/{session_id}/runtime-approvals/{approval_id}"),
                 &serde_json::json!({"decision":decision}),
             )
             .await?;
@@ -808,10 +828,14 @@ impl HostBridge {
             serde_json::from_slice(&bytes).map_err(|_| protocol_error())?;
         super::runtime_permissions::RuntimeApprovalSnapshot {
             requests: vec![value.clone()],
+            ..Default::default()
         }
         .validate()
         .map_err(|_| protocol_error())?;
-        if value.id != approval_id {
+        if value.id != approval_id
+            || (decision == "approve_similar"
+                && (value.kind != "command" || value.status != "approved"))
+        {
             return Err(protocol_error());
         }
         Ok(value)
@@ -2546,6 +2570,64 @@ mod tests {
             instance_nonce: nonce.to_owned(),
         })
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn command_approval_choices_read_legacy_without_downgrading_decisions() {
+        let session = Uuid::now_v7();
+        let id = Uuid::now_v7();
+        let row = serde_json::json!({"id":id,"kind":"command","status":"pending","summary":"git status","reason":"","scope":"/workspace"});
+        let v3 = serde_json::json!({"requests":[row],"commandPrefixes":{id.to_string():["git","status"]}});
+        let v2 = serde_json::json!({"requests":[row]});
+        let mut receipt = row;
+        receipt["status"] = "approved".into();
+        let (port, server) = serve(vec![
+            ready_response(NONCE),
+            json_response("200 OK", &v3.to_string()),
+            ready_response(NONCE),
+            json_response("404 Not Found", "{}"),
+            ready_response(NONCE),
+            json_response("200 OK", &v2.to_string()),
+            ready_response(NONCE),
+            json_response("200 OK", &receipt.to_string()),
+        ])
+        .await;
+        let token = TestToken::new(0o600);
+        let client = bridge(port, token.path.clone(), NONCE);
+        assert_eq!(
+            client
+                .runtime_approval_snapshot(session, true)
+                .await
+                .unwrap()
+                .command_prefixes
+                .unwrap()[&id],
+            ["git", "status"]
+        );
+        assert!(client
+            .runtime_approval_snapshot(session, true)
+            .await
+            .unwrap()
+            .command_prefixes
+            .is_none());
+        assert_eq!(
+            client
+                .decide_runtime_approval(session, id, "approve_similar")
+                .await
+                .unwrap()
+                .id,
+            id
+        );
+        let calls = server.await.unwrap();
+        assert!(calls[1].starts_with(&format!(
+            "GET /v3/agent-sessions/{session}/runtime-approvals "
+        )));
+        assert!(calls[5].starts_with(&format!(
+            "GET /v2/agent-sessions/{session}/runtime-approvals "
+        )));
+        assert!(calls[7].starts_with(&format!(
+            "POST /v3/agent-sessions/{session}/runtime-approvals/{id} "
+        )));
+        assert!(calls[7].ends_with(r#"{"decision":"approve_similar"}"#));
     }
 
     #[cfg(feature = "kimi-k31-pro-candidate")]

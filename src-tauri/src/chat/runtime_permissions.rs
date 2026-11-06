@@ -52,9 +52,11 @@ pub struct RuntimeApproval {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RuntimeApprovalSnapshot {
     pub requests: Vec<RuntimeApproval>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_prefixes: Option<std::collections::BTreeMap<uuid::Uuid, Vec<String>>>,
 }
 
 impl RuntimeApprovalSnapshot {
@@ -103,6 +105,20 @@ impl RuntimeApprovalSnapshot {
                     .any(|s| s.len() > 16384)
             {
                 return Err(ChatError::OrchestrationUnavailable);
+            }
+        }
+        if let Some(choices) = &self.command_prefixes {
+            for (id, prefix) in choices {
+                if !self
+                    .requests
+                    .iter()
+                    .any(|r| r.id == *id && r.kind == "command" && r.status == "pending")
+                    || prefix.is_empty()
+                    || prefix.len() > 64
+                    || prefix.iter().any(|arg| arg.is_empty() || arg.len() > 256)
+                {
+                    return Err(ChatError::OrchestrationUnavailable);
+                }
             }
         }
         Ok(())

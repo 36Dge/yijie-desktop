@@ -65,7 +65,9 @@ export function useRuntimePermissions(context: () => string | null, session: () 
 
   async function decide(approvalId: string, decision: RuntimeApprovalDecision): Promise<void> {
     const id = context(); const sessionId = session();
-    if (!id || !sessionId || deciding.value || !approvalsConnected.value || !approvals.value.some((r) => r.id === approvalId && r.status === "pending")) return;
+    const request = approvals.value.find(r => r.id === approvalId && r.status === "pending");
+    if (!id || !sessionId || deciding.value || !approvalsConnected.value || !request || request.kind === "mcp" || request.mcp ||
+      (decision === "approve_similar" && (request.kind !== "command" || !request.commandPrefix?.length))) return;
     mutation += 1;
     const epoch = generation; deciding.value = approvalId; error.value = null; decisionFailure = null;
     try {
