@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { useId } from "vue";
 import { NButton, NCard, NTooltip } from "naive-ui";
 import YjIcon from "../yijie/YjIcon.vue";
@@ -55,7 +56,7 @@ const titleId = useId();
         <h3><YjIcon name="lightbulb" size="lg" />专家帮你做</h3>
         <ul class="expert-detail__prompts">
           <li v-for="prompt in quickPrompts" :key="prompt">
-            <NTooltip v-if="interactive" placement="top-end" :disabled="disabled">
+            <NTooltip arrow-point-to-center v-if="interactive" placement="top-end" :disabled="disabled">
               <template #trigger>
                 <button type="button" class="expert-detail__prompt" :disabled="disabled" :aria-label="`去试试：${prompt}`" @click="emit('prompt', prompt)">
                   <span>“{{ expertPromptLabel(prompt) }}”</span><YjIcon name="arrowUpRight" size="sm" tone="muted" :stroke-width="1.5" />
@@ -63,7 +64,7 @@ const titleId = useId();
               </template>
               去试试
             </NTooltip>
-            <p v-else class="expert-detail__prompt expert-detail__prompt--readonly" :title="prompt"><span>{{ expertPromptLabel(prompt) }}</span></p>
+            <YjTooltip v-else :text="prompt"><p  class="expert-detail__prompt expert-detail__prompt--readonly" ><span>{{ expertPromptLabel(prompt) }}</span></p></YjTooltip>
           </li>
         </ul>
       </section>

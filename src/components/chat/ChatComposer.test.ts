@@ -731,7 +731,7 @@ describe("ChatComposer", () => {
       permissionParent: wrapper.get(".chat-composer__permission").element.parentElement?.className,
       readinessVisible: wrapper.find(".chat-composer__readiness").exists(),
       textareaDescribedBy: wrapper.get("textarea").attributes("aria-describedby") ?? null,
-      action: wrapper.get('[aria-label="发送任务"]').attributes("title"),
+      action: wrapper.get('[aria-label="发送任务"]').attributes("data-yj-tooltip"),
       theme: document.documentElement.dataset.theme,
     }).toMatchInlineSnapshot(`
       {

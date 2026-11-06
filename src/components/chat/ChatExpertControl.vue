@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, onMounted, ref } from "vue";
 import { NButton } from "naive-ui";
 import type { CatalogEntry, ExpertSelection } from "../../domain/experts-v2.generated";
@@ -63,11 +64,11 @@ onMounted(() => emit("refresh"));
     <p v-else-if="!loading && !executionAvailable" class="expert-menu__notice" role="status">专家服务尚未就绪，请前往管理页检查。</p>
     <ul v-if="filtered.length" class="expert-menu__list" role="radiogroup" aria-label="选择当前专家" @keydown="navigate">
       <li v-for="entry in filtered" :key="key(entry)" role="none" :aria-busy="busyKeys.has(key(entry))">
-        <button type="button" class="expert-menu__option" role="radio" :aria-checked="selected(entry)" :disabled="unavailable(entry)" :title="entry.description" @click="choose(entry)">
+        <YjTooltip :text="entry.description"><button type="button" class="expert-menu__option" role="radio" :aria-checked="selected(entry)" :disabled="unavailable(entry)"  @click="choose(entry)">
           <ExpertAvatar :expert-id="entry.display.expertId" :icon-key="entry.display.iconKey" compact />
-          <span class="expert-menu__copy"><span :title="entry.display.displayName">{{ entry.display.displayName }}</span><span v-if="status(entry)" class="expert-menu__status">{{ status(entry) }}</span></span>
+          <span class="expert-menu__copy"><YjTooltip :text="entry.display.displayName"><span >{{ entry.display.displayName }}</span></YjTooltip><span v-if="status(entry)" class="expert-menu__status">{{ status(entry) }}</span></span>
           <ChatResourceCheck :selected="selected(entry)" />
-        </button>
+        </button></YjTooltip>
       </li>
     </ul>
     <div v-else-if="!loading && !error" class="expert-menu__empty"><span>{{ entries.length ? '没有找到匹配的专家' : '暂无可用专家' }}</span><NButton v-if="query" quaternary @click="query = ''">清空搜索</NButton></div>

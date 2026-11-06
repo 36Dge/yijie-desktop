@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, nextTick, ref, watch } from "vue";
 import { NPopover, NTooltip } from "naive-ui";
 import type { Catalog, ProfileId } from "../../api/chat-model-client";
@@ -70,11 +71,11 @@ function key(event: KeyboardEvent): void {
   <Teleport to="body"><div ref="overlay" class="model-overlay chat-control-overlay" /></Teleport>
   <NPopover :to="overlay ?? false" v-model:show="open" trigger="click" placement="top-end" :show-arrow="false" :disabled="blocked" raw>
     <template #trigger>
-      <button ref="trigger" class="model-trigger yj-control yj-control--pill" type="button" :disabled="blocked" :aria-label="`选择对话模型，当前 ${label}`" :aria-expanded="open" aria-haspopup="menu" :title="disabled ? (disabledReason ?? '当前任务结束后可切换模型') : unavailable ? `${unavailableLabel(selectedAvailability?.reason)}，请选择可用模型` : label" @keydown.stop @keydown.down.prevent="open = !blocked" @keydown.esc="open = false">
+      <YjTooltip :text="disabled ? (disabledReason ?? '当前任务结束后可切换模型') : unavailable ? `${unavailableLabel(selectedAvailability?.reason)}，请选择可用模型` : label"><button ref="trigger" class="model-trigger yj-control yj-control--pill" type="button" :disabled="blocked" :aria-label="`选择对话模型，当前 ${label}`" :aria-expanded="open" aria-haspopup="menu"  @keydown.stop @keydown.down.prevent="open = !blocked" @keydown.esc="open = false">
         <span class="model-brand model-trigger-brand" :class="{ 'is-kimi': selected?.icon === 'modelKimi' }"><YjIcon :name="selected?.icon ?? 'assistant'" size="sm" /></span>
         <span class="model-trigger-label">{{ label }}</span>
         <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
-      </button>
+      </button></YjTooltip>
     </template>
     <div ref="menu" class="model-menu chat-control-menu" role="menu" aria-label="对话模型" @keydown="key">
       <button v-for="entry in catalog?.models ?? []" :key="entry.profile.profile_id" class="chat-control-option" type="button" role="menuitemradio" :aria-checked="entry.profile.profile_id === profile" :disabled="!entry.available" @click="choose(entry.profile.profile_id)">
@@ -83,7 +84,7 @@ function key(event: KeyboardEvent): void {
         <span v-if="!entry.available" class="model-option-status">{{ unavailableLabel(entry.reason) }}</span>
       </button>
       <span v-if="!catalog?.models.length" class="model-menu-empty">暂无可用模型</span>
-      <NTooltip v-for="entry in upcomingModels" :key="entry.label" :to="overlay ?? false" placement="top" :show-arrow="false" :style="{ zoom: 'var(--yj-ui-scale, 1)' }">
+      <NTooltip arrow-point-to-center v-for="entry in upcomingModels" :key="entry.label" :to="overlay ?? false" placement="top"  :style="{ zoom: 'var(--yj-ui-scale, 1)' }">
         <template #trigger>
           <span class="model-coming-soon">
             <button class="chat-control-option" type="button" role="menuitemradio" :aria-checked="false" :aria-label="`${entry.label}，即将支持`" disabled>
@@ -96,7 +97,7 @@ function key(event: KeyboardEvent): void {
       </NTooltip>
     </div>
   </NPopover>
-  <button v-if="error" class="model-retry yj-control" type="button" :disabled="saving || disabled" :title="error" :aria-label="retryLabel ?? '重试模型操作'" @click="emit('retry')">{{ retryLabel ?? "重试" }}</button>
+  <YjTooltip v-if="error" :text="error"><button  class="model-retry yj-control" type="button" :disabled="saving || disabled"  :aria-label="retryLabel ?? '重试模型操作'" @click="emit('retry')">{{ retryLabel ?? "重试" }}</button></YjTooltip>
   <span class="sr-only" role="status">{{ error || (unavailable ? unavailableLabel(selectedAvailability?.reason) : '') }}</span>
 </template>
 

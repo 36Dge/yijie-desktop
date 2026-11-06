@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { NModal } from "naive-ui";
 import {
@@ -382,14 +383,14 @@ onBeforeUnmount(() => {
     aria-label="图片预览与保存"
     :aria-busy="inlineBusy ? 'true' : 'false'"
   >
-    <button
-      v-if="inlineLease"
+    <YjTooltip v-if="inlineLease" text="预览图片"><button
+
       class="artifact-image__preview yj-control"
       data-testid="artifact-image-preview"
       type="button"
       :disabled="inlinePhase !== 'ready'"
       :aria-label="`预览图片：${displayName}`"
-      title="预览图片"
+
       @click="openLightbox"
     >
       <img
@@ -401,7 +402,7 @@ onBeforeUnmount(() => {
         @error="handleInlineError"
       >
       <span v-if="inlineBusy" class="artifact-image__overlay" role="status">正在安全加载图片…</span>
-    </button>
+    </button></YjTooltip>
 
     <div v-else-if="inlineBusy" class="artifact-image__placeholder" role="status">
       <YjIcon name="image" size="lg" tone="muted" />
@@ -420,17 +421,17 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="artifact-image__actions">
-      <button class="yj-control"
+      <YjTooltip text="保存图片"><button class="yj-control"
         data-testid="artifact-image-save"
         type="button"
         :disabled="saving"
         aria-label="保存图片"
-        title="保存图片"
+
         @click="saveImage"
       >
         <YjIcon name="download" size="sm" />
         {{ saving ? "保存中" : "保存图片" }}
-      </button>
+      </button></YjTooltip>
     </div>
 
     <p
@@ -463,14 +464,14 @@ onBeforeUnmount(() => {
       >
         <header class="artifact-image__dialog-header">
           <strong :id="`artifact-image-dialog-${artifact.artifactId}`">{{ displayName }}</strong>
-          <button class="yj-control"
+          <YjTooltip text="关闭"><button class="yj-control"
             ref="closeButton"
             data-testid="artifact-image-close"
             type="button"
             aria-label="关闭图片预览"
-            title="关闭"
+
             @click="closeLightbox"
-          ><YjIcon name="dismiss" size="md" /></button>
+          ><YjIcon name="dismiss" size="md" /></button></YjTooltip>
         </header>
 
         <div class="artifact-image__viewport" :aria-busy="lightboxBusy ? 'true' : 'false'">
@@ -494,39 +495,39 @@ onBeforeUnmount(() => {
         </div>
 
         <footer class="artifact-image__toolbar" aria-label="图片预览工具栏">
-          <button class="yj-control"
+          <YjTooltip text="缩小"><button class="yj-control"
             data-testid="artifact-image-zoom-out"
             type="button"
             :disabled="!canZoomOut"
             aria-label="缩小图片"
-            title="缩小"
+
             @click="zoomOut"
-          ><YjIcon name="zoomOut" size="sm" /></button>
+          ><YjIcon name="zoomOut" size="sm" /></button></YjTooltip>
           <span data-testid="artifact-image-zoom-value" aria-live="polite">{{ zoomLabel }}</span>
-          <button class="yj-control"
+          <YjTooltip text="放大"><button class="yj-control"
             data-testid="artifact-image-zoom-in"
             type="button"
             :disabled="!canZoomIn"
             aria-label="放大图片"
-            title="放大"
+
             @click="zoomIn"
-          ><YjIcon name="zoomIn" size="sm" /></button>
-          <button class="yj-control"
+          ><YjIcon name="zoomIn" size="sm" /></button></YjTooltip>
+          <YjTooltip text="重置缩放"><button class="yj-control"
             data-testid="artifact-image-reset"
             type="button"
             :disabled="zoomIndex === 0"
             aria-label="重置图片缩放"
-            title="重置缩放"
+
             @click="resetZoom"
-          ><YjIcon name="refresh" size="sm" /></button>
-          <button class="yj-control"
+          ><YjIcon name="refresh" size="sm" /></button></YjTooltip>
+          <YjTooltip text="保存图片"><button class="yj-control"
             data-testid="artifact-image-dialog-save"
             type="button"
             :disabled="saving"
             aria-label="保存当前图片"
-            title="保存图片"
+
             @click="saveImage"
-          ><YjIcon name="download" size="sm" /></button>
+          ><YjIcon name="download" size="sm" /></button></YjTooltip>
           <span
             v-if="saveFeedback"
             class="artifact-image__toolbar-feedback"

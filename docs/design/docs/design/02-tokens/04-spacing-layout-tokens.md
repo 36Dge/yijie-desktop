@@ -46,11 +46,11 @@
 
 ## 布局宽度
 
-- 左导航展开：256px。2026-11-02 按用户要求实测当前千问办公窗口：导航分界线为截图横向512物理像素，当前屏幕为2×，对应256逻辑像素；使用该实测值，不使用应用源码中的默认拖动宽度。
+- 左导航展开：256px（2026-11-05按用户纠正恢复原宽度）；180%/200%缩放下恢复原196px适配。缩窄40px针对右侧文件预览面板。
 - 左导航收起：72px。
 - Chat 会话列表：280px。
 - 右侧上下文面板：320–380px。
-- FEAT-166 文件预览面板单独采用两侧最小400px的分栏公式，详见[文件预览](../05-patterns/17-feat-166-conversation-file-preview.md)；布局数值集中于 `conversation-file-preview.ts`，固定尺寸使用 `--yj-layout-preview-tabs-height` 44px、`--yj-layout-preview-heading-height` 48px、`--yj-layout-preview-tab-max` 240px、`--yj-layout-preview-empty-max` 320px。
+- FEAT-166 文件预览面板采用对话最小400px、预览默认及最小320px的分栏公式，详见[文件预览](../05-patterns/17-feat-166-conversation-file-preview.md)；布局数值集中于 `conversation-file-preview.ts`。`--yj-layout-chat-toolbar-height` 在对话壳中为32px导航加32px原生窗口栏，100%缩放下总高64px，预览标签条复用；其余固定尺寸使用 `--yj-layout-preview-heading-height` 48px、`--yj-layout-preview-tab-min` 120px、`--yj-layout-preview-tab-max` 240px、`--yj-layout-preview-empty-max` 320px。
 - 表单最大宽度：720–960px。
 - 专家详情弹窗最大宽度：600px（`--yj-layout-expert-detail-width`），最小高度700px（`--yj-layout-expert-detail-min-height`）；最小高度也受视口限制，上下至少留32px，居中显示，超高时固定头部、正文内部滚动。内部标准边距24px，窄窗口减为20px。
 - 定时任务创建、编辑及草案确认弹窗：520px（`--yj-layout-schedule-form-width`），竖向分组；标题和底部操作固定，内容超高时在弹窗内滚动，按实际缩放后的可用视口限制宽高。

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, onMounted, ref, watch } from "vue";
 import { NButton, NSwitch } from "naive-ui";
 import ChatResourcePanel from "./ChatResourcePanel.vue";
@@ -98,8 +99,8 @@ onMounted(() => { emit("refresh"); });
         <li v-for="{ entry, status } in filtered" :key="entry.id" :aria-busy="entry.busy" :class="{ 'connector-menu__row--selected': selectedIds.includes(entry.id), 'connector-menu__row--blocked': disabled || entry.busy }">
           <button type="button" data-connector-option class="connector-menu__option" :disabled="disabled" :aria-label="`${selected(entry) ? '取消选用' : selectionDisabled(entry) ? '管理' : '选用'} ${entry.name}，${entry.status.label}`" @click="choose(entry)">
             <ConnectorIcon :asset-id="entry.iconAssetId" size="xs" />
-            <span class="connector-menu__name" :title="entry.name">{{ entry.name }}</span>
-            <span v-if="status" class="connector-menu__status" :class="[`connector-menu__status--${status.tone}`, { 'connector-menu__status--pending': status.label === '待连接' }]" :title="entry.explanation ? `${entry.status.label}：${entry.explanation}` : entry.status.label">{{ status.label }}</span>
+            <YjTooltip :text="entry.name"><span class="connector-menu__name" >{{ entry.name }}</span></YjTooltip>
+            <YjTooltip v-if="status" :text="entry.explanation ? `${entry.status.label}：${entry.explanation}` : entry.status.label"><span  class="connector-menu__status" :class="[`connector-menu__status--${status.tone}`, { 'connector-menu__status--pending': status.label === '待连接' }]" >{{ status.label }}</span></YjTooltip>
           </button>
           <NSwitch
             class="connector-menu__switch"

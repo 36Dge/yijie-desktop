@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, nextTick, ref, useId, watch } from "vue";
 import { NButton, NPopover } from "naive-ui";
 import type { ChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
@@ -74,8 +75,8 @@ watch(() => [props.identity, props.text], () => { close(); vote.value = null; re
     </NPopover>
     <span class="chat-answer-actions__metadata">
       <span class="chat-answer-actions__model" aria-label="本轮使用的模型"><span class="chat-answer-actions__brand" :class="{'is-kimi': model.icon === 'modelKimi'}"><YjIcon :name="model.icon" size="sm" :stroke-width="1.5" /></span><span>{{ model.label }}</span></span>
-      <time v-if="completed" class="chat-answer-actions__time" :datetime="completed.datetime" :title="completed.title">{{ completed.label }}</time>
-      <span v-else class="chat-answer-actions__time" title="没有可用的完成时间">时间未知</span>
+      <YjTooltip v-if="completed" :text="completed.title"><time  class="chat-answer-actions__time" :datetime="completed.datetime" >{{ completed.label }}</time></YjTooltip>
+      <YjTooltip v-else text="没有可用的完成时间"><span  class="chat-answer-actions__time" >时间未知</span></YjTooltip>
     </span>
     <span class="chat-answer-actions__announcement" role="status" aria-live="polite" aria-atomic="true">{{ announcement }}</span>
   </div>

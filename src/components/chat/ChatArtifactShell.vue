@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed } from "vue";
 import { isSidebarFile } from "../../domain/conversation-file-preview";
 import { chatFilePresentation } from "../../domain/chat-file-presentation";
@@ -89,7 +90,7 @@ const progressLabel = computed(() => `${displayName.value}处理进度`);
         <YjIcon :name="kindPresentation.icon" size="lg" tone="muted" />
       </span>
       <span class="artifact-shell__identity">
-        <button v-if="sidebarFile" :id="titleId" type="button" class="artifact-shell__name artifact-shell__open" :title="displayName" @click="openFile?.(artifact)">{{ displayName }}</button>
+        <YjTooltip v-if="sidebarFile" :text="displayName"><button  :id="titleId" type="button" class="artifact-shell__name artifact-shell__open"  @click="openFile?.(artifact)">{{ displayName }}</button></YjTooltip>
         <strong v-else :id="titleId" class="artifact-shell__name">{{ displayName }}</strong>
         <span class="artifact-shell__kind">{{ kindPresentation.label }}<template v-if="sizeLabel"> · {{ sizeLabel }}</template></span>
       </span>

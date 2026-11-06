@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, nextTick, onScopeDispose, ref, useId, watch } from "vue";
 import { NAlert, NButton, NCard, NModal, NSkeleton, useDialog, type DialogReactive } from "naive-ui";
 import { useRoute } from "vue-router";
@@ -113,8 +114,8 @@ watch(() => experts.scope, () => { selectedKey.value = null; query.value = ""; }
           <span class="expert-card__header">
             <ExpertAvatar :expert-id="entry.display.expertId" :icon-key="entry.display.iconKey" />
             <span class="expert-card__intro">
-              <span class="expert-card__name" :title="entry.display.displayName">{{ entry.display.displayName }}</span>
-              <span class="expert-card__description" :title="entry.description">{{ entry.description }}</span>
+              <YjTooltip :text="entry.display.displayName"><span class="expert-card__name" >{{ entry.display.displayName }}</span></YjTooltip>
+              <YjTooltip :text="entry.description"><span class="expert-card__description" >{{ entry.description }}</span></YjTooltip>
             </span>
           </span>
           <span class="expert-card__tags"><span v-for="tag in entry.tags" :key="tag" class="expert-card__tag">{{ tag }}</span></span>

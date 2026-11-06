@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { DOMWrapper, flushPromises, mount } from "@vue/test-utils";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import ChatWorkspaceControl from "./ChatWorkspaceControl.vue";
 
 const entry = { project: { projectId: "019c1a00-0000-7000-8000-000000000001", safeName: "市场调研", pinnedAt: null, lastUsedAt: 1, available: true }, path: "/Users/example/Yijie/Workspaces/市场调研" };
@@ -22,11 +22,13 @@ describe("workspace control", () => {
     expect(wrapper.emitted("open-local")).toBeUndefined();
     expect(wrapper.emitted("refresh")).toHaveLength(1);
     const option = document.querySelector<HTMLButtonElement>('[role="menuitemradio"]')!;
-    expect(option.title).toBe(entry.path);
+    expect(option.title).toBe("");
+    await new DOMWrapper(option).trigger("mouseenter");
+    await vi.waitFor(() => expect(document.querySelector(".workspace-path")?.textContent).toBe(entry.path));
     option.click(); await flushPromises();
     expect(wrapper.emitted("select")).toEqual([[entry.project.projectId]]);
     await wrapper.setProps({ selectedProjectId: entry.project.projectId });
-    expect(wrapper.get(".workspace-trigger").attributes("title")).toBe(entry.path);
+    expect(wrapper.get(".workspace-trigger").attributes("data-yj-tooltip")).toBe(entry.path);
     await wrapper.get(".workspace-trigger").trigger("click"); await flushPromises();
     menuAction("不使用工作空间").click(); await flushPromises();
     expect(wrapper.emitted("select")?.slice(-1)[0]).toEqual([null]);

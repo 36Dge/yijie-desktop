@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { scheduleModelLabel } from "../../domain/scheduled-task-ui";
 import { chatModelsEnabled } from "../../api/chat-model-client";
 import { computed } from "vue";
@@ -30,8 +31,8 @@ const note = computed(() => {
         <template v-if="chatModelsEnabled && detail.configuration"><dt>执行模型</dt><dd>{{ scheduleModelLabel(detail.configuration.model_profile) }}</dd></template>
         <dt>执行状态</dt><dd><span class="scheduled-record-dialog__status" :data-tone="recordTone(detail.record)">{{ recordStatus(detail.record) }}</span></dd>
         <dt>触发方式</dt><dd>{{ trigger }}</dd>
-        <dt>执行时间</dt><dd :title="executionTimeLabel(detail.record.timing)">{{ executionTimeLabel(detail.record.timing, true) }}</dd>
-        <dt>执行耗时</dt><dd :title="`${durationLabel(detail.record.timing)} · ${timingNote(detail.record.timing)}`">{{ durationLabel(detail.record.timing, true) }}</dd>
+        <dt>执行时间</dt><YjTooltip :text="executionTimeLabel(detail.record.timing)"><dd >{{ executionTimeLabel(detail.record.timing, true) }}</dd></YjTooltip>
+        <dt>执行耗时</dt><YjTooltip :text="`${durationLabel(detail.record.timing)} · ${timingNote(detail.record.timing)}`"><dd >{{ durationLabel(detail.record.timing, true) }}</dd></YjTooltip>
       </dl>
       <p v-if="error" class="scheduled-record-dialog__error" role="alert">{{ error }}</p>
       <p v-else-if="note" class="scheduled-record-dialog__note">{{ note }}</p>

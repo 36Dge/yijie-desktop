@@ -554,12 +554,20 @@ mod tests {
     fn native_completed_unknown_phase_replaces_a_provisional_declaration() {
         let mut b = NativeDisplayBuffer::new(context(), None).unwrap();
         b.observe(&event(1,"item/started",serde_json::json!({"item":{"id":"a","type":"agentMessage","text":"","phase":"commentary","availability":"available"}}))).unwrap();
-        b.observe(&event(2,"item/agentMessage/delta",serde_json::json!({"itemId":"a","delta":"开场与可读结果。"}))).unwrap();
+        b.observe(&event(
+            2,
+            "item/agentMessage/delta",
+            serde_json::json!({"itemId":"a","delta":"开场与可读结果。"}),
+        ))
+        .unwrap();
         b.observe(&event(3,"item/completed",serde_json::json!({"item":{"id":"a","type":"agentMessage","text":"开场与可读结果。","availability":"available"}}))).unwrap();
         assert_eq!(b.view.items.len(), 1);
         assert_eq!(b.view.items[0].item.id, "a");
         assert_eq!(b.view.items[0].item.phase, None);
-        assert_eq!(b.view.items[0].item.text.as_deref(), Some("开场与可读结果。"));
+        assert_eq!(
+            b.view.items[0].item.text.as_deref(),
+            Some("开场与可读结果。")
+        );
         assert!(!b.view.terminal_observed);
     }
     #[test]

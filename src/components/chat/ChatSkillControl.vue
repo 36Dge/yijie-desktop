@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, onMounted, ref, watch } from "vue";
 import { NButton } from "naive-ui";
 import { skillFailureMessage, type ManagedSkillProjection } from "../../domain/skill-marketplace";
@@ -57,11 +58,11 @@ onMounted(() => emit("refresh"));
     <div v-if="error" class="skill-menu__notice" role="alert"><p>{{ error }}</p><NButton size="small" :disabled="loading || refreshing" @click="$emit('refresh')">重试</NButton></div>
     <ul v-if="filtered.length" class="skill-menu__list" aria-label="已安装的技能" @keydown="navigate">
       <li v-for="entry in filtered" :key="entry.id" :aria-busy="Boolean(operations[entry.id])">
-        <button type="button" class="skill-menu__option" role="checkbox" :aria-checked="selected(entry)" :disabled="unavailable(entry)" :title="skillSelectionIssue(entry) ?? entry.description" @click="select(entry)">
+        <YjTooltip :text="skillSelectionIssue(entry) ?? entry.description"><button type="button" class="skill-menu__option" role="checkbox" :aria-checked="selected(entry)" :disabled="unavailable(entry)"  @click="select(entry)">
         <img class="skill-menu__icon" :src="skillCardArtwork(entry)" alt="" aria-hidden="true" draggable="false" />
-        <span class="skill-menu__copy"><span :title="entry.displayName">{{ entry.displayName }}</span><span v-if="status(entry)" class="skill-menu__status" :class="{ 'skill-menu__status--error': operationErrors[entry.id] || skillFailureMessage(entry.failureCode) }" :role="operationErrors[entry.id] ? 'alert' : undefined">{{ status(entry) }}</span></span>
+        <span class="skill-menu__copy"><YjTooltip :text="entry.displayName"><span >{{ entry.displayName }}</span></YjTooltip><span v-if="status(entry)" class="skill-menu__status" :class="{ 'skill-menu__status--error': operationErrors[entry.id] || skillFailureMessage(entry.failureCode) }" :role="operationErrors[entry.id] ? 'alert' : undefined">{{ status(entry) }}</span></span>
         <ChatResourceCheck class="skill-menu__check" :selected="selected(entry)" />
-        </button>
+        </button></YjTooltip>
       </li>
     </ul>
     <div v-else-if="!loading && !error" class="skill-menu__empty"><span>{{ installed.length ? '没有找到匹配的技能' : '还没有安装技能' }}</span><NButton v-if="query" quaternary @click="query = ''">清空搜索</NButton></div>

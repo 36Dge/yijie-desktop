@@ -47,7 +47,7 @@ defineExpose({focus});
 </script>
 
 <template>
-  <NTooltip trigger="manual" :show="show" placement="bottom" :show-arrow="false" :style="{zoom:'var(--yj-ui-scale, 1)'}">
+  <NTooltip arrow-point-to-center trigger="manual" :show="show" placement="bottom"  :style="{zoom:'var(--yj-ui-scale, 1)'}">
     <template #trigger>
       <button ref="button" type="button" class="chat-answer-action" :class="{'is-selected': pressed, 'is-error': error}"
         :aria-label="label" :aria-pressed="pressed" :aria-disabled="disabled || undefined" :aria-busy="busy || undefined"

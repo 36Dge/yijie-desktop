@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "./YjTooltip.vue";
 import { computed } from "vue";
 import { RouterLink } from "vue-router";
 import type { AppNavItem } from "../../navigation/app-nav";
@@ -17,31 +18,31 @@ const accessibleLabel = computed(() =>
 </script>
 
 <template>
-  <RouterLink
-    v-if="routeTarget"
+  <YjTooltip v-if="routeTarget" :text="collapsed ? accessibleLabel : undefined"><RouterLink
+
     class="yj-nav-item"
     :class="{ 'yj-nav-item--selected': selected, 'yj-nav-item--collapsed': collapsed }"
     :to="routeTarget"
     :aria-current="selected ? 'page' : undefined"
     :aria-label="collapsed ? accessibleLabel : undefined"
-    :title="collapsed ? accessibleLabel : undefined"
+
   >
     <YjIcon :name="item.icon" tone="primary" :stroke-width="1.5" />
     <span v-if="!collapsed" class="yj-nav-item__label">{{ item.label }}</span>
-  </RouterLink>
+  </RouterLink></YjTooltip>
 
-  <div
-    v-else
+  <YjTooltip v-else :text="collapsed ? accessibleLabel : undefined"><div
+
     class="yj-nav-item yj-nav-item--disabled"
     :class="{ 'yj-nav-item--collapsed': collapsed }"
     aria-disabled="true"
     :aria-label="accessibleLabel"
-    :title="collapsed ? accessibleLabel : undefined"
+
   >
     <YjIcon :name="item.icon" tone="muted" :stroke-width="1.5" />
     <span v-if="!collapsed" class="yj-nav-item__label">{{ item.label }}</span>
     <span v-if="!collapsed" class="yj-nav-item__status">即将开放</span>
-  </div>
+  </div></YjTooltip>
 </template>
 
 <style scoped>

@@ -83,7 +83,7 @@ describe("chat connector conversation selection", () => {
     const wrapper = setup([{ ...entry, enabled: false, selectable: false, busy, status: { label, tone: "warning" }, actions: ["configure"] }]);
     await flushPromises();
     expect(wrapper.get('.connector-menu__status').text()).toBe(compact);
-    expect(wrapper.get('.connector-menu__status').attributes('title')).toBe(label);
+    expect(wrapper.get('.connector-menu__status').attributes('data-yj-tooltip')).toBe(label);
     const option = wrapper.get('[data-connector-option]');
     expect(option.attributes('aria-label')).toContain(label);
     expect(wrapper.get('.connector-menu__name').text()).toBe(entry.name);

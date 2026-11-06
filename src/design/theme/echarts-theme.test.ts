@@ -28,6 +28,10 @@ function contrast(foreground: string, background: string): number {
 
 function tokenReader(overrides: Readonly<Record<string, string>> = {}) {
   const values: Record<string, string> = {
+    "--yj-color-tooltip-chart-bg": "#36393c", "--yj-color-tooltip-text": "#ffffff",
+    "--yj-tooltip-font-size": "12px", "--yj-tooltip-line-height": "20px",
+    "--yj-tooltip-font-weight": "400", "--yj-tooltip-radius": "8px",
+    "--yj-tooltip-padding-block": "4px", "--yj-tooltip-padding-inline": "8px",
     "--yj-color-text-primary": "#25282b",
     "--yj-color-text-secondary": "#60666e",
     "--yj-color-bg-elevated": "#ffffff",

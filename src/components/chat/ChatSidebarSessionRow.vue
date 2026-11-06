@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, ref, useId, watch } from "vue";
 import { NDropdown, type DropdownOption } from "naive-ui";
 import type { ChatSession } from "../../domain/chat-ipc";
@@ -87,7 +88,7 @@ function selectAction(key: string | number): void {
     >
       <span class="chat-tree__session-title">{{ session.title }}</span>
       <span class="chat-tree__session-status" aria-hidden="true">
-        <span v-if="completed" class="chat-tree__session-completed" title="任务已完成，点击查看" />
+        <YjTooltip v-if="completed" text="任务已完成，点击查看"><span  class="chat-tree__session-completed"  /></YjTooltip>
       </span>
     </button>
     <span v-if="completed" :id="completionDescriptionId" class="chat-tree__session-description">任务已完成，尚未查看</span>
@@ -111,6 +112,7 @@ function selectAction(key: string | number): void {
 
 <style scoped>
 .chat-tree__session {
+  position: relative;
   display: flex;
   min-width: 0;
   min-height: var(--yj-space-8);

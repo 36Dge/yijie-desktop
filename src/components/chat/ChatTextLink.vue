@@ -17,8 +17,7 @@ watch(() => props.destination, dismiss);
 </script>
 
 <template>
-  <NTooltip v-if="shown" :show="tooltipVisible" trigger="manual" placement="top" :show-arrow="false"
-    :style="{ maxWidth: 'min(var(--yj-layout-chat-link-tooltip-max-width), calc(100vw - 2 * var(--yj-space-4)))', zoom: 'var(--yj-ui-scale, 1)', overflowWrap: 'anywhere' }">
+  <NTooltip arrow-point-to-center v-if="shown" :show="tooltipVisible" trigger="manual" placement="top">
     <template #trigger>
       <component :is="href ? 'a' : 'span'" class="chat-text-link" :class="{'chat-text-link--enabled': href}"
         :href="href" :target="href ? '_blank' : undefined" :rel="href ? 'noopener noreferrer' : undefined"

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, ref, useId } from "vue";
 import { NButton, NSwitch, NTag, NTooltip } from "naive-ui";
 import {
@@ -112,10 +113,10 @@ function requestUninstall(event: MouseEvent): void {
       <img class="skill-card__icon" :src="artworkSrc" alt="" aria-hidden="true" draggable="false" />
 
       <div class="skill-card__content">
-        <h3 :id="titleId" class="skill-card__title" :title="skill.displayName">
+        <YjTooltip :text="skill.displayName"><h3 :id="titleId" class="skill-card__title" >
           {{ skill.displayName }}
-        </h3>
-        <p :id="descriptionId" class="skill-card__description" :title="skill.description">{{ skill.description }}</p>
+        </h3></YjTooltip>
+        <YjTooltip :text="skill.description"><p :id="descriptionId" class="skill-card__description" >{{ skill.description }}</p></YjTooltip>
       </div>
 
       <div class="skill-card__actions" aria-label="Skill 操作">
@@ -127,19 +128,19 @@ function requestUninstall(event: MouseEvent): void {
             :aria-label="enabledLabel"
             @update:value="emit('enabled-change', skill.id, $event)"
           />
-          <button
-            v-if="canManage"
+          <YjTooltip v-if="canManage" text="卸载"><button
+
             class="skill-card__delete"
             type="button"
             :disabled="pending"
             :aria-label="`卸载 ${skill.displayName}`"
-            title="卸载"
+
             @click="requestUninstall"
           >
             <YjIcon name="trash" size="lg" />
-          </button>
+          </button></YjTooltip>
         </template>
-        <n-tooltip
+        <n-tooltip arrow-point-to-center
           v-else-if="installable"
           trigger="manual"
           :show="installTooltipVisible"

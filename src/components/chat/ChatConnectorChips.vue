@@ -58,7 +58,7 @@ onBeforeUnmount(() => {
     <template #trigger>
       <ul ref="group" class="chat-connector-chips" aria-label="本轮使用的连接器">
         <li v-for="entry in entries" :key="entry.id" class="chat-connector-chip">
-          <NTooltip :show="open ? false : undefined" :disabled="open" placement="top" :show-arrow="false" trigger="hover">
+          <NTooltip arrow-point-to-center :show="open ? false : undefined" :disabled="open" placement="top"  trigger="hover">
             <template #trigger>
               <button type="button" class="chat-connector-chip__button" :class="{ 'chat-connector-chip__button--unavailable': entry.unavailableReason }"
                 :disabled="disabled" :aria-label="`连接器：${entry.name}${entry.unavailableReason ? `，${entry.unavailableReason}` : ''}`"

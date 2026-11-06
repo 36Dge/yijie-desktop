@@ -1,0 +1,74 @@
+/* Naive positions body portals in visual pixels. Cancel root zoom at that
+ * boundary, then scale the bubble once, just like composer-owned overlays. */
+body > .v-binder-follower-container:has(> .v-binder-follower-content > .n-tooltip) {
+  zoom: calc(1 / var(--yj-ui-scale, 1));
+}
+
+/* One surface for Naive tooltips and title replacements. Menus retain their own theme. */
+.n-popover.n-tooltip {
+  max-width: min(var(--yj-tooltip-max-width), calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-8)));
+  padding: var(--yj-tooltip-padding-block) var(--yj-tooltip-padding-inline);
+  border: 0;
+  border-radius: var(--yj-tooltip-radius);
+  color: var(--yj-color-tooltip-text);
+  background: var(--yj-color-tooltip-bg);
+  box-shadow: none;
+  font-family: var(--yj-font-family-sans);
+  font-size: var(--yj-tooltip-font-size);
+  font-weight: var(--yj-tooltip-font-weight);
+  line-height: var(--yj-tooltip-line-height);
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  backdrop-filter: blur(var(--yj-tooltip-blur));
+  -webkit-backdrop-filter: blur(var(--yj-tooltip-blur));
+  zoom: var(--yj-ui-scale, 1);
+}
+
+.n-tooltip .n-popover-arrow {
+  background: var(--yj-color-tooltip-bg);
+  box-shadow: none;
+}
+
+[v-placement^="top"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow,
+[v-placement^="bottom"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow {
+  width: var(--yj-tooltip-arrow-width);
+  height: var(--yj-tooltip-arrow-height);
+  transform: none;
+}
+[v-placement^="top"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow { top: 0; clip-path: polygon(0 0, 100% 0, 50% 100%); }
+[v-placement^="bottom"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow { bottom: 0; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+[v-placement="top"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow,
+[v-placement="bottom"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow { transform: translateX(-50%); }
+
+[v-placement^="left"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow,
+[v-placement^="right"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow {
+  width: var(--yj-tooltip-arrow-height);
+  height: var(--yj-tooltip-arrow-width);
+  transform: none;
+}
+[v-placement^="left"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow { left: 0; clip-path: polygon(0 0, 100% 50%, 0 100%); }
+[v-placement^="right"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow { right: 0; clip-path: polygon(100% 0, 100% 100%, 0 50%); }
+[v-placement="left"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow,
+[v-placement="right"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow { transform: translateY(-50%); }
+
+[v-placement="top-start"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow,
+[v-placement="bottom-start"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow {
+  left: calc(max((var(--v-target-width, 0px) / var(--yj-ui-scale, 1) - var(--yj-tooltip-arrow-width)) / 2, var(--yj-tooltip-radius)) - var(--v-offset-left) / var(--yj-ui-scale, 1));
+}
+[v-placement="top-end"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow,
+[v-placement="bottom-end"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow {
+  right: calc(max((var(--v-target-width, 0px) / var(--yj-ui-scale, 1) - var(--yj-tooltip-arrow-width)) / 2, var(--yj-tooltip-radius)) + var(--v-offset-left) / var(--yj-ui-scale, 1));
+}
+[v-placement="left-start"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow,
+[v-placement="right-start"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow {
+  top: calc(max((var(--v-target-height, 0px) / var(--yj-ui-scale, 1) - var(--yj-tooltip-arrow-width)) / 2, var(--yj-tooltip-radius)) - var(--v-offset-top) / var(--yj-ui-scale, 1));
+}
+[v-placement="left-end"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow,
+[v-placement="right-end"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow {
+  bottom: calc(max((var(--v-target-height, 0px) / var(--yj-ui-scale, 1) - var(--yj-tooltip-arrow-width)) / 2, var(--yj-tooltip-radius)) + var(--v-offset-top) / var(--yj-ui-scale, 1));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .n-popover.n-tooltip { backdrop-filter: none; -webkit-backdrop-filter: none; }
+}

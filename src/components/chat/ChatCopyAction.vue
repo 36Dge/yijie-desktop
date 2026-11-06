@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import type { ChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
 import YjIcon from "../yijie/YjIcon.vue";
@@ -87,11 +88,11 @@ async function copy(): Promise<void> {
     <ChatActionButton v-if="compact" label="复制" :tooltip="feedback || '复制'"
       :icon="outcome === 'success' ? 'checkmark' : icon" :error="outcome === 'error'"
       :busy="outcome === 'pending'" :disabled="unavailable" preserve-selection @click="copy" />
-    <button v-else
+    <YjTooltip v-else :text="actionLabel"><button
       class="chat-copy-action__button"
       type="button"
       :aria-label="actionLabel"
-      :title="actionLabel"
+
       :aria-disabled="unavailable ? 'true' : undefined"
       :aria-busy="outcome === 'pending' ? 'true' : undefined"
       @pointerdown.prevent
@@ -99,7 +100,7 @@ async function copy(): Promise<void> {
       @click="copy"
     >
       <YjIcon :name="icon" size="sm" :tone="iconTone" />
-    </button>
+    </button></YjTooltip>
     <span
       v-if="feedback && !compact"
       class="chat-copy-action__feedback"

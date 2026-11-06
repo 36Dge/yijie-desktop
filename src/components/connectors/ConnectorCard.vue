@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import type { ConnectorView } from "../../domain/connector-ui";
 import YjIcon from "../yijie/YjIcon.vue";
 import ConnectorIcon from "./ConnectorIcon.vue";
@@ -11,7 +12,7 @@ defineEmits<{ open: [id: string] }>();
   <button class="connector-card" type="button" :aria-label="`${connector.name}，${connector.status.label}，查看详情`" :aria-busy="connector.busy" @click="$emit('open', connector.id)">
     <ConnectorIcon :asset-id="connector.iconAssetId" />
     <span class="connector-card__copy">
-      <strong :title="connector.name">{{ connector.name }}</strong>
+      <YjTooltip :text="connector.name"><strong >{{ connector.name }}</strong></YjTooltip>
       <span class="connector-card__description">{{ connector.description }}</span>
       <span v-if="connector.installed || connector.status.tone === 'warning' || connector.status.tone === 'error'" class="connector-card__status" :class="`connector-card__status--${connector.status.tone}`">{{ connector.status.label }}</span>
     </span>

@@ -80,8 +80,17 @@ export function useChatScroll(scrollElement: Ref<HTMLElement | null>) {
     const element = scrollElement.value;
     if (!element || !element.contains(anchor)) return;
     pauseFollowing();
-    // Native scrolling accounts for CSS zoom and the scroller's scroll padding.
-    anchor.scrollIntoView({ block: "start", behavior: "instant" });
+    // scrollIntoView also moves overflow:hidden ancestors, including the app
+    // shell. Navigate this conversation alone, converting zoomed screen bounds
+    // back to its CSS scroll coordinates and preserving its reading inset.
+    const bounds = element.getBoundingClientRect();
+    const scale = element.offsetHeight > 0 && bounds.height > 0
+      ? bounds.height / element.offsetHeight : 1;
+    const padding = Number.parseFloat(getComputedStyle(element).scrollPaddingTop) || 0;
+    const margin = Number.parseFloat(getComputedStyle(anchor).scrollMarginTop) || 0;
+    const targetTop = element.scrollTop + (anchor.getBoundingClientRect().top - bounds.top) / scale
+      - element.clientTop - padding - margin;
+    element.scrollTop = Math.max(0, Math.min(targetTop, element.scrollHeight - element.clientHeight));
     previousTop = element.scrollTop;
     bottomDistance.value = distanceFromBottom(element);
     anchor.focus({ preventScroll: true });

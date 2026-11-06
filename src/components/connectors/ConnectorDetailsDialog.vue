@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, useId } from "vue";
 import { NAlert, NButton, NCard, NModal } from "naive-ui";
 import { connectorPrimaryAction, type ConnectorAction, type ConnectorView } from "../../domain/connector-ui";
@@ -23,7 +24,7 @@ const title = computed(() => {
 <template>
   <NModal v-if="connector" :show="show" :auto-focus="true" :trap-focus="true" @update:show="$emit('update:show', $event)" @after-leave="$emit('after-leave')">
     <NCard class="connector-details" role="dialog" aria-modal="true" :aria-labelledby="titleId" :aria-busy="connector.busy" :bordered="false">
-      <button class="connector-details__close" type="button" aria-label="关闭连接器详情" :title="connector.busy ? '关闭详情，连接操作可稍后继续查看' : '关闭'" @click="$emit('update:show', false)"><YjIcon name="dismiss" size="md" /></button>
+      <YjTooltip :text="connector.busy ? '关闭详情，连接操作可稍后继续查看' : '关闭'"><button class="connector-details__close" type="button" aria-label="关闭连接器详情"  @click="$emit('update:show', false)"><YjIcon name="dismiss" size="md" /></button></YjTooltip>
       <div class="connector-details__content">
         <div class="connector-details__identity" aria-hidden="true"><YjLogo variant="icon-only" size="lg" /><YjIcon name="arrowRight" size="md" tone="muted" /><ConnectorIcon :asset-id="connector.iconAssetId" size="lg" /></div>
         <h2 :id="titleId">{{ title }}</h2>

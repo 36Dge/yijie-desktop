@@ -379,7 +379,8 @@ it("locates the exact requested local turn without sending or substituting the l
   await flushPromises();
   expect(wrapper.text()).toContain("已定位本次运行对应的轮次");
   expect(wrapper.find(`[data-turn-id="${TURN_ID}"]`).exists()).toBe(true);
-  expect(scroll).toHaveBeenCalled();
+  expect(document.activeElement).toBe(wrapper.get(`[data-turn-id="${TURN_ID}"]`).element);
+  expect(scroll).not.toHaveBeenCalled();
   const submit = vi.spyOn(store, "submitTurn");
   await router.push(`/chat/${SESSION_ID}?turn=019c1a00-0000-7000-8000-000000009999`);
   await flushPromises();
@@ -389,6 +390,23 @@ it("locates the exact requested local turn without sending or substituting the l
 });
 
 describe("FEAT-126 ChatPage", () => {
+  it.skipIf(!kimiK31Candidate)("hides the duplicate preview trigger while open and restores keyboard focus after collapsing", async () => {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1028);
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+    try {
+      const submit = vi.spyOn(store, "submitTurn");
+      await wrapper.get('[aria-label="展开右侧面板"]').trigger('click');
+      await flushPromises();
+      expect(wrapper.find('[aria-label="展开右侧面板"]').exists()).toBe(false);
+      expect(wrapper.findAll('[aria-label="收起右侧面板"]')).toHaveLength(1);
+      await wrapper.get('[aria-label="收起右侧面板"]').trigger('click');
+      await flushPromises();
+      expect(wrapper.find('[aria-label="收起右侧面板"]').exists()).toBe(false);
+      expect(document.activeElement).toBe(wrapper.get('[aria-label="展开右侧面板"]').element);
+      expect(submit).not.toHaveBeenCalled();
+    } finally { wrapper.unmount(); }
+  });
+
   it("anchors the latest turn for repeated sidebar clicks without resubmitting or reloading history", async () => {
     const latestId = "019c1a00-0000-7000-8000-000000000099";
     const history: ChatHistoryPage = { ...HISTORY, turns: [...HISTORY.turns, {
@@ -400,13 +418,16 @@ describe("FEAT-126 ChatPage", () => {
     const reading = useChatReadingStore(pinia);
     const submit = vi.spyOn(store, "submitTurn");
     const reload = vi.spyOn(store, "selectSession");
+    const anchor = wrapper.get(`[data-turn-id="${latestId}"]`).element as HTMLElement;
+    const focus = vi.spyOn(anchor, "focus");
     scroll.mockClear();
     for (let click = 1; click <= 2; click++) {
       reading.requestLatest(SESSION);
       await flushPromises();
-      expect(scroll).toHaveBeenCalledTimes(click);
-      expect((scroll.mock.contexts[click - 1] as HTMLElement).dataset.turnId).toBe(latestId);
-      expect(document.activeElement).toBe(wrapper.get(`[data-turn-id="${latestId}"]`).element);
+      expect(scroll).not.toHaveBeenCalled();
+      expect(focus).toHaveBeenCalledTimes(click);
+      expect(focus).toHaveBeenLastCalledWith({ preventScroll: true });
+      expect(document.activeElement).toBe(anchor);
       expect(reading.latestRequest).toBeNull();
     }
     expect(reading.receipts[0]?.turnId).toBe(latestId);
@@ -417,19 +438,24 @@ describe("FEAT-126 ChatPage", () => {
 
   it("waits for the requested history to render before anchoring and does not substitute an older turn", async () => {
     const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => undefined);
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
     const { wrapper, store, pinia } = await mountPage(`/chat/${SESSION_ID}`, true);
+    focus.mockClear();
     const reading = useChatReadingStore(pinia);
     store.phase = "resyncing";
     store.history = null;
     reading.requestLatest(SESSION);
     await flushPromises();
     expect(scroll).not.toHaveBeenCalled();
+    expect(focus.mock.contexts.filter(element => (element as HTMLElement).dataset.turnId)).toHaveLength(0);
     expect(reading.latestRequest).not.toBeNull();
     setHistoryProjection(store, HISTORY);
     store.phase = "ready";
     await flushPromises();
-    expect(scroll).toHaveBeenCalledTimes(1);
-    expect((scroll.mock.contexts[0] as HTMLElement).dataset.turnId).toBe(TURN_ID);
+    expect(scroll).not.toHaveBeenCalled();
+    expect(focus.mock.contexts.filter(element => (element as HTMLElement).dataset.turnId)
+      .map(element => (element as HTMLElement).dataset.turnId)).toEqual([TURN_ID]);
+    expect(document.activeElement).toBe(wrapper.get(`[data-turn-id="${TURN_ID}"]`).element);
     expect(reading.latestRequest).toBeNull();
     wrapper.unmount();
   });
@@ -1261,7 +1287,7 @@ describe("FEAT-126 ChatPage", () => {
     expect(picker.props("createOpen")).toBe(false);
     expect(picker.props("selectedProjectId")).toBe(SECOND_PROJECT.projectId);
     expect(store.projects).toContainEqual(SECOND_PROJECT);
-    expect(wrapper.get(".workspace-trigger").attributes("title")).toBe("/Users/example/Yijie/Workspaces/Second Synthetic Workspace");
+    expect(wrapper.get(".workspace-trigger").attributes("data-yj-tooltip")).toBe("/Users/example/Yijie/Workspaces/Second Synthetic Workspace");
     const createSession = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
     await wrapper.get("textarea").setValue("使用新建空间");
     await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();

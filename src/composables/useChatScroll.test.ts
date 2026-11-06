@@ -68,7 +68,7 @@ describe("useChatScroll", () => {
     const callbacks = new Map<number, FrameRequestCallback>();
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { callbacks.set(1, callback); return 1; });
     vi.stubGlobal("cancelAnimationFrame", (id: number) => callbacks.delete(id));
-    const wrapper = mount(Harness);
+    const wrapper = mount(Harness, { attachTo: document.body });
     await nextTick();
     const element = wrapper.get("div").element as HTMLElement;
     const anchor = document.createElement("div");
@@ -76,16 +76,49 @@ describe("useChatScroll", () => {
     element.append(anchor);
     const scroll = vi.fn();
     Object.defineProperty(anchor, "scrollIntoView", { value: scroll });
+    let top = 1000;
     Object.defineProperties(element, {
-      scrollHeight: { value: 2400 }, clientHeight: { value: 400 }, scrollTop: { configurable: true, value: 1000 },
+      scrollHeight: { value: 2400 }, clientHeight: { value: 400 },
+      offsetHeight: { value: 400 },
+      scrollTop: { configurable: true, get: () => top, set: value => { top = Number(value); } },
     });
+    element.style.scrollPaddingTop = "32px";
+    vi.spyOn(element, "getBoundingClientRect").mockReturnValue({ top: 96, height: 400 } as DOMRect);
+    vi.spyOn(anchor, "getBoundingClientRect").mockReturnValue({ top: 500 } as DOMRect);
     await wrapper.vm.followNewContent();
     expect(callbacks.size).toBe(1);
     wrapper.vm.scrollToAnchor(anchor);
-    expect(scroll).toHaveBeenCalledWith({ block: "start", behavior: "instant" });
+    expect(top).toBe(1372);
+    expect(scroll).not.toHaveBeenCalled();
     expect(callbacks.size).toBe(0);
     await wrapper.vm.followNewContent();
     expect(callbacks.size).toBe(0);
+    expect(wrapper.vm.following).toBe(false);
+    wrapper.unmount();
+  });
+
+  it.each([0.8, 1, 1.4, 2])("keeps outer scroll positions and aligns the target inside a conversation at %s zoom", scale => {
+    const wrapper = mount(Harness, { attachTo: document.body });
+    const element = wrapper.get("div").element as HTMLElement;
+    const anchor = document.createElement("section");
+    anchor.tabIndex = -1;
+    anchor.style.scrollMarginTop = "8px";
+    element.style.scrollPaddingTop = "32px";
+    element.append(anchor);
+    const parent = element.parentElement!;
+    parent.scrollTop = 90;
+    let top = 200;
+    Object.defineProperties(element, {
+      scrollHeight: { value: 2400 }, clientHeight: { value: 400 },
+      offsetHeight: { value: 404 }, clientTop: { value: 2 },
+      scrollTop: { get: () => top, set: value => { top = Number(value); } },
+    });
+    vi.spyOn(element, "getBoundingClientRect").mockReturnValue({ top: 24 * scale, height: 404 * scale } as DOMRect);
+    vi.spyOn(anchor, "getBoundingClientRect").mockReturnValue({ top: (24 + 2 + 32 + 8 + 500) * scale } as DOMRect);
+    wrapper.vm.scrollToAnchor(anchor);
+    expect(top).toBeCloseTo(700);
+    expect(parent.scrollTop).toBe(90);
+    expect(document.activeElement).toBe(anchor);
     expect(wrapper.vm.following).toBe(false);
     wrapper.unmount();
   });

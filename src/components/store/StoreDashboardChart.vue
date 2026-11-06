@@ -322,9 +322,6 @@ function option(): EChartsOption {
       trigger: comparative.value ? "axis" : "item",
       renderMode: "richText",
       confine: true,
-      borderWidth: 1,
-      padding: [12, 16],
-      textStyle: { ...theme.tooltip.textStyle, fontSize },
       valueFormatter: (value) => formatValue(Number(value)),
       formatter: (params: unknown) => {
         const items = (Array.isArray(params) ? params : [params]) as Array<{

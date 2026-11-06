@@ -103,7 +103,7 @@ main h1[tabindex="-1"]:focus {
   --n-opacity-disabled: 1 !important;
 }
 
-:is(.n-modal.n-card, .n-modal.n-dialog, .n-popover) {
+:is(.n-modal.n-card, .n-modal.n-dialog, .n-popover:not(.n-tooltip)) {
   box-shadow: var(--yj-shadow-popover);
 }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, useTemplateRef } from "vue";
 import { useRoute } from "vue-router";
 import { resolveNavigationVisibility } from "../../authorization/app-permission-policy";
 import { authoritativePermissionUiEnabled } from "../../authorization/permission-ui-config";
@@ -15,8 +15,11 @@ import { useSidebarStore } from "../../stores/sidebar.store";
 import { useChatReadingStore } from "../../stores/chat-reading.store";
 import YjSidebar from "./YjSidebar.vue";
 import YjWindowTitlebar from "./YjWindowTitlebar.vue";
+import { provideWorkspaceFullscreen } from "../../composables/useWorkspaceFullscreen";
 
 const route = useRoute();
+const fullscreenTarget = useTemplateRef<HTMLElement>("fullscreenHost");
+const { active: workspaceFullscreen } = provideWorkspaceFullscreen(fullscreenTarget);
 const chatStore = useChatStore();
 const sidebarStore = useSidebarStore();
 const permissionStore = usePermissionStore();
@@ -63,41 +66,96 @@ function recoverCurrentNewTask(): void {
 </script>
 
 <template>
-  <div class="yj-app-shell" :class="{ 'yj-app-shell--chat': isLocalChatRoute }">
-    <YjWindowTitlebar :collapsed="sidebarCollapsed" @toggle="sidebarStore.toggle" />
+  <div class="yj-app-shell" :class="{ 'yj-app-shell--chat': isLocalChatRoute, 'yj-app-shell--sidebar-collapsed': sidebarCollapsed, 'yj-app-shell--fullscreen': workspaceFullscreen }">
+    <YjWindowTitlebar :collapsed="sidebarCollapsed" :sidebar-visible="!workspaceFullscreen" @toggle="sidebarStore.toggle" />
     <div class="yj-app-shell__body">
       <YjSidebar
+        :inert="workspaceFullscreen"
         :entries="navigationEntries"
         :collapsed="sidebarCollapsed"
         :current-path="route.path"
         :show-chat-tree="showTaskHistoryTree"
         @recover-new-task="recoverCurrentNewTask"
       />
-      <main class="yj-app-shell__content" tabindex="0">
+      <main class="yj-app-shell__content" :inert="workspaceFullscreen" tabindex="0">
         <slot />
       </main>
+      <div v-show="workspaceFullscreen" ref="fullscreenHost" class="yj-app-shell__fullscreen" />
     </div>
   </div>
 </template>
 
 <style scoped>
 .yj-app-shell {
+  --yj-shell-sidebar-width: var(--yj-layout-sidebar-expanded);
+  position: relative;
   display: flex;
   flex-direction: column;
   width: var(--yj-ui-viewport-width, 100%);
   min-width: var(--yj-layout-window-min-width);
   min-height: min(var(--yj-layout-window-min-height), var(--yj-ui-viewport-height, 100vh));
   height: var(--yj-ui-viewport-height, 100vh);
-  overflow: hidden;
+  overflow: clip;
   color: var(--yj-color-text-primary);
+  /* Continue the navigation surface through the native window-control strip. */
+  background: linear-gradient(to right,
+    var(--yj-color-bg-nav) var(--yj-shell-sidebar-width),
+    var(--yj-color-bg-app) var(--yj-shell-sidebar-width));
+}
+
+.yj-app-shell--sidebar-collapsed {
+  --yj-shell-sidebar-width: var(--yj-layout-sidebar-collapsed);
+}
+
+:global(html:is([data-ui-zoom-percent="180"], [data-ui-zoom-percent="200"]) .yj-app-shell:has(.yj-sidebar--chat-tree)) {
+  --yj-shell-sidebar-width: 196px;
+}
+
+.yj-app-shell--fullscreen :deep(.yj-window-titlebar) {
   background: var(--yj-color-bg-app);
 }
 
+/* Chat headers include the window strip so their contents are centered in the
+ * whole top region. Native controls keep their unscaled, reserved corner. */
+.yj-app-shell--chat {
+  --yj-chat-window-strip: calc(var(--yj-layout-titlebar-height) / var(--yj-ui-scale, 1));
+  --yj-layout-chat-toolbar-height: calc(var(--yj-layout-chat-navigation-height) + var(--yj-chat-window-strip));
+  --yj-layout-preview-tabs-height: var(--yj-layout-chat-toolbar-height);
+  --yj-chat-native-controls-inset: calc(var(--yj-layout-titlebar-controls-inset) / var(--yj-ui-scale, 1));
+  --yj-chat-title-leading-inset: 0px;
+}
+
+.yj-app-shell--chat.yj-app-shell--sidebar-collapsed {
+  --yj-chat-title-leading-inset: max(0px, calc((var(--yj-layout-titlebar-controls-inset) + var(--yj-space-8)) / var(--yj-ui-scale, 1) - var(--yj-layout-sidebar-collapsed)));
+}
+
+.yj-app-shell--chat :deep(.yj-window-titlebar) {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: calc(var(--yj-layout-titlebar-controls-inset) + var(--yj-space-8));
+  z-index: var(--yj-z-window-controls);
+}
+
+.yj-app-shell--chat.yj-app-shell--fullscreen :deep(.yj-window-titlebar) {
+  width: var(--yj-layout-titlebar-controls-inset);
+}
+
+.yj-app-shell--chat .yj-sidebar { margin-top: var(--yj-chat-window-strip); }
+
 .yj-app-shell__body {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  /* Layout frames must not scroll when a descendant receives focus or an anchor. */
+  overflow: clip;
+}
+
+.yj-app-shell__fullscreen {
+  position: absolute;
+  inset: 0;
+  z-index: var(--yj-z-preview-fullscreen);
 }
 
 .yj-app-shell__content {
@@ -109,5 +167,6 @@ function recoverCurrentNewTask(): void {
 
 @media (max-width: 700px) {
   .yj-app-shell--chat { min-width: 0; }
+  .yj-app-shell:has(.yj-sidebar--chat-tree) { --yj-shell-sidebar-width: 196px; }
 }
 </style>

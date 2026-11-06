@@ -31,7 +31,7 @@ describe("compact native web search disclosure", () => {
     expect(button.attributes("aria-expanded")).toBe("true");
     expect(wrapper.get('[role="region"]').attributes("id")).toBe(button.attributes("aria-controls"));
     expect(wrapper.findAll(".chat-web-search__source-title").map(row => row.text())).toEqual(["清河坊历史文化街区", "https://example.org/history"]);
-    expect(wrapper.get(".chat-web-search__source").attributes("title")).toBeUndefined();
+    expect(wrapper.get(".chat-web-search__source").attributes("data-yj-tooltip")).toBeUndefined();
     expect(wrapper.find("img, iframe").exists()).toBe(false);
     expect(wrapper.get("a").attributes("href")).toBe("https://example.org/hefang");
     expect(wrapper.emitted("disclosure-change")?.[0]?.[0]).toEqual({itemIdentity: record.identity, expanded: true});
@@ -43,7 +43,7 @@ describe("compact native web search disclosure", () => {
     const record = item({action: "search", queries: [query]});
     const wrapper = mount(ChatWebSearchItem, {props: {item: record, searchOccurrence: 2}});
     expect(wrapper.get("button").text()).toBe("再次搜索新丰小吃 · 推荐分店、必点小吃、分店人气");
-    expect(wrapper.get(".chat-web-search__query").attributes("title")).toBe(query);
+    expect(wrapper.get(".chat-web-search__query").attributes("data-yj-tooltip")).toBe(query);
     expect(record.webSearch?.queries).toEqual([query]);
   });
 

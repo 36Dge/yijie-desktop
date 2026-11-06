@@ -28,7 +28,13 @@ export type ArtifactReportEChartsTheme = Readonly<{
   tooltip: Readonly<{
     backgroundColor: string;
     borderColor: string;
-    textStyle: Readonly<{ color: string; fontFamily: string }>;
+    borderWidth: number;
+    borderRadius: number;
+    padding: number[];
+    shadowBlur: number;
+    shadowColor: string;
+    textStyle: Readonly<{ color: string; fontFamily: string; fontSize: number; fontWeight: number; lineHeight: number }>;
+    extraCssText: string;
   }>;
 }>;
 
@@ -47,7 +53,6 @@ export function createArtifactReportEChartsTheme(
   const textSecondary = token("--yj-color-text-secondary");
   const borderDefault = token("--yj-color-border-default");
   const borderSubtle = token("--yj-color-border-subtle");
-  const backgroundElevated = token("--yj-color-bg-elevated");
   const fontFamily = token("--yj-font-family-sans");
   const axis = Object.freeze({
     axisLabel: Object.freeze({ color: textSecondary }),
@@ -62,9 +67,21 @@ export function createArtifactReportEChartsTheme(
     categoryAxis: axis,
     valueAxis: axis,
     tooltip: Object.freeze({
-      backgroundColor: backgroundElevated,
-      borderColor: borderDefault,
-      textStyle: Object.freeze({ color: textPrimary, fontFamily }),
+      // Canvas tooltips have no backdrop filter; use the equivalent opaque surface.
+      backgroundColor: token("--yj-color-tooltip-chart-bg"),
+      borderColor: "transparent",
+      borderWidth: 0,
+      borderRadius: Number.parseFloat(token("--yj-tooltip-radius")),
+      shadowBlur: 0,
+      shadowColor: "transparent",
+      padding: [Number.parseFloat(token("--yj-tooltip-padding-block")), Number.parseFloat(token("--yj-tooltip-padding-inline"))],
+      textStyle: Object.freeze({
+        color: token("--yj-color-tooltip-text"), fontFamily,
+        fontSize: Number.parseFloat(token("--yj-tooltip-font-size")),
+        fontWeight: Number.parseInt(token("--yj-tooltip-font-weight"), 10),
+        lineHeight: Number.parseFloat(token("--yj-tooltip-line-height")),
+      }),
+      extraCssText: "box-shadow:none",
     }),
   });
 }

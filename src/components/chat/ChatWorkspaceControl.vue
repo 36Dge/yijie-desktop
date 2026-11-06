@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, nextTick, ref, watch } from "vue";
 import { NButton, NCard, NInput, NModal, NPopover, NTooltip } from "naive-ui";
 import { workspaceNameError, type ChatWorkspace } from "../../domain/chat-workspace";
@@ -55,18 +56,18 @@ async function openByKeyboard() { if (props.disabled) return; open.value = true;
   <Teleport to="body"><div ref="overlay" class="chat-control-overlay" /></Teleport>
   <NPopover v-model:show="open" :to="overlay ?? false" trigger="click" placement="top-start" :disabled="disabled" :show-arrow="false" raw>
     <template #trigger>
-      <button ref="trigger" class="workspace-trigger chat-composer__project chat-composer__project--button yj-control yj-control--pill" type="button" :disabled="disabled" :aria-label="triggerLabel" :title="selected?.path ?? triggerLabel" aria-haspopup="menu" :aria-expanded="open" @keydown.down.prevent="openByKeyboard" @keydown.esc="open = false">
+      <YjTooltip :text="selected?.path ?? triggerLabel"><button ref="trigger" class="workspace-trigger chat-composer__project chat-composer__project--button yj-control yj-control--pill" type="button" :disabled="disabled" :aria-label="triggerLabel"  aria-haspopup="menu" :aria-expanded="open" @keydown.down.prevent="openByKeyboard" @keydown.esc="open = false">
         <YjIcon name="folder" size="sm" :stroke-width="1.5" />
         <span class="workspace-name">{{ selected?.project.safeName ?? '选择工作空间' }}</span>
         <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
-      </button>
+      </button></YjTooltip>
     </template>
     <div ref="menu" class="workspace-menu chat-control-menu" role="menu" aria-label="选择工作空间" :aria-busy="loading" @keydown="navigate">
       <div class="workspace-search"><NInput v-model:value="query" :input-props="{ 'aria-label': '搜索工作空间' }" placeholder="搜索工作空间" clearable /></div>
       <div class="workspace-list">
-        <NTooltip v-for="entry in filtered" :key="entry.project.projectId" :to="overlay ?? false" placement="right" :delay="300">
+        <NTooltip arrow-point-to-center v-for="entry in filtered" :key="entry.project.projectId" :to="overlay ?? false" placement="right" :delay="300">
           <template #trigger>
-            <button class="chat-control-option" type="button" role="menuitemradio" :aria-checked="selectedProjectId === entry.project.projectId" :disabled="!entry.project.available" :title="entry.path ?? '工作空间暂不可用'" @click="choose(entry.project.projectId)">
+            <button class="chat-control-option" type="button" role="menuitemradio" :aria-checked="selectedProjectId === entry.project.projectId" :disabled="!entry.project.available"  @click="choose(entry.project.projectId)">
               <YjIcon name="folder" size="sm" :stroke-width="1.5" />
               <span class="workspace-name">{{ entry.project.safeName }}</span>
               <YjIcon v-if="selectedProjectId === entry.project.projectId" name="permissionCheck" size="sm" :stroke-width="1.5" />
@@ -114,7 +115,7 @@ async function openByKeyboard() { if (props.disabled) return; open.value = true;
 .workspace-menu-actions { margin-top: var(--yj-space-2); padding-top: var(--yj-space-2); border-top: var(--yj-border-width) solid var(--yj-color-border-default); }
 .workspace-hint, .workspace-error { margin: 0; padding: var(--yj-space-2) var(--yj-space-3); color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
 .workspace-error button { padding: 0; border: 0; background: transparent; color: var(--yj-color-text-primary); cursor: pointer; text-decoration: underline; }
-.workspace-path { display: inline-block; max-width: min(var(--yj-layout-chat-workspace-control-max), calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-10))); overflow-wrap: anywhere; pointer-events: auto; zoom: var(--yj-ui-scale, 1); }
+.workspace-path { display: inline-block; max-width: min(var(--yj-layout-chat-workspace-control-max), calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-10))); overflow-wrap: anywhere; pointer-events: auto; }
 .workspace-create { width: min(var(--yj-layout-workspace-create-width), calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-10))); }
 .workspace-close { display: inline-flex; align-items: center; justify-content: center; width: var(--yj-space-8); height: var(--yj-space-8); border: 0; border-radius: var(--yj-radius-md); background: transparent; color: var(--yj-color-text-primary); cursor: pointer; }
 .workspace-close:hover:not(:disabled) { background: var(--yj-color-control-hover); }

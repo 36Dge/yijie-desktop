@@ -47,6 +47,10 @@ beforeEach(() => {
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: mocks.removeMotionListener }));
   document.documentElement.dataset.theme = "light";
   const tokens: Record<string, string> = {
+    "--yj-color-tooltip-chart-bg": "#36393c", "--yj-color-tooltip-text": "#ffffff",
+    "--yj-tooltip-font-size": "12px", "--yj-tooltip-line-height": "20px",
+    "--yj-tooltip-font-weight": "400", "--yj-tooltip-radius": "8px",
+    "--yj-tooltip-padding-block": "4px", "--yj-tooltip-padding-inline": "8px",
     "--yj-color-brand-primary": "#c3f35b", "--yj-color-text-primary": "#27292a",
     "--yj-color-text-secondary": "#63696c", "--yj-color-border-default": "#dce0e2",
     "--yj-color-border-subtle": "#eceeed", "--yj-color-border-strong": "#c9cecb",

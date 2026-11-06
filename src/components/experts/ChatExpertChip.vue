@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import type { ExpertDisplay } from "../../domain/experts-v2.generated";
 import YjIcon from "../yijie/YjIcon.vue";
 import ExpertAvatar from "./ExpertAvatar.vue";
@@ -7,15 +8,15 @@ const emit = defineEmits<{ details: []; remove: [] }>();
 </script>
 <template>
   <div class="chat-expert-chip" :class="{ 'chat-expert-chip--removable': !disabled && !pending }" :aria-busy="pending">
-    <button type="button" class="yj-control yj-control--pill chat-expert-chip__remove" :disabled="disabled || pending" aria-label="移除专家" title="移除专家，已有聊天保留" @click="!disabled && !pending && emit('remove')">
+    <YjTooltip text="移除专家，已有聊天保留"><button type="button" class="yj-control yj-control--pill chat-expert-chip__remove" :disabled="disabled || pending" aria-label="移除专家"  @click="!disabled && !pending && emit('remove')">
       <span class="chat-expert-chip__icon" aria-hidden="true">
         <ExpertAvatar :expert-id="expert.expertId" :icon-key="expert.iconKey" compact class="chat-expert-chip__symbol" />
         <YjIcon name="dismiss" size="sm" class="chat-expert-chip__dismiss" />
       </span>
-    </button>
-    <button type="button" class="yj-control yj-control--pill chat-expert-chip__details" :title="expert.displayName" :aria-label="`查看已选专家 ${expert.displayName}`" @click="emit('details')">
+    </button></YjTooltip>
+    <YjTooltip :text="expert.displayName"><button type="button" class="yj-control yj-control--pill chat-expert-chip__details"  :aria-label="`查看已选专家 ${expert.displayName}`" @click="emit('details')">
       <span>{{ expert.displayName }}</span>
-    </button>
+    </button></YjTooltip>
     <span v-if="pending" class="chat-expert-chip__status" role="status">正在切换专家</span>
   </div>
 </template>

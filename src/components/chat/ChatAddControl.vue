@@ -175,7 +175,7 @@ onBeforeUnmount(() => {
   <!-- Cascades must measure at their final size even when entered immediately. -->
   <NPopover :show="open" :to="overlay ?? false" trigger="click" :placement="placement" :flip="false" :animated="false" :show-arrow="false" raw :disabled="disabled" @update:show="setOpen">
     <template #trigger>
-      <NTooltip :disabled="open || disabled" :to="overlay ?? false" placement="top" :style="{ zoom: 'var(--yj-ui-scale, 1)' }">
+      <NTooltip arrow-point-to-center :disabled="open || disabled" :to="overlay ?? false" placement="top" :style="{ zoom: 'var(--yj-ui-scale, 1)' }">
         <template #trigger>
           <button ref="trigger" class="chat-composer__add" type="button" :disabled="disabled" :aria-label="addLabel" aria-haspopup="dialog" :aria-expanded="open" :aria-controls="open ? panelId : undefined" @keydown.down.prevent="setOpen(true)" @keydown.esc.stop.prevent="close"><YjIcon name="plus" size="lg" /></button>
         </template>

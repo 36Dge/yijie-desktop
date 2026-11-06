@@ -404,6 +404,25 @@ export function createNaiveThemeOverrides(
       textColor: body,
       boxShadow: overlayShadow
     },
+    Tooltip: {
+      color: token('--yj-color-tooltip-bg'),
+      textColor: token('--yj-color-tooltip-text'),
+      borderRadius: token('--yj-tooltip-radius'),
+      padding: `${token('--yj-tooltip-padding-block')} ${token('--yj-tooltip-padding-inline')}`,
+      boxShadow: 'none',
+      peers: {
+        Popover: {
+          color: token('--yj-color-tooltip-bg'),
+          textColor: token('--yj-color-tooltip-text'),
+          fontSize: token('--yj-tooltip-font-size'),
+          borderRadius: token('--yj-tooltip-radius'),
+          padding: `${token('--yj-tooltip-padding-block')} ${token('--yj-tooltip-padding-inline')}`,
+          arrowHeight: token('--yj-tooltip-arrow-height'),
+          spaceArrow: token('--yj-tooltip-space'),
+          boxShadow: 'none'
+        }
+      }
+    },
     Dropdown: {
       color: elevated,
       optionTextColor: body,

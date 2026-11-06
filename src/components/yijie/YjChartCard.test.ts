@@ -80,6 +80,10 @@ beforeEach(() => {
   mocks.instance.setOption.mockClear();
   document.documentElement.dataset.theme = "light";
   const tokens: Record<string, string> = {
+    "--yj-color-tooltip-chart-bg": "#36393c", "--yj-color-tooltip-text": "#ffffff",
+    "--yj-tooltip-font-size": "12px", "--yj-tooltip-line-height": "20px",
+    "--yj-tooltip-font-weight": "400", "--yj-tooltip-radius": "8px",
+    "--yj-tooltip-padding-block": "4px", "--yj-tooltip-padding-inline": "8px",
     "--yj-color-text-primary": "#18230f",
     "--yj-color-text-secondary": "#526046",
     "--yj-color-bg-elevated": "#ffffff",
@@ -149,8 +153,7 @@ describe("YjChartCard", () => {
     expect(firstObserver?.disconnect).toHaveBeenCalled();
 
     document.documentElement.dataset.theme = "dark";
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(mocks.init.mock.calls.length).toBeGreaterThanOrEqual(3);
+    await vi.waitFor(() => expect(mocks.init.mock.calls.length).toBeGreaterThanOrEqual(3));
 
     wrapper.unmount();
     expect(TestResizeObserver.instances[TestResizeObserver.instances.length - 1]?.disconnect).toHaveBeenCalled();

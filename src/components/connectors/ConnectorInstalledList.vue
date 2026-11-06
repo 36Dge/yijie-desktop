@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { NSwitch } from "naive-ui";
 import { connectorCan, connectorSwitchDisabled, type ConnectorView } from "../../domain/connector-ui";
 import YjIcon from "../yijie/YjIcon.vue";
@@ -18,13 +19,13 @@ defineEmits<{
       <button class="connector-installed__details" type="button" :aria-label="`查看 ${connector.name}，${connector.status.label}`" @click="$emit('open', connector.id)">
         <ConnectorIcon :asset-id="connector.iconAssetId" />
         <span class="connector-installed__copy">
-          <strong :title="connector.name">{{ connector.name }}</strong>
+          <YjTooltip :text="connector.name"><strong >{{ connector.name }}</strong></YjTooltip>
           <span class="connector-installed__description">{{ connector.description }}</span>
           <span class="connector-installed__status" :class="`connector-installed__status--${connector.status.tone}`">{{ connector.status.label }}</span>
         </span>
       </button>
       <div class="connector-installed__actions">
-        <button v-if="canManage" class="connector-installed__remove" type="button" :aria-label="`卸载 ${connector.name}`" title="卸载" :disabled="!connectorCan(connector, 'uninstall')" @click="$emit('uninstall', connector.id)"><YjIcon name="trash" size="sm" /></button>
+        <YjTooltip v-if="canManage" text="卸载"><button  class="connector-installed__remove" type="button" :aria-label="`卸载 ${connector.name}`"  :disabled="!connectorCan(connector, 'uninstall')" @click="$emit('uninstall', connector.id)"><YjIcon name="trash" size="sm" /></button></YjTooltip>
         <NSwitch :value="connector.desiredEnabled ?? connector.enabled" :loading="connector.busy" :disabled="connectorSwitchDisabled(connector, canManage)" :aria-disabled="connectorSwitchDisabled(connector, canManage)" :aria-label="`${(connector.desiredEnabled ?? connector.enabled) ? '停用' : '启用'} ${connector.name}`" @update:value="$emit('enabled-change', connector.id, $event)" />
       </div>
     </li>

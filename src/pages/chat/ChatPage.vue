@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../../components/yijie/YjTooltip.vue";
 import { provideWebSourceActions } from "../../composables/useWebSources";
 import { useChatTurnTimingDetails } from "../../composables/useChatTurnTiming";
 import { useChatTurnModels } from "../../composables/useChatTurnModels";
@@ -134,6 +135,7 @@ const attachmentPresentationScope = computed(() => `${chatStore.context?.context
 const previewWorkspace = ref<InstanceType<typeof ChatDocumentWorkspace>>();
 const previewTrigger = ref<HTMLButtonElement>();
 const previewExpanded = ref(false);
+function restorePreviewTrigger() { void nextTick(() => previewTrigger.value?.focus({ preventScroll: true })); }
 const previewEnabled = computed(() => kimiK31Candidate && !isDraftMode.value && normalPurposeReady.value && chatStore.hasAction("read_sessions"));
 const previewScope = computed(() => `${route.fullPath}:${permissionScope.selectedTenantId ?? ""}:${permissionScope.authorizationRevision ?? ""}:${permissionScope.isReady}:${permissionScope.hasCapability("task.read")}`);
 function openArtifactFile(artifact: ArtifactProjection) {
@@ -748,7 +750,7 @@ async function locateRequestedTurn() {
       timelineFrameProjection.push(chatStore.conversationState, false);
       await nextTick();
       const element = conversationScroller.value?.querySelector<HTMLElement>(`[data-turn-id="${turnId}"]`);
-      if (element) { element.scrollIntoView({ block: "start" }); element.focus({ preventScroll: true }); turnLocationNotice.value = "已定位本次运行对应的轮次。"; }
+      if (element) { scrollToAnchor(element); turnLocationNotice.value = "已定位本次运行对应的轮次。"; }
       else turnLocationNotice.value = "已读取目标轮次，暂未呈现，请重新定位。";
     } else turnLocationNotice.value = result === "more" ? "目标轮次较早，可继续有界加载定位。" : "目标轮次尚未加载或已不可用，没有使用最新轮次替代。";
   } catch { if (current()) turnLocationNotice.value = "对应轮次读取失败，可重试定位。"; }
@@ -1224,9 +1226,9 @@ onBeforeUnmount(() => {
     </div>
   </section>
 
-  <ChatDocumentWorkspace v-else ref="previewWorkspace" :context-id="chatStore.context?.contextId ?? null" :scope-key="previewScope" :enabled="previewEnabled" @expanded="previewExpanded = $event" @restore-trigger="previewTrigger?.focus()">
+  <ChatDocumentWorkspace v-else ref="previewWorkspace" :context-id="chatStore.context?.contextId ?? null" :scope-key="previewScope" :enabled="previewEnabled" @expanded="previewExpanded = $event" @restore-trigger="restorePreviewTrigger">
   <section class="chat-workspace" aria-labelledby="active-chat-title">
-    <header class="chat-workspace__header">
+    <header class="chat-workspace__header" data-tauri-drag-region>
       <div class="chat-workspace__heading-copy">
         <h1 id="active-chat-title" class="chat-workspace__title">
           {{ selectedSession?.title ?? (isHistoryLoading ? "正在读取任务" : "任务对话") }}
@@ -1242,7 +1244,7 @@ onBeforeUnmount(() => {
       >
         {{ readiness.title }}
       </div>
-      <button v-if="previewEnabled" ref="previewTrigger" type="button" class="yj-control yj-control--icon chat-workspace__preview-toggle" :aria-label="previewExpanded ? '收起文件预览' : '展开文件预览'" :title="previewExpanded ? '收起文件预览' : '展开文件预览'" :aria-expanded="previewExpanded" @click="previewWorkspace?.toggle()"><YjIcon name="previewSidebar" size="sm" tone="muted" :stroke-width="1.5" /></button>
+      <YjTooltip v-if="previewEnabled && !previewExpanded" text="展开右侧面板"><button  ref="previewTrigger" type="button" class="yj-control yj-control--icon chat-workspace__preview-toggle" aria-label="展开右侧面板"  :aria-expanded="false" @click="previewWorkspace?.toggle()"><YjIcon name="previewSidebar" size="sm" tone="muted" :stroke-width="1.5" /></button></YjTooltip>
     </header>
 
     <div class="chat-workspace__conversation-wrap">
@@ -1297,11 +1299,11 @@ onBeforeUnmount(() => {
               </template>
             </template>
             <template #item-actions="{ item }">
-              <time
-                v-if="item.presentation === 'user_message' && userMessageTimes[item.turnId]"
+              <YjTooltip v-if="item.presentation === 'user_message' && userMessageTimes[item.turnId]" :text="userMessageTimes[item.turnId]!.title"><time
+
                 :datetime="userMessageTimes[item.turnId]!.datetime"
-                :title="userMessageTimes[item.turnId]!.title"
-              >{{ userMessageTimes[item.turnId]!.label }}</time>
+
+              >{{ userMessageTimes[item.turnId]!.label }}</time></YjTooltip>
               <ChatAnswerActions v-if="itemCopyText(item) && answerActionIds.has(item.identity)"
                 :identity="`${chatStore.context?.contextId}:${item.identity}`" :adapter="browserChatClipboardAdapter" :text="itemCopyText(item)"
                 :model-profile-id="turnModels[item.turnId]" :completed-at="nativeCompletedAt(turnTimingFacts[item.turnId])" />
@@ -1463,6 +1465,7 @@ onBeforeUnmount(() => {
           <ChatPermissionControl :state="permissions.state.value" :disabled="!permissions.ready.value || permissions.busy.value" :saving="permissions.saving.value" @select="permissions.setMode" />
         </template>
       </ChatComposer>
+      <p class="chat-generation-notice">内容由 AI 生成，请注意核实</p>
     </footer>
     <div class="sr-only" aria-live="polite">{{ statusAnnouncement }}</div>
   </section>
@@ -1534,7 +1537,7 @@ onBeforeUnmount(() => {
   display: grid;
   width: 100%;
   height: 100%;
-  /* The shell already reserves the title bar; fit its remaining content area. */
+  /* The header includes the window strip; keep scrolling inside the workspace. */
   min-height: 0;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
@@ -1544,15 +1547,15 @@ onBeforeUnmount(() => {
 
 .chat-workspace__header {
   display: flex;
-  min-height: var(--yj-space-16);
+  min-height: var(--yj-layout-chat-toolbar-height);
   align-items: center;
   justify-content: space-between;
   gap: var(--yj-space-4);
-  padding: var(--yj-space-3) var(--yj-space-8);
+  padding: var(--yj-space-1) var(--yj-space-8);
   background: color-mix(in srgb, var(--yj-color-bg-page) 92%, transparent);
 }
 
-.chat-workspace__heading-copy { min-width: 0; flex:1; }
+.chat-workspace__heading-copy { min-width: 0; flex:1; padding-inline-start: var(--yj-chat-title-leading-inset, 0px); }
 .chat-workspace__preview-toggle { flex:none; appearance:none; border:var(--yj-border-width) solid transparent; background:transparent; box-shadow:none; color:var(--yj-color-text-primary); cursor:pointer; }
 .chat-workspace__preview-toggle:hover { background:var(--yj-color-control-hover); }
 .chat-workspace__preview-toggle:active { background:var(--yj-color-control-pressed); }
@@ -1650,7 +1653,8 @@ onBeforeUnmount(() => {
 .chat-notice__action:focus-visible,
 .permission-dialog button:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-space-1); }
 
-.chat-workspace__composer { z-index: 1; display: flex; flex-direction: column; align-items: center; padding: var(--yj-space-3) var(--yj-space-8) var(--yj-space-5); background: var(--yj-color-bg-page); }
+.chat-workspace__composer { z-index: 1; display: flex; flex-direction: column; align-items: center; padding: var(--yj-space-3) var(--yj-space-8) var(--yj-space-2); background: var(--yj-color-bg-page); }
+.chat-generation-notice { flex: none; margin: var(--yj-space-2) 0 0; color: var(--yj-color-chat-generation-notice); font-size: var(--yj-font-size-chat-generation-notice); line-height: var(--yj-line-height-chat-generation-notice); text-align: center; }
 .chat-workspace__composer-note { width: min(100%, var(--yj-layout-chat-composer-max)); margin: 0 0 var(--yj-space-2); color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
 .chat-workspace__composer-error { width: min(100%, var(--yj-layout-chat-composer-max)); margin: 0 0 var(--yj-space-2); color: var(--yj-color-semantic-error-ink); font-size: var(--yj-font-size-caption); }
 .chat-workspace__composer-error button { padding: 0; border: 0; color: inherit; background: transparent; font-weight: var(--yj-font-weight-semibold); text-decoration: underline; }

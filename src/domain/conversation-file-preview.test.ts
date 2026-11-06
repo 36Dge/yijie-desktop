@@ -36,7 +36,7 @@ describe("FEAT-166 conversation preview rules", () => {
     openPreviewFile(s, { ...a, source: { kind: "attachment", sessionId: "s", messageId: null, attachmentId: "same" } }, () => "3");
     expect(s.tabs).toHaveLength(2);
   });
-  it.each([[800,false,0],[800.67,false,0],[801,true,400],[924,true,523],[940,true,539],[1012,true,607],[1028,true,616],[1108,true,664],[2400,true,1200]])("width %s respects both columns", (width, available, right) => {
+  it.each([[720,false,0],[720.67,false,0],[721,true,320],[800,true,320],[924,true,320],[940,true,320],[1012,true,320],[1028,true,320],[1108,true,320],[2400,true,320]])("width %s opens at the panel minimum while respecting both columns", (width, available, right) => {
     const g = previewWidths(Number(width)); expect(g.available).toBe(available); expect(g.right).toBe(right);
     if (g.available) { expect(g.chat).toBeGreaterThanOrEqual(400); expect(g.chat + g.right + 1).toBe(width); }
   });
@@ -44,7 +44,8 @@ describe("FEAT-166 conversation preview rules", () => {
     expect(previewWidths(2000,1000).right).toBe(1000);
     expect(previewWidths(940,1000).right).toBe(539);
     expect(previewWidths(2000,1000).right).toBe(1000);
-    expect(previewWidths(2000).right).toBe(1199);
+    expect(previewWidths(2000).right).toBe(320);
+    expect(previewWidths(940,0).right).toBe(320);
   });
   it.each([["image/png","a.bin"],["video/mp4","a.bin"],["text/plain","figure.SVG"],["","movie.mov"]])("excludes media %s/%s from the sidebar", (mime,name) => expect(isSidebarFile(mime,name)).toBe(false));
   it("allows actual non-media files and makes integrity failures nonretryable", () => {

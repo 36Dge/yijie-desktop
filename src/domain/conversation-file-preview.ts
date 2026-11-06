@@ -1,7 +1,9 @@
 import type { Location, Source } from "./document-preview.generated";
 
 export const MAX_PREVIEW_TABS = 10;
-export const MIN_PREVIEW_WORKSPACE = 801;
+export const MIN_PREVIEW_WIDTH = 320;
+export const MIN_PREVIEW_CHAT_WIDTH = 400;
+export const MIN_PREVIEW_WORKSPACE = MIN_PREVIEW_WIDTH + MIN_PREVIEW_CHAT_WIDTH + 1;
 export type PreviewFile = Readonly<{ source: Source; name: string; mediaType: string; status: string; expiresAt: number | null }>;
 export type PreviewTab = { id: string; file: PreviewFile | null; location: Location };
 export type PreviewTabs = { tabs: PreviewTab[]; activeId: string | null };
@@ -35,11 +37,11 @@ export function closePreviewTab(state: PreviewTabs, id: string): void {
   if (state.activeId === id) state.activeId = state.tabs[index]?.id ?? state.tabs[index - 1]?.id ?? null;
 }
 export function previewWidths(width: number, preferred: number | null = null): { available: boolean; min: number; max: number; right: number; chat: number } {
-  if (!Number.isFinite(width) || width < MIN_PREVIEW_WORKSPACE) return { available: false, min: 400, max: 400, right: 0, chat: Math.max(0, width || 0) };
+  if (!Number.isFinite(width) || width < MIN_PREVIEW_WORKSPACE) return { available: false, min: MIN_PREVIEW_WIDTH, max: MIN_PREVIEW_WIDTH, right: 0, chat: Math.max(0, width || 0) };
   const available = width - 1;
-  const max = Math.min(1200, Math.floor(0.7 * available), available - 400);
-  const right = Math.max(400, Math.min(max, preferred ?? Math.round(0.6 * available)));
-  return { available: true, min: 400, max, right, chat: available - right };
+  const max = Math.min(1200, Math.floor(0.7 * available), available - MIN_PREVIEW_CHAT_WIDTH);
+  const right = Math.max(MIN_PREVIEW_WIDTH, Math.min(max, preferred ?? MIN_PREVIEW_WIDTH));
+  return { available: true, min: MIN_PREVIEW_WIDTH, max, right, chat: available - right };
 }
 
 export function previewFailure(code: string): Readonly<{ text: string; retryable: boolean }> {

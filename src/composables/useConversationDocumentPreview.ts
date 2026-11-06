@@ -3,6 +3,7 @@ import { listen, TauriEvent, type UnlistenFn } from "@tauri-apps/api/event";
 import { documentPreviewClient, DocumentPreviewError } from "../api/chat-document-preview-client";
 import type { Document as PreviewDocument, Invalidated, Loaded, Viewport } from "../domain/document-preview.generated";
 import { addPreviewTab, closePreviewTab, isSidebarFile, openPreviewFile, previewFailure, previewWidths, type PreviewFile, type PreviewTab, type PreviewTabs } from "../domain/conversation-file-preview";
+import { useWorkspaceFullscreen } from "./useWorkspaceFullscreen";
 
 export function useConversationDocumentPreview(props: Readonly<{ contextId: string | null; scopeKey: string; enabled: boolean }>, emit: { (event: "expanded", value: boolean): void; (event: "restoreTrigger"): void }) {
 const root = useTemplateRef<HTMLElement>("root");
@@ -10,8 +11,10 @@ const panel = useTemplateRef<HTMLElement>("panel");
 const viewport = useTemplateRef<HTMLElement>("viewport");
 const tabStrip = useTemplateRef<HTMLElement>("tabStrip");
 const addButton = useTemplateRef<HTMLButtonElement>("addButton");
+const fullscreenButton = useTemplateRef<HTMLButtonElement>("fullscreenButton");
 const separator = useTemplateRef<HTMLElement>("separator");
 const opened = ref(false);
+const { fullscreen, fullscreenTarget } = useWorkspaceFullscreen();
 const width = ref(0);
 const preferred = ref<number | null>(null);
 const state = reactive<PreviewTabs>({ tabs: [], activeId: null });
@@ -44,8 +47,15 @@ function measuredViewport(): Viewport | null {
   const r = viewport.value?.getBoundingClientRect();
   return r && r.width >= 1 && r.height >= 1 ? { x: Math.max(0, r.x), y: Math.max(0, r.y), width: r.width, height: r.height, dpr: window.devicePixelRatio || 1 } : null;
 }
-function overlayVisible(): boolean {
-  return [...document.querySelectorAll<HTMLElement>('.n-modal-container,.n-dropdown-menu,.n-popover,[aria-modal="true"],dialog[open]')].some(e => e.getBoundingClientRect().width > 0 && getComputedStyle(e).visibility !== "hidden");
+function overlayVisible(includeTooltips = true): boolean {
+  const bounds = viewport.value?.getBoundingClientRect();
+  if (!bounds) return false;
+  return [...document.querySelectorAll<HTMLElement>('.n-modal-container,.n-dropdown-menu,.n-popover,[aria-modal="true"],dialog[open]')].some(e => {
+    if (!includeTooltips && (e.classList.contains("n-tooltip") || e.getAttribute("role") === "tooltip")) return false;
+    const r = e.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== "hidden"
+      && r.left < bounds.right && r.right > bounds.left && r.top < bounds.bottom && r.bottom > bounds.top;
+  });
 }
 function syncViewport() {
   cancelAnimationFrame(frame);
@@ -121,12 +131,14 @@ function reload(preserve = true) {
 function focusTab(id: string | null) {
   void nextTick(() => {
     const element = id ? tabStrip.value?.querySelector<HTMLButtonElement>(`[data-tab-id="${id}"]`) : addButton.value;
-    element?.focus(); element?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    element?.focus({ preventScroll: true });
+    (element?.closest<HTMLElement>("[data-preview-tab]") ?? element)?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   });
 }
 function ensureOpen(): boolean {
   if (!props.enabled) return false;
-  if (!geometry.value.available) { notice.value = insufficientSpaceText; return false; }
+  if (!fullscreen.value && !geometry.value.available) { notice.value = insufficientSpaceText; return false; }
+  if (!state.tabs.length) addPreviewTab(state, newId);
   notice.value = ""; opened.value = true; return true;
 }
 function openFile(file: PreviewFile) {
@@ -138,11 +150,26 @@ function openFile(file: PreviewFile) {
   focusTab(tab.id);
 }
 function collapse(restore = true) {
-  opened.value = false; epoch++; queued = null; phase.value = "empty"; endDrag(false); void detach(true);
+  fullscreen.value = false; opened.value = false; epoch++; queued = null; phase.value = "empty"; endDrag(false); void detach(true);
   if (restore) emit("restoreTrigger");
 }
 function toggle() {
   if (opened.value) collapse(); else if (ensureOpen()) { reload(); if (active.value) focusTab(active.value.id); else void nextTick(() => addButton.value?.focus()); }
+}
+function toggleFullscreen() {
+  if (!opened.value) return;
+  endDrag(false);
+  fullscreen.value = !fullscreen.value;
+  void nextTick(() => {
+    measureLayout(undefined, !fullscreen.value);
+    if (opened.value) fullscreenButton.value?.focus({ preventScroll: true });
+    syncViewport();
+  });
+}
+function fullscreenKey(event: KeyboardEvent) {
+  if (fullscreen.value && event.key === "Escape" && !event.defaultPrevented && !overlayVisible(false)) {
+    event.preventDefault(); toggleFullscreen();
+  }
 }
 function createTab() {
   const tab = addPreviewTab(state, newId);
@@ -153,7 +180,9 @@ function selectTab(id: string) { if (state.activeId !== id) { state.activeId = i
 function closeTab(id: string) {
   const wasActive = state.activeId === id;
   const focused = (document.activeElement as HTMLElement | null)?.closest("[data-preview-tab]")?.getAttribute("data-preview-tab") === id;
-  closePreviewTab(state, id); notice.value = "";
+  closePreviewTab(state, id);
+  notice.value = "";
+  if (!state.tabs.length) { collapse(); return; }
   if (wasActive) { reload(false); focusTab(state.activeId); } else if (focused) focusTab(state.activeId);
 }
 function keyTab(event: KeyboardEvent, id: string) {
@@ -180,7 +209,7 @@ function keyResize(event: KeyboardEvent) {
 }
 function startDrag(event: PointerEvent) {
   if (event.button !== 0) return;
-  event.preventDefault(); separator.value?.focus();
+  event.preventDefault(); separator.value?.focus({ preventScroll: true });
   const scale = (root.value?.getBoundingClientRect().width ?? 0) / width.value;
   drag = { start: event.clientX, width: geometry.value.right, preference: preferred.value, pointerId: event.pointerId, scale: Number.isFinite(scale) && scale > 0 ? scale : 1 };
   dragging.value = true; separator.value?.setPointerCapture?.(event.pointerId); syncViewport();
@@ -192,8 +221,8 @@ function endDrag(commit = true) {
   syncViewport();
 }
 function cancelDrag() { if (drag) endDrag(false); }
-function measureLayout(measured?: number) {
-  // Grid columns and the 400px minimum use unzoomed layout pixels. Native child
+function measureLayout(measured?: number, restoreOnCollapse = false) {
+  // Grid columns and panel minimums use unzoomed layout pixels. Native child
   // positioning above deliberately keeps visual getBoundingClientRect values.
   const element = root.value;
   const cssWidth = element ? getComputedStyle(element).width : "";
@@ -201,8 +230,8 @@ function measureLayout(measured?: number) {
   const next = measured ?? fallback;
   if (next !== width.value && drag) endDrag(false);
   width.value = next;
-  if (!geometry.value.available && opened.value) {
-    const focusHidden = panel.value?.contains(document.activeElement) || separator.value === document.activeElement;
+  if (!geometry.value.available && opened.value && !fullscreen.value) {
+    const focusHidden = restoreOnCollapse || panel.value?.contains(document.activeElement) || separator.value === document.activeElement;
     collapse(Boolean(focusHidden)); notice.value = insufficientSpaceText;
   }
   if (geometry.value.available && notice.value === insufficientSpaceText) notice.value = "";
@@ -216,7 +245,7 @@ function visibility() {
   if (document.visibilityState === "hidden") suspend();
   else if (opened.value) reload();
 }
-watch(opened, value => emit("expanded", value));
+watch(opened, value => emit("expanded", value), { immediate: true });
 watch(() => geometry.value.right, () => { void nextTick(syncViewport); });
 // Scope follows route + authenticated tenant/revision/capability. A short-lived
 // Native context can renew within that same scope; release its content at once,
@@ -241,6 +270,7 @@ onMounted(async () => {
   themeObserver.observe(document.documentElement, { attributes:true, attributeFilter:["data-theme", "data-ui-zoom-percent"] });
   document.addEventListener("visibilitychange", visibility);
   window.addEventListener("blur", cancelDrag);
+  window.addEventListener("keydown", fullscreenKey);
   try {
     const callbacks = await Promise.allSettled([
       listen<Loaded>("chat-document-preview-loaded", ({ payload }) => { if (payload && current?.id === payload.viewId) { current.loaded = true; loaded(); } }),
@@ -253,6 +283,6 @@ onMounted(async () => {
   } catch { /* Browser-only scaffolds cannot claim Native preview availability. */ }
 });
 watch(viewport, (value, previous) => { if (previous) resizeObserver?.unobserve(previous); if (value) resizeObserver?.observe(value); });
-onBeforeUnmount(() => { disposed = true; epoch++; queued = null; void detach(false); resizeObserver?.disconnect(); mutationObserver?.disconnect(); themeObserver?.disconnect(); unlisteners.forEach(stop => stop()); document.removeEventListener("visibilitychange", visibility); window.removeEventListener("blur", cancelDrag); cancelAnimationFrame(frame); });
-return { root, panel, viewport, tabStrip, addButton, separator, opened, state, active, geometry, metadata, phase, error, notice, dragging, capacityText, toggle, openFile, collapse, createTab, selectTab, closeTab, keyTab, navigate, resetWidth, keyResize, startDrag, moveDrag, endDrag, reload };
+onBeforeUnmount(() => { disposed = true; epoch++; queued = null; void detach(false); resizeObserver?.disconnect(); mutationObserver?.disconnect(); themeObserver?.disconnect(); unlisteners.forEach(stop => stop()); document.removeEventListener("visibilitychange", visibility); window.removeEventListener("blur", cancelDrag); window.removeEventListener("keydown", fullscreenKey); cancelAnimationFrame(frame); });
+return { root, panel, viewport, tabStrip, addButton, separator, opened, fullscreen, fullscreenTarget, state, active, geometry, metadata, phase, error, notice, dragging, capacityText, toggle, toggleFullscreen, openFile, collapse, createTab, selectTab, closeTab, keyTab, navigate, resetWidth, keyResize, startDrag, moveDrag, endDrag, reload };
 }

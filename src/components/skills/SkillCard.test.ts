@@ -67,7 +67,7 @@ describe("SkillCard", () => {
     const install = wrapper.get(`button[aria-label="安装 跨境营销文案"]`);
     expect(wrapper.classes()).toContain("skill-card--actionable");
 
-    const tooltip = wrapper.getComponent(NTooltip);
+    const tooltip = wrapper.findAllComponents(NTooltip).find(candidate => candidate.vm.$slots.default?.().some(node => typeof node.children === "string" && node.children.trim() === "安装"))!;
     expect(tooltip.props("trigger")).toBe("manual");
     expect(tooltip.props("show")).toBe(false);
     expect(tooltip.vm.$slots.default?.().some((node) =>
@@ -233,8 +233,8 @@ describe("SkillCard", () => {
     });
 
     expect(wrapper.get(`button[aria-label="重试安装 跨境营销文案"]`)).toBeDefined();
-    expect(String(wrapper.getComponent(NTooltip).vm.$slots.default?.()[0]?.children).trim())
-      .toBe("重试安装");
+    expect(wrapper.findAllComponents(NTooltip).some(candidate => candidate.vm.$slots.default?.().some(node => typeof node.children === "string" && node.children.trim() === "重试安装")))
+      .toBe(true);
   });
 
   it.each([

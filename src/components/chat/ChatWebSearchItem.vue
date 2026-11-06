@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, ref, useId, watch } from "vue";
 import { webSearchQueryTitle } from "../../domain/web-search-presentation";
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
@@ -52,7 +53,7 @@ watch(() => props.item.identity, () => { expanded.value = false; });
       :aria-label="`${label}${detail ? ` ${detail}` : ''}，${status}，${expanded ? '收起' : '展开'}`" @click="toggle">
       <YjIcon class="chat-web-search__globe" name="skillCrossBorderSelection" size="xs" :stroke-width="1.5" />
       <span class="chat-web-search__label">{{ label }}</span>
-      <span v-if="detail" class="chat-web-search__query" :title="originalQueries || detail">{{ detail }}</span>
+      <YjTooltip v-if="detail" :text="originalQueries || detail"><span  class="chat-web-search__query" >{{ detail }}</span></YjTooltip>
       <YjIcon class="chat-web-search__chevron" :name="expanded ? 'chevronDown' : 'chevronRight'"
         size="xs" :stroke-width="1.5" />
     </button>

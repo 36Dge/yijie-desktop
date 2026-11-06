@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type {
   ChatComposerFocusSnapshot,
@@ -400,17 +401,17 @@ function handlePaste(event: ClipboardEvent): void {
               <span>{{ attachmentImportDetails(attachmentImportAttempt) }}</span>
             </span>
             <span class="chat-composer__attachment-actions">
-              <button
-                v-if="attachmentImportAttempt.stage === 'error_terminal'"
+              <YjTooltip v-if="attachmentImportAttempt.stage === 'error_terminal'" text="移除失败的附件选择"><button
+
                 type="button"
                 class="chat-composer__attachment-action"
                 aria-label="移除失败的附件选择"
-                title="移除失败的附件选择"
+
                 :disabled="submissionBusy || attachmentImporting"
                 @click="emit('dismiss-attachment-import', attachmentImportAttempt.operationId)"
               >
                 <YjIcon name="dismiss" size="sm" />
-              </button>
+              </button></YjTooltip>
             </span>
           </li>
           <li v-for="attachment in attachments" :key="attachment.attachmentId" class="chat-composer__capsule">
@@ -461,11 +462,11 @@ function handlePaste(event: ClipboardEvent): void {
               <template #experts="{ close }"><slot name="expert-picker" :close="close" /></template>
             </ChatAddControl>
             <slot v-if="!textOnly && mode === 'reply'" name="permission-control">
-              <button
+              <YjTooltip text="权限审批：只读访问，禁止写入"><button
                 class="chat-composer__permission yj-control yj-control--pill"
                 type="button"
                 aria-label="查看权限审批：只读访问，禁止写入"
-                title="权限审批：只读访问，禁止写入"
+
                 aria-haspopup="dialog"
                 @click="emit('show-permission')"
               >
@@ -473,7 +474,7 @@ function handlePaste(event: ClipboardEvent): void {
                 <span class="chat-composer__permission-label">权限审批</span>
                 <span class="chat-composer__permission-value">只读 · 禁止写入</span>
                 <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
-              </button>
+              </button></YjTooltip>
             </slot>
             <ChatConnectorChips v-if="!textOnly && connectors.length" :entries="connectors" :disabled="selectionRemovalDisabled || !$slots['connector-control']">
               <template #default="{ close }"><slot name="connector-control" :close="close" /></template>
@@ -489,29 +490,29 @@ function handlePaste(event: ClipboardEvent): void {
               :disabled="submissionBusy"
               :interrupt="requestActiveTurnInterrupt"
             >
-              <button
+              <YjTooltip text="停止生成"><button
                 class="chat-composer__send chat-composer__send--stop"
                 type="button"
                 :disabled="submissionBusy"
                 aria-label="停止生成"
-                title="停止生成"
+
                 @click="requestActiveTurnInterrupt"
               >
                 <YjIcon class="chat-composer__stop-icon" name="stopFilled" size="xs" :stroke-width="0" />
-              </button>
+              </button></YjTooltip>
             </slot>
           </template>
-          <button
-            v-else
+          <YjTooltip v-else :text="sendLabel"><button
+
             class="chat-composer__send"
             type="button"
             :disabled="sendDisabled"
             :aria-label="sendLabel"
-            :title="sendLabel"
+
             @click="submit"
           >
             <YjIcon name="send" size="md" />
-          </button>
+          </button></YjTooltip>
           </div>
         </div>
         <div v-if="dragActive && !attachmentButtonDisabled" class="chat-composer__drop-overlay" aria-hidden="true">
@@ -521,26 +522,26 @@ function handlePaste(event: ClipboardEvent): void {
       </div>
       <div v-if="!textOnly && mode === 'new'" class="chat-composer__settings" role="group" aria-label="工作空间与权限">
         <slot name="workspace-control">
-          <button
+          <YjTooltip :text="selectedProject ? `更换工作空间：${projectName}` : '选择工作空间'"><button
             class="chat-composer__project chat-composer__project--button yj-control yj-control--pill"
             type="button"
             :disabled="submissionBusy || streaming"
             :aria-label="selectedProject ? `更换工作空间，当前工作空间 ${projectName}` : '选择工作空间'"
-            :title="selectedProject ? `更换工作空间：${projectName}` : '选择工作空间'"
+
             aria-haspopup="dialog"
             @click="emit('pick-project')"
           >
             <YjIcon name="folder" size="sm" :stroke-width="1.5" />
             <span class="chat-composer__project-name">{{ projectName }}</span>
             <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
-          </button>
+          </button></YjTooltip>
         </slot>
         <slot name="permission-control">
-          <button
+          <YjTooltip text="权限审批：只读访问，禁止写入"><button
             class="chat-composer__permission yj-control yj-control--pill"
             type="button"
             aria-label="查看权限审批：只读访问，禁止写入"
-            title="权限审批：只读访问，禁止写入"
+
             aria-haspopup="dialog"
             @click="emit('show-permission')"
           >
@@ -548,7 +549,7 @@ function handlePaste(event: ClipboardEvent): void {
             <span class="chat-composer__permission-label">权限审批</span>
             <span class="chat-composer__permission-value">只读 · 禁止写入</span>
             <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
-          </button>
+          </button></YjTooltip>
         </slot>
       </div>
     </div>

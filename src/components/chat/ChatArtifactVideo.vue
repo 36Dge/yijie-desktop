@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import {
   chatArtifactVideoNativeClient,
@@ -297,17 +298,17 @@ onBeforeUnmount(() => {
         aria-live="polite"
         aria-atomic="true"
       >{{ stateMessage }}</span>
-      <button class="yj-control"
+      <YjTooltip text="保存视频"><button class="yj-control"
         data-testid="artifact-video-save"
         type="button"
         :disabled="saving || !eligible"
         aria-label="保存视频"
-        title="保存视频"
+
         @click="saveVideo"
       >
         <YjIcon name="download" size="sm" />
         {{ saving ? "保存中" : "保存视频" }}
-      </button>
+      </button></YjTooltip>
     </div>
 
     <p

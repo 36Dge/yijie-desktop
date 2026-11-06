@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, ref } from "vue";
 import { NDropdown, NPopover } from "naive-ui";
 import type { MyWorkflow } from "../../domain/workflow-showcase";
@@ -37,10 +38,10 @@ function select(key: string) {
     </header>
     <div class="workflow-summary-card__body workflow-showcase-card__body">
       <h3 class="workflow-summary-card__title workflow-showcase-card__title">
-        <RouterLink v-if="to" :to="to" :title="workflow.description" class="workflow-summary-card__link" :aria-label="`打开 ${workflow.title}`">{{ workflow.title }}</RouterLink>
+        <YjTooltip v-if="to" :text="workflow.description"><RouterLink  :to="to"  class="workflow-summary-card__link" :aria-label="`打开 ${workflow.title}`">{{ workflow.title }}</RouterLink></YjTooltip>
         <template v-else>{{ workflow.title }}</template>
       </h3>
-      <p class="workflow-summary-card__description workflow-showcase-card__description" :title="workflow.description">{{ workflow.description }}</p>
+      <YjTooltip :text="workflow.description"><p class="workflow-summary-card__description workflow-showcase-card__description" >{{ workflow.description }}</p></YjTooltip>
     </div>
     <div class="workflow-summary-card__labels workflow-showcase-card__metadata" aria-label="工作流标签与节点数量">
       <span class="workflow-summary-card__badge workflow-showcase-card__badge yj-badge">{{ workflow.badge }}</span>

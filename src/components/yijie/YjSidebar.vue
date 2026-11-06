@@ -97,13 +97,15 @@ function handleEntryClick(entry: AppNavEntry): void {
 
 <style scoped>
 .yj-sidebar {
+  --yj-color-control-hover: var(--yj-color-nav-hover);
+  --yj-color-control-pressed: var(--yj-color-nav-pressed);
+  --yj-color-text-tertiary: var(--yj-color-nav-muted);
   position: relative;
   z-index: 1;
   display: flex;
   width: var(--yj-layout-sidebar-expanded);
   flex: 0 0 var(--yj-layout-sidebar-expanded);
   flex-direction: column;
-  border-right: 1px solid var(--yj-color-border-subtle);
   background: var(--yj-color-bg-nav);
   transition:
     width var(--yj-motion-base) var(--yj-ease-standard),

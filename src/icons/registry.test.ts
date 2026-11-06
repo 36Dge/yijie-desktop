@@ -18,6 +18,8 @@ describe("iconRegistry", () => {
       "globe",
       "lightbulb",
       "previewSidebar",
+      "enterFullscreen",
+      "exitFullscreen",
       "terminal",
 
       "arrowRight",

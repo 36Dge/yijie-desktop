@@ -165,7 +165,7 @@ describe("FEAT-129 AC-009 automated acceptance", () => {
     await flushPromises();
     const install = wrapper.get(`button[aria-label="安装 跨境营销文案"]`);
     const tooltip = wrapper.findAllComponents(NTooltip).find((candidate) =>
-      candidate.props("trigger") === "manual"
+      candidate.props("trigger") === "manual" && candidate.vm.$slots.default?.().some(node => typeof node.children === "string" && node.children.trim() === "安装")
     );
 
     expect(tooltip).toBeDefined();
@@ -280,7 +280,7 @@ describe("FEAT-129 AC-009 automated acceptance", () => {
       candidate.props("type") === "error"
     );
     expect(dangerAction?.text()).toBe("确认");
-    expect(uninstall.attributes("title")).toBe("卸载");
+    expect(uninstall.attributes("data-yj-tooltip")).toBe("卸载");
 
     await buttonByText(wrapper, "取消").trigger("click");
     await flushPromises();
@@ -354,7 +354,7 @@ describe("FEAT-129 AC-009 automated acceptance", () => {
     expect(cardSource).toMatch(/\.skill-card\s*{[^}]*min-width:\s*0;/s);
     expect(cardSource).toMatch(/\.skill-card\s*{[^}]*background:\s*var\(--yj-color-bg-card\);/s);
     expect(shellSource).toMatch(/\.yj-app-shell__content\s*{[^}]*min-width:\s*0;[^}]*overflow:\s*auto;/s);
-    expect(shellSource).toMatch(/\.yj-app-shell\s*{[^}]*overflow:\s*hidden;/s);
+    expect(shellSource).toMatch(/\.yj-app-shell\s*{[^}]*overflow:\s*clip;/s);
     expect(cardSource).toMatch(
       /\.skill-card__delete:hover,[\s\S]*color:\s*var\(--yj-color-semantic-error-ink\);[\s\S]*background:\s*var\(--yj-color-error-soft\);/,
     );

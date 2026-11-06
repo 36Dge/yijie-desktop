@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { NButton, NInput, NPopover } from "naive-ui";
 import type { ChatShopPreview } from "../../composables/useChatShopPreview";
@@ -75,12 +76,12 @@ function navigate(event: KeyboardEvent) {
   <Teleport to="body"><div ref="overlay" class="chat-control-overlay" /></Teleport>
   <NPopover :show="open" :to="overlay ?? false" trigger="click" :placement="placement" :flip="false" :disabled="disabled" :show-arrow="false" raw @update:show="setOpen">
     <template #trigger>
-      <button ref="trigger" class="shop-trigger yj-control" :class="{ 'is-linked': state.current }" type="button" :disabled="disabled" :aria-label="triggerLabel" :title="disabled ? '任务进行中，暂时不能切换店铺' : `${triggerLabel}（交互演示）`" aria-haspopup="dialog" :aria-expanded="open" @keydown.down.prevent="setOpen(true)" @keydown.esc.stop.prevent="setOpen(false)">
+      <YjTooltip :text="disabled ? '任务进行中，暂时不能切换店铺' : `${triggerLabel}（交互演示）`"><button ref="trigger" class="shop-trigger yj-control" :class="{ 'is-linked': state.current }" type="button" :disabled="disabled" :aria-label="triggerLabel"  aria-haspopup="dialog" :aria-expanded="open" @keydown.down.prevent="setOpen(true)" @keydown.esc.stop.prevent="setOpen(false)">
         <YjIcon :name="state.current ? shopIcon(state.current.id) : 'store'" size="sm" :stroke-width="1.5" />
         <span class="shop-trigger-name">{{ state.current?.name ?? '关联店铺' }}</span>
         <span v-if="state.current" class="shop-trigger-check" aria-hidden="true"><YjIcon name="permissionCheck" size="xs" :stroke-width="1.5" /></span>
         <YjIcon v-else class="shop-trigger-chevron yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
-      </button>
+      </button></YjTooltip>
     </template>
     <div ref="panel" class="shop-panel chat-control-menu" :class="{ 'is-compact': panelHeight < 430 }" :style="{ '--shop-panel-available-height': `${panelHeight}px`, '--shop-panel-offset-y': `${panelShift}px` }" role="dialog" tabindex="-1" aria-label="选择关联店铺" :aria-busy="state.busy" @keydown.esc.stop.prevent="setOpen(false)" @keydown="navigate">
       <div v-if="state.stage === 'empty'" class="shop-state">

@@ -8,7 +8,7 @@ const emit = defineEmits<{ click: [] }>();
 const hovered = ref(false); const focused = ref(false);
 </script>
 <template>
-  <NTooltip trigger="manual" :show="!loading && (hovered || focused)">
+  <NTooltip arrow-point-to-center trigger="manual" :show="!loading && (hovered || focused)">
     <template #trigger><span @mouseenter="hovered = true" @mouseleave="hovered = false" @click.stop>
       <NButton :id="id" quaternary circle size="small" :disabled="disabled" :loading="loading" :aria-label="label" @focus="focused = true" @blur="focused = false" @click="emit('click')"><YjIcon :name="icon" size="sm" /></NButton>
     </span></template>{{ label }}

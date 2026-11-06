@@ -289,8 +289,6 @@ function option(): EChartsOption {
       trigger: "item",
       renderMode: "richText",
       confine: true,
-      padding: [10, 12],
-      textStyle: { ...theme.tooltip.textStyle, fontSize },
     },
   };
   const axis = {

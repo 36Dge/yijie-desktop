@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import {
   chatArtifactFileNativeClient,
@@ -341,18 +342,18 @@ onBeforeUnmount(() => {
       </span>
       <span v-else-if="!htmlPreview && !openFile" class="artifact-file__fallback" role="note">当前文件格式不可用。</span>
 
-      <button class="yj-control"
-        v-if="canSave"
+      <YjTooltip v-if="canSave" text="保存文件"><button class="yj-control"
+
         data-testid="artifact-file-save"
         type="button"
         :disabled="saving"
         aria-label="保存文件"
-        title="保存文件"
+
         @click="saveFile"
       >
         <YjIcon name="download" size="sm" />
         {{ saving ? "保存中" : "保存文件" }}
-      </button>
+      </button></YjTooltip>
     </div>
 
     <p
@@ -386,16 +387,16 @@ onBeforeUnmount(() => {
     >
       <header class="artifact-file__preview-header">
         <h3 :id="previewTitleId">{{ displayName }} 预览</h3>
-        <button class="yj-control"
+        <YjTooltip text="关闭文件预览"><button class="yj-control"
           data-testid="artifact-file-close"
           type="button"
           aria-label="关闭文件预览"
-          title="关闭文件预览"
+
           @click="closePreview"
         >
           <YjIcon name="dismiss" size="sm" />
           关闭预览
-        </button>
+        </button></YjTooltip>
       </header>
 
       <p
