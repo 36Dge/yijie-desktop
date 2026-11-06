@@ -56,11 +56,15 @@ async function openByKeyboard() { if (props.disabled) return; open.value = true;
   <Teleport to="body"><div ref="overlay" class="chat-control-overlay" /></Teleport>
   <NPopover v-model:show="open" :to="overlay ?? false" trigger="click" placement="top-start" :disabled="disabled" :show-arrow="false" raw>
     <template #trigger>
-      <YjTooltip :text="selected?.path ?? triggerLabel"><button ref="trigger" class="workspace-trigger chat-composer__project chat-composer__project--button yj-control yj-control--pill" type="button" :disabled="disabled" :aria-label="triggerLabel"  aria-haspopup="menu" :aria-expanded="open" @keydown.down.prevent="openByKeyboard" @keydown.esc="open = false">
-        <YjIcon name="folder" size="sm" :stroke-width="1.5" />
-        <span class="workspace-name">{{ selected?.project.safeName ?? '选择工作空间' }}</span>
-        <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
-      </button></YjTooltip>
+      <span class="chat-control-anchor">
+        <YjTooltip :text="selected?.path ?? triggerLabel">
+          <button ref="trigger" class="workspace-trigger chat-composer__project chat-composer__project--button yj-control yj-control--pill" type="button" :disabled="disabled" :aria-label="triggerLabel" aria-haspopup="menu" :aria-expanded="open" @keydown.down.prevent="openByKeyboard" @keydown.esc="open = false">
+            <YjIcon name="folder" size="sm" :stroke-width="1.5" />
+            <span class="workspace-name">{{ selected?.project.safeName ?? '选择工作空间' }}</span>
+            <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
+          </button>
+        </YjTooltip>
+      </span>
     </template>
     <div ref="menu" class="workspace-menu chat-control-menu" role="menu" aria-label="选择工作空间" :aria-busy="loading" @keydown="navigate">
       <div class="workspace-search"><NInput v-model:value="query" :input-props="{ 'aria-label': '搜索工作空间' }" placeholder="搜索工作空间" clearable /></div>

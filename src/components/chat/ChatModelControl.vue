@@ -71,11 +71,15 @@ function key(event: KeyboardEvent): void {
   <Teleport to="body"><div ref="overlay" class="model-overlay chat-control-overlay" /></Teleport>
   <NPopover :to="overlay ?? false" v-model:show="open" trigger="click" placement="top-end" :show-arrow="false" :disabled="blocked" raw>
     <template #trigger>
-      <YjTooltip :text="disabled ? (disabledReason ?? '当前任务结束后可切换模型') : unavailable ? `${unavailableLabel(selectedAvailability?.reason)}，请选择可用模型` : label"><button ref="trigger" class="model-trigger yj-control yj-control--pill" type="button" :disabled="blocked" :aria-label="`选择对话模型，当前 ${label}`" :aria-expanded="open" aria-haspopup="menu"  @keydown.stop @keydown.down.prevent="open = !blocked" @keydown.esc="open = false">
-        <span class="model-brand model-trigger-brand" :class="{ 'is-kimi': selected?.icon === 'modelKimi' }"><YjIcon :name="selected?.icon ?? 'assistant'" size="sm" /></span>
-        <span class="model-trigger-label">{{ label }}</span>
-        <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
-      </button></YjTooltip>
+      <span class="chat-control-anchor">
+        <YjTooltip :text="disabled ? (disabledReason ?? '当前任务结束后可切换模型') : unavailable ? `${unavailableLabel(selectedAvailability?.reason)}，请选择可用模型` : label">
+          <button ref="trigger" class="model-trigger yj-control yj-control--pill" type="button" :disabled="blocked" :aria-label="`选择对话模型，当前 ${label}`" :aria-expanded="open" aria-haspopup="menu" @keydown.stop @keydown.down.prevent="open = !blocked" @keydown.esc="open = false">
+            <span class="model-brand model-trigger-brand" :class="{ 'is-kimi': selected?.icon === 'modelKimi' }"><YjIcon :name="selected?.icon ?? 'assistant'" size="sm" /></span>
+            <span class="model-trigger-label">{{ label }}</span>
+            <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
+          </button>
+        </YjTooltip>
+      </span>
     </template>
     <div ref="menu" class="model-menu chat-control-menu" role="menu" aria-label="对话模型" @keydown="key">
       <button v-for="entry in catalog?.models ?? []" :key="entry.profile.profile_id" class="chat-control-option" type="button" role="menuitemradio" :aria-checked="entry.profile.profile_id === profile" :disabled="!entry.available" @click="choose(entry.profile.profile_id)">

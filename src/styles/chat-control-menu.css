@@ -1,4 +1,12 @@
 /* Shared surface and row rhythm for composer selection menus. */
+/* The menu measures this box. A tooltip renders a fragment, so it cannot
+ * serve as the menu's DOM anchor. Keep the box fitted to the visible button. */
+.chat-control-anchor {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .chat-control-overlay {
   position: fixed;
   inset: 0;
