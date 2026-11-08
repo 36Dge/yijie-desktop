@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, useId, watch } from "vue";
 import type { UserInputAnswers, UserInputRequest } from "../../api/user-input-client";
 import YjIcon from "../yijie/YjIcon.vue";
 
-const props = defineProps<{ request: UserInputRequest; disabled: boolean; submitting: boolean }>();
+const props = defineProps<{ request: UserInputRequest; disabled: boolean; submitting: boolean; revalidating?: boolean }>();
 const emit = defineEmits<{ answer: [answers: UserInputAnswers]; interact: [] }>();
 const id = useId();
 const page = ref(0), reveal = ref(false), now = ref(Date.now());
@@ -11,7 +11,7 @@ const draft = ref<Record<string, string>>(Object.create(null));
 const selected = ref<Record<string, string>>(Object.create(null));
 const question = computed(() => props.request.questions[page.value]);
 const pending = computed(() => props.request.state === "pending");
-const blocked = computed(() => props.disabled || props.submitting || !pending.value);
+const blocked = computed(() => props.disabled || props.submitting || props.revalidating || !pending.value);
 const text = computed({ get: () => question.value ? draft.value[question.value.id] ?? "" : "", set: value => {
   if (!question.value || blocked.value) return;
   draft.value[question.value.id] = value; delete selected.value[question.value.id]; emit("interact");
@@ -23,6 +23,7 @@ const interval = setInterval(() => { now.value = Date.now(); }, 1000);
 function clear() { draft.value = Object.create(null); selected.value = Object.create(null); reveal.value = false; }
 watch(() => props.request.request_id, () => { clear(); page.value = 0; }, { flush: "sync" });
 watch([pending, () => props.submitting], ([isPending, sending]) => { if (!isPending || sending) clear(); }, { flush: "sync" });
+watch([() => props.disabled, () => props.revalidating], ([disabled, checking]) => { if (disabled || checking) reveal.value = false; }, { flush: "sync" });
 onBeforeUnmount(() => { clearInterval(interval); clear(); });
 function choose(value: string) { if (!question.value || blocked.value) return; selected.value[question.value.id] = value; delete draft.value[question.value.id]; emit("interact"); }
 function navigate(index: number) { if (blocked.value || index < 0 || index >= props.request.questions.length) return; page.value = index; reveal.value = false; emit("interact"); }
@@ -57,7 +58,7 @@ function keys(event: KeyboardEvent) {
       </nav>
       <button type="button" class="icon-button close" aria-label="关闭并跳过本组问题" :disabled="blocked" @click="submit(true)"><YjIcon name="dismiss" /></button>
     </header>
-    <div v-if="question" class="user-input__body">
+    <div v-if="question && !revalidating" class="user-input__body">
       <h3 :id="`${id}-question`" class="yj-selectable-text">{{ question.question }}</h3>
       <div v-if="question.options?.length" class="user-input__options" role="group" :aria-labelledby="`${id}-question`">
         <button v-for="(option, index) in question.options" :key="option.label" type="button" class="user-input__option" :aria-pressed="selected[question.id] === option.label" :disabled="blocked" @click="choose(option.label)">
@@ -79,6 +80,7 @@ function keys(event: KeyboardEvent) {
     <footer>
       <span class="user-input__hint" role="status">
         <template v-if="submitting || request.state === 'submitting'">正在确认回答送达…</template>
+        <template v-else-if="revalidating">正在重新确认问题，回答尚未发送</template>
         <template v-else-if="disabled">连接或权限暂不可用</template>
         <template v-else-if="remaining !== null">{{ remaining > 0 ? `${remaining} 秒后按未回答继续` : '正在确认超时状态…' }}</template>
         <template v-else-if="request.timeout_paused">已暂停自动跳过</template>

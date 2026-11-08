@@ -3,9 +3,9 @@
   "mode": "immutable_local_candidate",
   "release": false,
   "feature": "FEAT-164",
-  "source_commit": "de1fcdf8dabd9b08983bbf907f079db41da437fe",
+  "source_commit": "2d2351b49bc7ca7bfe53e6dfe090c2bc0d949d65",
   "authority": "yijie-connectors/catalog/market-catalog.v1.json",
-  "base_commit": "de1fcdf8dabd9b08983bbf907f079db41da437fe",
+  "base_commit": "2d2351b49bc7ca7bfe53e6dfe090c2bc0d949d65",
   "source_sha256": "55ec42e1965a7ecdfd17771af299afea786bc74a175ab4f021afdf8d538ab70d",
   "generated": "contracts/market-catalog.json"
 }

@@ -1,5 +1,6 @@
 // Explicit FEAT-169 local-development inputs. Existing release/image pins remain intact.
 import assert from "node:assert/strict";
+import { verifyHostCandidateBase } from "./native-tools-build-candidate.mjs";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync, writeFileSync } from "node:fs";
@@ -11,7 +12,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const lockName = "contracts/interaction-tools-build.candidate.json";
 const hostPaths = ["cmd", "internal", "api", "go.mod", "go.sum", "artifact-mcp/Cargo.toml", "artifact-mcp/Cargo.lock", "artifact-mcp/src", "scripts/build-artifact-adapter.sh", "scripts/artifact_build_output.py"];
 
-function snapshot(desktop, contracts, host) {
+function snapshot(desktop, contracts, host, base = execFileSync("git", ["-C", host, "rev-parse", "HEAD"], { encoding: "utf8" }).trim()) {
   execFileSync(process.execPath, ["scripts/generate-runtime-interaction-tools.mjs", "--check"], { cwd: contracts, stdio: "pipe" });
   const runtime = readFileSync(path.join(contracts, "compatibility/runtime-interaction-tools/source.lock.json"));
   assert.deepEqual(runtime, readFileSync(path.join(desktop, "contracts/runtime-interaction-tools.candidate.json")));
@@ -29,7 +30,7 @@ function snapshot(desktop, contracts, host) {
     sources[name] = hash(readFileSync(path.join(host, name)));
   }
   return { schema_version: 1, feature: "FEAT-169", mode: "local_worktree_candidate", release: false,
-    runtime_lock_sha256: hash(runtime), user_input_lock_sha256: hash(input), context_window_lock_sha256: hash(contextWindow), native_display_sha256: hash(display), host_base_commit: execFileSync("git", ["-C", host, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(), host_sources: sources };
+    runtime_lock_sha256: hash(runtime), user_input_lock_sha256: hash(input), context_window_lock_sha256: hash(contextWindow), native_display_sha256: hash(display), host_base_commit: verifyHostCandidateBase(host, base), host_sources: sources };
 }
 
 export function verifyInteractionToolsBuildCandidate(desktop, contracts, host, env) {
@@ -43,7 +44,7 @@ export function verifyInteractionToolsBuildCandidate(desktop, contracts, host, e
   assert.equal(env.YIJIE_DEVELOPMENT_CLIENT, "true");
   assert.equal(env.YIJIE_FEAT164_DAILY, "true");
   const expected = JSON.parse(readFileSync(path.join(desktop, lockName)));
-  assert.deepEqual(expected, snapshot(desktop, contracts, host), "interaction tool build inputs changed; prepare the reviewed local candidate again");
+  assert.deepEqual(expected, snapshot(desktop, contracts, host, expected.host_base_commit), "interaction tool build inputs changed; prepare the reviewed local candidate again");
   return expected.host_sources;
 }
 

@@ -11,7 +11,14 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const lockName = "contracts/native-tools-build.candidate.json";
 const hostPaths = ["cmd", "internal", "api", "go.mod", "go.sum", "artifact-mcp/Cargo.toml", "artifact-mcp/Cargo.lock", "artifact-mcp/src", "scripts/build-artifact-adapter.sh", "scripts/artifact_build_output.py"];
 
-function snapshot(desktop, contracts, host) {
+export function verifyHostCandidateBase(host, base) {
+  assert.match(base, /^[a-f0-9]{40}$/);
+  assert.equal(execFileSync("git", ["-C", host, "rev-parse", `${base}^{commit}`], { encoding: "utf8" }).trim(), base);
+  execFileSync("git", ["-C", host, "merge-base", "--is-ancestor", base, "HEAD"], { stdio: "pipe" });
+  return base;
+}
+
+function snapshot(desktop, contracts, host, base = execFileSync("git", ["-C", host, "rev-parse", "HEAD"], { encoding: "utf8" }).trim()) {
   execFileSync(process.execPath, ["scripts/generate-runtime-native-tools.mjs", "--check"], { cwd: contracts, stdio: "pipe" });
   const runtime = readFileSync(path.join(contracts, "compatibility/runtime-native-tools/source.lock.json"));
   assert.deepEqual(runtime, readFileSync(path.join(desktop, "contracts/runtime-native-tools.candidate.json")));
@@ -25,7 +32,7 @@ function snapshot(desktop, contracts, host) {
     sources[name] = hash(readFileSync(path.join(host, name)));
   }
   return { schema_version: 1, feature: "FEAT-169", mode: "local_worktree_candidate", release: false,
-    runtime_lock_sha256: hash(runtime), native_display_sha256: hash(display), host_base_commit: execFileSync("git", ["-C", host, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(), host_sources: sources };
+    runtime_lock_sha256: hash(runtime), native_display_sha256: hash(display), host_base_commit: verifyHostCandidateBase(host, base), host_sources: sources };
 }
 
 export function verifyNativeToolsBuildCandidate(desktop, contracts, host, env) {
@@ -38,7 +45,7 @@ export function verifyNativeToolsBuildCandidate(desktop, contracts, host, env) {
   assert.equal(env.YIJIE_DEVELOPMENT_CLIENT, "true");
   assert.equal(env.YIJIE_FEAT164_DAILY, "true");
   const expected = JSON.parse(readFileSync(path.join(desktop, lockName)));
-  assert.deepEqual(expected, snapshot(desktop, contracts, host), "native tool build inputs changed; prepare the reviewed local candidate again");
+  assert.deepEqual(expected, snapshot(desktop, contracts, host, expected.host_base_commit), "native tool build inputs changed; prepare the reviewed local candidate again");
   return expected.host_sources;
 }
 

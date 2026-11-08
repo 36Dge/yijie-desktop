@@ -19,6 +19,7 @@ import { usePermissionStore } from "../../stores/permission.store";
 import ChatPermissionControl from "../../components/chat/ChatPermissionControl.vue";
 import ChatUserInput from "../../components/chat/ChatUserInput.vue";
 import { useUserInput } from "../../composables/useUserInput";
+import { userInputDraftScope } from "../../domain/user-input-draft-scope";
 import { useContextWindow } from "../../composables/useContextWindow";
 import type { ContextWindowSnapshot } from "../../api/context-window-client";
 import { withContextWindowTimeline } from "../../domain/context-window-timeline";
@@ -517,10 +518,21 @@ const permissions = useRuntimePermissions(
   () => expertBusy.value || isStreaming.value || composerSubmissionState.value !== "idle",
 );
 const interactionToolsEnabled = runtimePermissionsEnabled && import.meta.env.VITE_YIJIE_INTERACTION_TOOLS === "true";
+const questionDraftScope = computed(() => {
+  if (!interactionToolsEnabled || isDraftMode.value || chatStore.selectedAccessMode === "history-only") return null;
+  return userInputDraftScope({
+    ready: permissionScope.isReady,
+    tenantId: permissionScope.selectedTenantId,
+    authorizationRevision: permissionScope.authorizationRevision,
+    expiresAt: permissionScope.expiresAt,
+    capabilities: permissionScope.capabilities,
+  });
+});
 const userInput = useUserInput(
   () => interactionToolsEnabled && !isDraftMode.value && normalPurposeReady.value && chatStore.selectedAccessMode === "live" && chatStore.hasAction("read_sessions") ? chatStore.context?.contextId ?? null : null,
   () => routeSessionId.value ?? null,
-  () => chatStore.hasAction("submit_turn"),
+  () => chatStore.hasAction("submit_turn") && permissionScope.hasCapability("task.create"),
+  () => questionDraftScope.value,
 );
 const permissionCanSend = computed(() => !runtimePermissionsEnabled || (permissions.ready.value && !permissions.saving.value && !permissions.deciding.value && !permissions.approvals.value.some((r) => r.status === "pending")));
 
@@ -1479,7 +1491,7 @@ onBeforeUnmount(() => {
     </div>
 
     <footer class="chat-workspace__composer">
-      <ChatUserInput v-if="userInput.current.value && ['pending', 'submitting'].includes(userInput.current.value.state)" :key="`${chatStore.context?.contextId}:${routeSessionId}:${userInput.current.value.request_id}`" :request="userInput.current.value" :disabled="userInput.blocked.value" :submitting="userInput.submitting.value" @interact="userInput.touch" @answer="userInput.answer" />
+      <ChatUserInput v-if="userInput.current.value && ['pending', 'submitting'].includes(userInput.current.value.state)" :key="userInput.formKey.value" :request="userInput.current.value" :disabled="userInput.blocked.value" :submitting="userInput.submitting.value" :revalidating="userInput.revalidating.value" @interact="userInput.touch" @answer="userInput.answer" />
       <p v-if="userInput.error.value" class="chat-workspace__composer-error" role="alert">{{ userInput.error.value }} <button type="button" :disabled="userInput.loading.value" @click="userInput.refresh">重新读取</button></p>
       <p v-else-if="userInput.notice.value" class="chat-workspace__composer-note" role="status">{{ userInput.notice.value }} <button type="button" @click="userInput.dismissNotice">知道了</button></p>
       <RuntimeApprovalList v-if="!isDraftMode && runtimePermissionsEnabled && chatStore.selectedAccessMode === 'live'" :requests="permissions.approvals.value" :deciding="permissions.deciding.value" :connected="permissions.approvalsConnected.value && chatStore.hasAction('submit_turn')" @decision="permissions.decide" />
