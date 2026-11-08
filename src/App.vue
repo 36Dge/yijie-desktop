@@ -74,6 +74,7 @@ async function synchronizeChatAuthority(): Promise<void> {
     tenantId: permissionStore.selectedTenantId,
     authorizationRevision: permissionStore.authorizationRevision,
     expiresAt: permissionStore.expiresAt,
+    capabilities: permissionStore.capabilities,
     canCreateTask: permissionStore.hasCapability("task.create"),
     canReadTask: permissionStore.hasCapability("task.read"),
     canReadSchedule: permissionStore.hasCapability("schedule.read"),
@@ -219,7 +220,7 @@ watch(
 
 watch(
   [
-    () => route.path === "/scheduled-tasks",
+    () => route.path === "/scheduled-tasks" || route.path === "/connectors",
     () => permissionStore.phase,
     () => permissionStore.selectedTenantId,
     () => permissionStore.authorizationRevision,

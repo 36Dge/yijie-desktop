@@ -1662,6 +1662,31 @@ describe("FEAT-126 ChatPage", () => {
     expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("会话 B 草稿");
   });
 
+  it.each(["light", "dark"])("keeps the conversation DOM, input focus and reading position across lease renewal in %s mode", async theme => {
+    document.documentElement.dataset.theme = theme;
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+    await wrapper.get("textarea").setValue("续期时继续输入的草稿");
+    const textarea = wrapper.get("textarea").element as HTMLTextAreaElement;
+    const scroller = wrapper.get(".chat-workspace__conversation").element as HTMLElement;
+    const timeline = wrapper.getComponent(ChatTimeline).element;
+    textarea.focus(); textarea.setSelectionRange(2, 6); scroller.scrollTop = 240;
+    for (let renewal = 0; renewal < 2; renewal++) {
+      store.context = { ...store.context!, expiresAtEpochSeconds: store.context!.expiresAtEpochSeconds + 300 };
+      await flushPromises();
+      expect(wrapper.get("textarea").element).toBe(textarea);
+      expect(textarea.value).toBe("续期时继续输入的草稿");
+      expect(document.activeElement).toBe(textarea);
+      expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([2, 6]);
+      expect(wrapper.getComponent(ChatTimeline).element).toBe(timeline);
+      expect(wrapper.get(".chat-workspace__conversation").element).toBe(scroller);
+      expect(scroller.scrollTop).toBe(240);
+      expect(wrapper.text()).toContain("标题检查完成");
+      expect(store.selectedSessionId).toBe(SESSION_ID);
+    }
+    wrapper.unmount();
+    delete document.documentElement.dataset.theme;
+  });
+
   it("keeps a draft through the first context bind and clears it across authority changes", async () => {
     const { wrapper, store } = await mountPage("/chat");
     const boundContext = store.context!;

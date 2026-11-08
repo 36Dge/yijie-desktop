@@ -783,6 +783,100 @@ describe("chat view-model store", () => {
     vi.unstubAllGlobals();
   });
 
+  it("authority renewal preserves the selected conversation, stream, attachments and subscriptions past the old deadline", async () => {
+    const renewContext = vi.fn(async () => ({ contextId: CONTEXT,
+      expiresAtEpochSeconds: Math.floor(Date.now() / 1000) + 300, allowedActions: ALL_ALLOWED_ACTIONS }));
+    const harness = fakeClient({ renewContext });
+    const bind = vi.spyOn(harness.client, "bindContext");
+    const unsubscribe = vi.spyOn(harness.client, "unsubscribeSession");
+    const store = createStore(harness.client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    store.phase = "streaming";
+    store.liveAssistantText = "正在继续的回答";
+    const history = store.history, view = store.conversationState, attachments = store.draftAttachments;
+    const target = store.draftTarget, sessions = store.sessions;
+    await vi.advanceTimersByTimeAsync(301_000);
+    expect(renewContext).toHaveBeenCalledExactlyOnceWith(CONTEXT, TENANT);
+    expect(bind).toHaveBeenCalledTimes(1);
+    expect(unsubscribe).not.toHaveBeenCalled();
+    expect(store.context?.contextId).toBe(CONTEXT);
+    expect(store.context?.expiresAtEpochSeconds).toBe(Math.floor(NOW / 1000) + 570);
+    expect(store.selectedSessionId).toBe(SESSION_A);
+    expect(store.phase).toBe("streaming");
+    expect(store.liveAssistantText).toBe("正在继续的回答");
+    expect(store.history).toBe(history);
+    expect(store.conversationState).toBe(view);
+    expect(store.draftAttachments).toBe(attachments);
+    expect(store.draftTarget).toBe(target);
+    expect(store.sessions).toBe(sessions);
+    await store.dispose();
+  });
+
+  it("authority renewal coalesces requests and never restores a disposed context", async () => {
+    const response = new Deferred<Awaited<ReturnType<NonNullable<ChatClient["renewContext"]>>>>();
+    const renewContext = vi.fn(() => response.promise);
+    const { client } = fakeClient({ renewContext });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    const first = store.renewAuthority();
+    const second = store.renewAuthority();
+    expect(renewContext).toHaveBeenCalledTimes(1);
+    await store.dispose();
+    response.resolve({ contextId: CONTEXT, expiresAtEpochSeconds: Math.floor(NOW / 1000) + 600, allowedActions: ALL_ALLOWED_ACTIONS });
+    expect(await first).toBe(false);
+    expect(await second).toBe(false);
+    expect(store.context).toBeNull();
+    expect(store.phase).toBe("idle");
+  });
+
+  it("authority renewal retries temporary unavailability without blanking the page", async () => {
+    const renewContext = vi.fn<NonNullable<ChatClient["renewContext"]>>()
+      .mockRejectedValueOnce(new ChatClientError({ schemaVersion: 1, code: "chat_temporarily_unavailable", retryable: true, recovery: "retry" }))
+      .mockResolvedValue({ contextId: CONTEXT, expiresAtEpochSeconds: Math.floor(NOW / 1000) + 575, allowedActions: ALL_ALLOWED_ACTIONS });
+    const { client } = fakeClient({ renewContext });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    const history = store.history;
+    await vi.advanceTimersByTimeAsync(270_000);
+    expect(store.context?.contextId).toBe(CONTEXT);
+    expect(store.history).toBe(history);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(renewContext).toHaveBeenCalledTimes(2);
+    expect(store.context?.expiresAtEpochSeconds).toBe(Math.floor(NOW / 1000) + 575);
+    expect(store.history).toBe(history);
+    await store.dispose();
+  });
+
+  it("authority renewal retains the hard expiry while its provider is pending", async () => {
+    const response = new Deferred<Awaited<ReturnType<NonNullable<ChatClient["renewContext"]>>>>();
+    const { client } = fakeClient({ renewContext: () => response.promise });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(store.context).toBeNull();
+    expect(store.phase).toBe("resync-required");
+    response.resolve({ contextId: CONTEXT, expiresAtEpochSeconds: Math.floor(NOW / 1000) + 600, allowedActions: ALL_ALLOWED_ACTIONS });
+    await Promise.resolve();
+    expect(store.context).toBeNull();
+    await store.dispose();
+  });
+
+  it("authority renewal handles permission revocation immediately", async () => {
+    const { client } = fakeClient({ renewContext: async () => {
+      throw new ChatClientError({ schemaVersion: 1, code: "chat_capability_denied", retryable: false, recovery: "request_permission" });
+    } });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    expect(await store.renewAuthority()).toBe(false);
+    expect(store.context).toBeNull();
+    expect(store.history).toBeNull();
+    expect(store.phase).toBe("permission-denied");
+    await store.dispose();
+  });
+
   it("targets background session metadata without selecting it or modifying the active conversation", async () => {
     const renameSession = vi.fn<ChatClient["renameSession"]>(async (_context, _session, _title, operation) => operation);
     const setSessionPinned = vi.fn<ChatClient["setSessionPinned"]>(async (_context, _session, _pinned, operation) => operation);

@@ -27,6 +27,7 @@ const SAFE_CWD_SEGMENT_PATTERN = /^(?!\.{1,2}$)(?!(?:con|prn|aux|nul|com[1-9]|lp
 export const CHAT_COMMAND_NAMES = Object.freeze([
   "chat_bind_context_v1",
   "chat_bind_management_context_v1",
+  "chat_renew_context_v1",
   "chat_list_projects_v1",
   "chat_pick_project_v1",
   "chat_revalidate_project_v1",

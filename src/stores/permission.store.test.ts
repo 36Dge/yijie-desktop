@@ -209,25 +209,75 @@ describe("permission store", () => {
       getMyCapabilities: async () => {
         capabilityCalls += 1;
         return capabilityCalls === 1
-          ? projection(TENANT_A, 1, ["task.read"], NOW + 1_000)
+          ? projection(TENANT_A, 1, ["task.read"], NOW + 60_000)
           : refreshed.promise;
       },
     });
     await store.discoverTenants();
     expect(store.capabilities).toEqual(["task.read"]);
 
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(store.phase).toBe("ready");
     expect(store.capabilities).toEqual(["task.read"]);
     expect(store.authorizationRevision).toBe(1);
+    expect(store.hasCapability("task.read")).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(store.phase).toBe("loading");
+    expect(store.isReady).toBe(false);
+    expect(store.capabilities).toEqual([]);
     expect(store.hasCapability("task.read")).toBe(false);
 
-    refreshed.resolve(projection(TENANT_A, 2, ["task.create"], NOW + 60_000));
+    refreshed.resolve(projection(TENANT_A, 2, ["task.create"], NOW + 120_000));
     await Promise.resolve();
     await Promise.resolve();
     expect(store.phase).toBe("ready");
     expect(store.authorizationRevision).toBe(2);
     expect(store.capabilities).toEqual(["task.create"]);
+  });
+
+  it("retries temporary refresh failures within the existing lease without resetting the view", async () => {
+    const getMyCapabilities = vi.fn<PermissionClient["getMyCapabilities"]>()
+      .mockResolvedValueOnce(projection(TENANT_A, 1, ["task.read"], NOW + 60_000))
+      .mockRejectedValueOnce(new PermissionClientError("unavailable", 503))
+      .mockResolvedValue(projection(TENANT_A, 1, ["task.read"], NOW + 120_000));
+    const store = createStore({ listMyTenants: async () => [TENANTS[0]], getMyCapabilities });
+    await store.discoverTenants();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(store.phase).toBe("ready");
+    expect(store.hasCapability("task.read")).toBe(true);
+    expect(store.expiresAt).toBe(new Date(NOW + 60_000).toISOString());
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(getMyCapabilities).toHaveBeenCalledTimes(3);
+    expect(store.expiresAt).toBe(new Date(NOW + 120_000).toISOString());
+    store.clearForLogout();
+  });
+
+  it("never lets temporary refresh failures extend a permission lease", async () => {
+    const getMyCapabilities = vi.fn<PermissionClient["getMyCapabilities"]>()
+      .mockResolvedValueOnce(projection(TENANT_A, 1, ["task.read"], NOW + 60_000))
+      .mockRejectedValue(new PermissionClientError("unavailable", 503));
+    const store = createStore({ listMyTenants: async () => [TENANTS[0]], getMyCapabilities });
+    await store.discoverTenants();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(store.isReady).toBe(false);
+    expect(store.phase).toBe("unavailable");
+    expect(store.capabilities).toEqual([]);
+    expect(store.hasCapability("task.read")).toBe(false);
+  });
+
+  it("revokes explicit denial immediately and treats capability ordering as the same projection", async () => {
+    const getMyCapabilities = vi.fn<PermissionClient["getMyCapabilities"]>()
+      .mockResolvedValueOnce(projection(TENANT_A, 1, ["task.read", "task.create"]))
+      .mockResolvedValueOnce(projection(TENANT_A, 1, ["task.create", "task.read"]))
+      .mockRejectedValue(new PermissionClientError("tenant-access-denied", 403));
+    const store = createStore({ listMyTenants: async () => [TENANTS[0]], getMyCapabilities });
+    await store.discoverTenants();
+    await store.refresh();
+    expect(store.phase).toBe("ready");
+    await store.refresh();
+    expect(store.phase).toBe("tenant-access-denied");
+    expect(store.capabilities).toEqual([]);
   });
 
   it("rejects a lower authorization revision for the same in-memory context", async () => {

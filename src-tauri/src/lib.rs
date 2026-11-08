@@ -461,6 +461,7 @@ pub fn run() {
         chat::chat_stop_local_host,
         chat::ipc::chat_bind_context_v1,
         chat::ipc::chat_bind_management_context_v1,
+        chat::ipc::chat_renew_context_v1,
         chat::ipc::chat_list_projects_v1,
         chat::ipc::chat_pick_project_v1,
         chat::ipc::workspaces::chat_workspace_catalog_v1,

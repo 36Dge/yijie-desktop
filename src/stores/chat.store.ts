@@ -491,6 +491,9 @@ export function createChatStoreDefinition(
     let controlPlaneSequence: bigint | null = null;
     let activeRead: AbortController | null = null;
     let contextExpiryTimer: ReturnType<typeof setTimeout> | null = null;
+    let contextRenewalTimer: ReturnType<typeof setTimeout> | null = null;
+    let boundTenantSelector: string | null = null;
+    let pendingRenewal: { epoch: number; promise: Promise<boolean> } | null = null;
     let approvalExpiryTimer: ReturnType<typeof setTimeout> | null = null;
     let cleanupPollTimer: ReturnType<typeof setTimeout> | null = null;
     let cleanupPollEpoch = 0;
@@ -611,6 +614,10 @@ export function createChatStoreDefinition(
       if (contextExpiryTimer !== null) {
         clearTimeout(contextExpiryTimer);
         contextExpiryTimer = null;
+      }
+      if (contextRenewalTimer !== null) {
+        clearTimeout(contextRenewalTimer);
+        contextRenewalTimer = null;
       }
     }
 
@@ -916,6 +923,8 @@ export function createChatStoreDefinition(
 
     function clearAuthority(nextPhase: ChatViewPhase): void {
       authorityEpoch += 1;
+      pendingRenewal = null;
+      boundTenantSelector = null;
       resetSubmissionState();
       const oldContext = context.value?.contextId;
       const oldSubscription = subscriptionId;
@@ -944,6 +953,55 @@ export function createChatStoreDefinition(
           clearAuthority("resync-required");
         }
       }, delay);
+      if (client.renewContext) scheduleContextRenewal(Math.max(5_000, delay - 30_000));
+    }
+
+    function scheduleContextRenewal(delay: number): void {
+      if (contextRenewalTimer !== null) clearTimeout(contextRenewalTimer);
+      contextRenewalTimer = setTimeout(() => {
+        contextRenewalTimer = null;
+        void renewAuthority();
+      }, delay);
+    }
+
+    function renewAuthority(): Promise<boolean> {
+      const bound = context.value;
+      const tenant = boundTenantSelector;
+      if (pendingRenewal?.epoch === authorityEpoch) return pendingRenewal.promise;
+      if (!bound || !tenant || !client.renewContext) return Promise.resolve(false);
+      const epoch = authorityEpoch;
+      const isCurrent = () => epoch === authorityEpoch && context.value?.contextId === bound.contextId;
+      const attempt = { epoch, promise: Promise.resolve(false) };
+      attempt.promise = (async () => {
+        try {
+          const renewed = await client.renewContext!(bound.contextId, tenant);
+          if (!isCurrent()) return false;
+          if (renewed.contextId !== bound.contextId ||
+              renewed.expiresAtEpochSeconds * 1000 <= Date.now() ||
+              [...renewed.allowedActions].sort().join("|") !== [...bound.allowedActions].sort().join("|")) {
+            throw new ChatClientError({ schemaVersion: 1, code: "chat_protocol_error", retryable: false, recovery: "rebind_context" });
+          }
+          // Updating the lease keeps the contextId, selected session, subscription,
+          // live views, drafts and DOM identity unchanged. Never replay a mutation.
+          context.value = renewed;
+          scheduleContextExpiry(renewed);
+          return true;
+        } catch (error: unknown) {
+          if (!isCurrent()) return false;
+          if (error instanceof ChatClientError && error.shape.code === "chat_temporarily_unavailable" &&
+              bound.expiresAtEpochSeconds * 1000 > Date.now()) {
+            scheduleContextRenewal(5_000);
+          } else {
+            lastErrorCode.value = error instanceof ChatClientError ? error.shape.code : "chat_protocol_error";
+            clearAuthority(phaseForError(error));
+          }
+          return false;
+        }
+      })().finally(() => {
+        if (pendingRenewal === attempt) pendingRenewal = null;
+      });
+      pendingRenewal = attempt;
+      return attempt.promise;
     }
 
     function startRead(): { epoch: number; controller: AbortController } {
@@ -2075,6 +2133,7 @@ export function createChatStoreDefinition(
 
     async function bind(tenantSelector: string, managementOnly = false): Promise<void> {
       clearAuthority("binding");
+      boundTenantSelector = tenantSelector;
       const bindEpoch = authorityEpoch;
       lastErrorCode.value = null;
       lastBindFailureStage.value = null;
@@ -4443,6 +4502,7 @@ export function createChatStoreDefinition(
       reloadSessions,
       loadMoreSessions,
       refreshLocalReadiness,
+      renewAuthority,
       requestLocalRecovery,
       renameSelected,
       setSelectedPinned,

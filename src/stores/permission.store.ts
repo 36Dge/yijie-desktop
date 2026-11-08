@@ -34,17 +34,24 @@ export function createPermissionStoreDefinition(
     let activeController: AbortController | null = null;
     let initializationPromise: Promise<void> | null = null;
     let expiryTimer: ReturnType<typeof setTimeout> | null = null;
+    let projectionExpiryTimer: ReturnType<typeof setTimeout> | null = null;
     let expiresAtEpochMs: number | null = null;
     const lastAcceptedRevision = new Map<
       string,
       { revision: number; capabilityKey: string }
     >();
 
-    function clearExpiryTimer(): void {
+    function clearRefreshTimer(): void {
       if (expiryTimer !== null) {
         clearTimeout(expiryTimer);
         expiryTimer = null;
       }
+    }
+
+    function clearExpiryTimer(): void {
+      clearRefreshTimer();
+      if (projectionExpiryTimer !== null) clearTimeout(projectionExpiryTimer);
+      projectionExpiryTimer = null;
     }
 
     function clearProjection(): void {
@@ -64,7 +71,8 @@ export function createPermissionStoreDefinition(
         phase.value = nextPhase;
         clearProjection();
       } else {
-        clearExpiryTimer();
+        // Refresh may outlive the current projection. Its hard deadline remains armed.
+        clearRefreshTimer();
       }
       requestEpoch += 1;
       const controller = new AbortController();
@@ -94,8 +102,19 @@ export function createPermissionStoreDefinition(
         return;
       }
       activeController = null;
-      clearProjection();
       const kind = error instanceof PermissionClientError ? error.kind : "unavailable";
+      if (kind === "unavailable" && isReady.value && selectedTenantId.value !== null &&
+          expiresAtEpochMs !== null && expiresAtEpochMs > Date.now()) {
+        lastFailure.value = kind;
+        const tenant = selectedTenantId.value;
+        clearRefreshTimer();
+        expiryTimer = setTimeout(() => {
+          expiryTimer = null;
+          if (selectedTenantId.value === tenant && isReady.value) void loadTenant(tenant);
+        }, 5_000);
+        return;
+      }
+      clearProjection();
       if (kind === "aborted") {
         return;
       }
@@ -114,8 +133,16 @@ export function createPermissionStoreDefinition(
       clearExpiryTimer();
       const scheduledEpoch = requestEpoch;
       const scheduledTenant = projection.tenantId;
+      const deadline = projection.expiresAtEpochMs;
+      projectionExpiryTimer = setTimeout(() => {
+        if (selectedTenantId.value !== scheduledTenant || expiresAtEpochMs !== deadline) return;
+        // Make expiry reactive even if a provider request never completes.
+        phase.value = activeController === null ? "unavailable" : "loading";
+        lastFailure.value = activeController === null ? "unavailable" : null;
+        clearProjection();
+      }, Math.max(0, deadline - Date.now()));
       const delay = Math.max(
-        0,
+        5_000,
         projection.expiresAtEpochMs - Date.now() - PROJECTION_REFRESH_LEAD_MS,
       );
       expiryTimer = setTimeout(() => {
@@ -157,7 +184,8 @@ export function createPermissionStoreDefinition(
           return;
         }
         const previousRevision = lastAcceptedRevision.get(selected.tenantId);
-        const capabilityKey = projection.capabilities.join("\u0000");
+        const nextCapabilities = Object.freeze([...projection.capabilities].sort());
+        const capabilityKey = nextCapabilities.join("\u0000");
         if (
           previousRevision !== undefined &&
           (projection.authorizationRevision < previousRevision.revision ||
@@ -170,7 +198,6 @@ export function createPermissionStoreDefinition(
           return;
         }
 
-        const nextCapabilities = Object.freeze([...projection.capabilities]);
         lastAcceptedRevision.set(selected.tenantId, {
           revision: projection.authorizationRevision,
           capabilityKey,

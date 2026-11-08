@@ -6,6 +6,7 @@ export interface ChatAuthoritySnapshot {
   readonly tenantId: string | null;
   readonly authorizationRevision: number | null;
   readonly expiresAt: string | null;
+  readonly capabilities?: readonly string[];
   readonly canCreateTask: boolean;
   readonly canReadTask: boolean;
 }
@@ -48,15 +49,17 @@ export function createChatPermissionLifecycle(
     ) {
       return null;
     }
-    return [
+    // Lease deadlines change during ordinary renewal. Native context renewal
+    // is owned by the store and must not replace the UI's authority identity.
+    return JSON.stringify([
       snapshot.tenantId,
       snapshot.authorizationRevision,
-      snapshot.expiresAt ?? "",
+      [...(snapshot.capabilities ?? [])].sort(),
       snapshot.canCreateTask ? "create" : "",
       snapshot.canReadTask ? "read" : "",
       snapshot.canReadSchedule ? "schedule" : "",
       snapshot.canReadConnector ? "connector" : "",
-    ].join(":");
+    ]);
   }
 
   function synchronizeSnapshot(
@@ -92,6 +95,7 @@ export function createChatPermissionLifecycle(
     };
     attempt.promise = Promise.resolve().then(async () => {
       try {
+        if (current !== epoch || desiredAuthorityKey !== nextAuthorityKey) return false;
         await store.dispose();
         if (
           current !== epoch ||

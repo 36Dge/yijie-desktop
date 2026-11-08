@@ -9,6 +9,7 @@
   "x-yijie-command-names": [
     "chat_bind_context_v1",
     "chat_bind_management_context_v1",
+    "chat_renew_context_v1",
     "chat_list_projects_v1",
     "chat_pick_project_v1",
     "chat_revalidate_project_v1",
@@ -36,6 +37,7 @@
   "x-yijie-command-contracts": {
     "chat_bind_context_v1": { "request": "#/$defs/bindRequest", "response": "#/$defs/boundContextResponse" },
     "chat_bind_management_context_v1": {"request": "#/$defs/bindRequest", "response": "#/$defs/boundContextResponse"},
+    "chat_renew_context_v1": { "request": "#/$defs/renewContextRequest", "response": "#/$defs/boundContextResponse" },
     "chat_list_projects_v1": { "request": "#/$defs/emptyRequest", "response": "#/$defs/projectListResponse" },
     "chat_pick_project_v1": { "request": "#/$defs/operationOnlyRequest", "response": "#/$defs/optionalProjectResponse" },
     "chat_revalidate_project_v1": { "request": "#/$defs/projectOperationRequest", "response": "#/$defs/projectResponse" },
@@ -175,6 +177,13 @@
         "requestId": { "$ref": "#/$defs/uuid" },
         "data": {}
       }
+    },
+    "renewContextRequest": {
+      "description": "Renew an unexpired context using a fresh trusted native projection. Identity, authorization revision and the complete capability set must remain identical. Preserves contextId and subscriptions; cannot revive an expired or replaced context. See docs/chat-authority-renewal.md.",
+      "allOf": [
+        { "$ref": "#/$defs/commandRequest" },
+        { "properties": { "payload": { "$ref": "#/$defs/bindPayload" } } }
+      ]
     },
     "bindRequest": {
       "type": "object",

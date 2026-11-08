@@ -90,7 +90,7 @@ describe("Chat permission lifecycle", () => {
     expect(store.bind).toHaveBeenCalledOnce();
   });
 
-  it("renews the Chat context when the permission projection expiry advances", async () => {
+  it("keeps the Chat UI bound when only the permission lease advances", async () => {
     const store = {
       dispose: vi.fn(async () => undefined),
       bind: vi.fn(async () => undefined),
@@ -100,6 +100,17 @@ describe("Chat permission lifecycle", () => {
     await lifecycle.synchronize(accepted);
     await lifecycle.synchronize({ ...accepted, expiresAt: "2026-08-24T00:04:00Z" });
 
+    expect(store.dispose).toHaveBeenCalledTimes(1);
+    expect(store.bind).toHaveBeenCalledTimes(1);
+  });
+
+  it("compares the complete capability set and ignores its ordering", async () => {
+    const store = { dispose: vi.fn(async () => undefined), bind: vi.fn(async () => undefined) };
+    const lifecycle = createChatPermissionLifecycle(store, true);
+    await lifecycle.synchronize({ ...accepted, capabilities: ["task.read", "workspace.use"] });
+    await lifecycle.synchronize({ ...accepted, capabilities: ["workspace.use", "task.read"] });
+    expect(store.bind).toHaveBeenCalledTimes(1);
+    await lifecycle.synchronize({ ...accepted, capabilities: ["task.read"] });
     expect(store.dispose).toHaveBeenCalledTimes(2);
     expect(store.bind).toHaveBeenCalledTimes(2);
   });
@@ -130,6 +141,7 @@ describe("Chat permission lifecycle", () => {
     }, true);
 
     const old = lifecycle.synchronize(accepted);
+    await Promise.resolve();
     const nextTenant = "019c1a00-0000-7000-8000-000000000003";
     await lifecycle.synchronize({ ...accepted, tenantId: nextTenant, authorizationRevision: 8 });
     releaseFirst();

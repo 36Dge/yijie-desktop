@@ -116,6 +116,7 @@ export interface ChatClient {
 
   bindContext(tenantSelector: string): Promise<BoundChatContext>;
   bindManagementContext?(tenantSelector: string): Promise<BoundChatContext>;
+  renewContext?(contextId: string, tenantSelector: string): Promise<BoundChatContext>;
   listProjects(contextId: string, signal?: AbortSignal): Promise<readonly ChatProject[]>;
   pickProject(contextId: string, operationId: string): Promise<ChatProject | null>;
   revalidateProject(contextId: string, projectId: string, operationId: string): Promise<ChatProject>;
@@ -541,6 +542,10 @@ export function createChatClient(transport: ChatClientTransport = productionTran
   }
 
   return {
+    renewContext(contextId, tenantSelector) {
+      const envelope = operationEnvelope(contextId, { tenantSelector });
+      return run("chat_renew_context_v1", envelope.request, parseBoundContextResponse);
+    },
     bindManagementContext(tenantSelector) {
       const id = requestId();
       return run("chat_bind_management_context_v1",

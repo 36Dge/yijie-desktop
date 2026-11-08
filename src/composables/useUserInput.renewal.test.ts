@@ -18,7 +18,7 @@ beforeEach(() => {
   vi.mocked(userInputClient.snapshot).mockResolvedValue({ enabled: true, generation, requests: [pending] });
 });
 afterEach(() => vi.useRealTimers());
-function harness() {
+function harness(attached = false) {
   const context = ref<string | null>("context-one"), session = ref("session-one"), canAnswer = ref(true);
   const scope = ref<{ key: string; expiresAt: number } | null>({ key: "native-local-tenant:7:read,create", expiresAt: Date.now() + 300_000 });
   let model!: ReturnType<typeof useUserInput>;
@@ -26,11 +26,11 @@ function harness() {
     model = useUserInput(() => context.value, () => session.value, () => canAnswer.value, () => scope.value);
     return () => model.current.value && ["pending", "submitting"].includes(model.current.value.state)
       ? h(ChatUserInput, { key: model.formKey.value, request: model.current.value, disabled: model.blocked.value, submitting: model.submitting.value, revalidating: model.revalidating.value, onInteract: model.touch, onAnswer: model.answer }) : null;
-  } }));
+  } }), attached ? { attachTo: document.body } : {});
   return { context, session, canAnswer, scope, wrapper, get model() { return model; } };
 }
-describe("question drafts across ordinary Native context renewal", () => {
-  it("keeps a masked draft for the same verified question after a normal context replacement", async () => {
+describe("question drafts across explicit Native context replacement", () => {
+  it("keeps a masked draft for the same verified question after an explicit context replacement", async () => {
     const t = harness(); await flushPromises();
     await t.wrapper.get("input").setValue("ordinary synthetic note");
     await t.wrapper.get(".user-input__secret button").trigger("click");
@@ -55,7 +55,7 @@ function deferred<T>() {
 async function fill(t: ReturnType<typeof harness>) {
   await flushPromises(); await t.wrapper.get("input").setValue("ordinary private draft");
 }
-async function renew(t: ReturnType<typeof harness>) {
+async function replaceContext(t: ReturnType<typeof harness>) {
   t.context.value = null; t.canAnswer.value = false; await flushPromises();
   t.canAnswer.value = true; t.context.value = "renewed-context"; await flushPromises();
 }
@@ -82,7 +82,7 @@ describe("question draft safety during revalidation", () => {
     if (changed === "question") row.questions[0]!.question = "另一个普通问题";
     if (changed === "secret flag") row.questions[0]!.isSecret = false;
     vi.mocked(userInputClient.snapshot).mockResolvedValue({ enabled: true, generation: nextGeneration, requests: [row] });
-    await renew(t);
+    await replaceContext(t);
     expect((t.wrapper.get("input, textarea").element as HTMLInputElement).value).toBe("");
     expect(userInputClient.answer).not.toHaveBeenCalled(); t.wrapper.unmount();
   });
@@ -90,7 +90,7 @@ describe("question draft safety during revalidation", () => {
     const t = harness(); await fill(t);
     vi.mocked(userInputClient.snapshot).mockResolvedValue({ enabled: true, generation, requests: [] });
     vi.mocked(userInputClient.read).mockResolvedValue({ ...pending, state: "cancelled", questions: [] });
-    await renew(t);
+    await replaceContext(t);
     expect(t.wrapper.find("input").exists()).toBe(false);
     expect(t.model.notice.value).toBe("问题已结束");
     expect(userInputClient.answer).not.toHaveBeenCalled(); t.wrapper.unmount();
@@ -99,7 +99,7 @@ describe("question draft safety during revalidation", () => {
     const t = harness(); await fill(t);
     const read = deferred<Awaited<ReturnType<typeof userInputClient.snapshot>>>();
     vi.mocked(userInputClient.snapshot).mockReturnValueOnce(read.promise);
-    await renew(t);
+    await replaceContext(t);
     expect(t.wrapper.find("input").exists()).toBe(false);
     expect(t.model.blocked.value).toBe(true);
     await t.model.answer({ note: { answers: ["ordinary value"] } });
@@ -112,7 +112,7 @@ describe("question draft safety during revalidation", () => {
   it("discards input on a Native permission rejection and does not restore it on retry", async () => {
     const t = harness(); await fill(t);
     vi.mocked(userInputClient.snapshot).mockRejectedValueOnce(new ChatClientError({ schemaVersion: 1, code: "chat_context_invalid", retryable: false, recovery: "resync" }));
-    await renew(t);
+    await replaceContext(t);
     expect(t.wrapper.find("input").exists()).toBe(false);
     await t.model.refresh();
     expect((t.wrapper.get("input").element as HTMLInputElement).value).toBe("");
@@ -139,7 +139,7 @@ describe("question draft safety during revalidation", () => {
     t.scope.value = { ...t.scope.value!, expiresAt: Date.now() + 1_000 };
     const read = deferred<Awaited<ReturnType<typeof userInputClient.snapshot>>>();
     vi.mocked(userInputClient.snapshot).mockReturnValueOnce(read.promise);
-    await renew(t); await vi.advanceTimersByTimeAsync(1_001);
+    await replaceContext(t); await vi.advanceTimersByTimeAsync(1_001);
     read.resolve({ enabled: true, generation, requests: [pending] }); await flushPromises();
     expect(t.model.current.value).toBeNull(); expect(t.wrapper.find("input").exists()).toBe(false);
     expect(userInputClient.answer).not.toHaveBeenCalled(); t.wrapper.unmount();
@@ -151,14 +151,14 @@ describe("question draft safety during revalidation", () => {
     const next = harness(); await flushPromises();
     expect((next.wrapper.get("input").element as HTMLInputElement).value).toBe(""); next.wrapper.unmount();
   });
-  it("preserves choices, freeform text and the current page during routine renewal", async () => {
+  it("preserves choices, freeform text and the current page during explicit same-authority replacement", async () => {
     const row = { ...pending, questions: [{ id: "choice", header: "颜色", question: "普通选项", options: [{ label: "蓝色", description: "普通" }, { label: "绿色", description: "普通" }] }, { id: "text", header: "备注", question: "普通文本", isOther: true }] };
     vi.mocked(userInputClient.snapshot).mockResolvedValue({ enabled: true, generation, requests: [row] });
     const t = harness(); await flushPromises();
     await t.wrapper.findAll(".user-input__option")[1]!.trigger("click");
     await t.wrapper.get(".primary").trigger("click");
     await t.wrapper.get("textarea").setValue("普通未发送文本");
-    await renew(t);
+    await replaceContext(t);
     expect((t.wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("普通未发送文本");
     await t.wrapper.get('[aria-label="上一题"]').trigger("click");
     expect(t.wrapper.findAll('.user-input__option[aria-pressed="true"]')[0]!.text()).toContain("绿色");
@@ -166,7 +166,7 @@ describe("question draft safety during revalidation", () => {
   });
 });
 
-it("preserves a draft through two real permission-store timer renewals without bypassing dispose/bind", async () => {
+it("preserves the input node, draft, selection and focus through two permission-store timer renewals without rebinding", async () => {
   setActivePinia(createPinia());
   const tenant = "10000000-0000-4000-8000-000000000021";
   const permissionClient = {
@@ -174,38 +174,45 @@ it("preserves a draft through two real permission-store timer renewals without b
     getMyCapabilities: vi.fn(async () => ({ tenantId: tenant, authorizationRevision: 7, expiresAt: new Date(Date.now() + 300_000).toISOString(), expiresAtEpochMs: Date.now() + 300_000, capabilities: ["task.read", "task.create"] as const })),
   };
   const permissions = createPermissionStoreDefinition(permissionClient, "question-renewal-projection")();
-  const t = harness();
+  const t = harness(true);
   let bound = 0;
   const boundary = {
     dispose: vi.fn(async () => { t.context.value = null; t.canAnswer.value = false; }),
     bind: vi.fn(async () => { t.canAnswer.value = true; t.context.value = `native-context-${++bound}`; }),
   };
   const lifecycle = createChatPermissionLifecycle(boundary, true);
-  // Same source values and sync ordering used by App and ChatPage. Neither
-  // permission refresh nor Chat dispose/bind is replaced by draft retention.
+  // Same source values and sync ordering used by App and ChatPage. Updating
+  // the permission lease must not enter the explicit-rebind retention path.
   const stop = watch(() => [permissions.phase, permissions.selectedTenantId, permissions.authorizationRevision, permissions.expiresAt, permissions.capabilities] as const, () => {
     t.scope.value = userInputDraftScope({ ready: permissions.isReady, tenantId: permissions.selectedTenantId, authorizationRevision: permissions.authorizationRevision, expiresAt: permissions.expiresAt, capabilities: permissions.capabilities });
-    void lifecycle.synchronize({ ready: permissions.isReady, tenantId: permissions.selectedTenantId, authorizationRevision: permissions.authorizationRevision, expiresAt: permissions.expiresAt, canCreateTask: permissions.hasCapability("task.create"), canReadTask: permissions.hasCapability("task.read") });
+    void lifecycle.synchronize({ ready: permissions.isReady, tenantId: permissions.selectedTenantId, authorizationRevision: permissions.authorizationRevision, expiresAt: permissions.expiresAt, capabilities: permissions.capabilities, canCreateTask: permissions.hasCapability("task.create"), canReadTask: permissions.hasCapability("task.read") });
   }, { immediate: true, flush: "sync" });
   await permissions.ensureInitialized(); await fill(t);
   const before = boundary.bind.mock.calls.length;
+  const input = t.wrapper.get("input").element as HTMLInputElement;
+  input.focus(); input.setSelectionRange(2, 7);
   await vi.advanceTimersByTimeAsync(270_001); await flushPromises();
-  expect(boundary.bind.mock.calls.length).toBe(before + 1);
+  expect(boundary.bind.mock.calls.length).toBe(before);
   expect((t.wrapper.get("input").element as HTMLInputElement).value).toBe("ordinary private draft");
   await vi.advanceTimersByTimeAsync(270_001); await flushPromises();
-  expect(boundary.bind.mock.calls.length).toBe(before + 2);
+  expect(boundary.bind.mock.calls.length).toBe(before);
   expect(boundary.dispose).toHaveBeenCalledTimes(boundary.bind.mock.calls.length);
   expect((t.wrapper.get("input").element as HTMLInputElement).value).toBe("ordinary private draft");
+  expect(t.wrapper.get("input").element).toBe(input);
+  expect(document.activeElement).toBe(input);
+  expect(input.selectionStart).toBe(2);
+  expect(input.selectionEnd).toBe(7);
+  expect(t.model.revalidating.value).toBe(false);
   expect(userInputClient.answer).not.toHaveBeenCalled();
   stop(); t.wrapper.unmount(); await lifecycle.stop(); permissions.$dispose();
 });
 
-it("ignores an old context proof after another renewal begins", async () => {
+it("ignores an old context proof after another context replacement begins", async () => {
   const t = harness(); await fill(t);
   const older = deferred<Awaited<ReturnType<typeof userInputClient.snapshot>>>();
   const newer = deferred<Awaited<ReturnType<typeof userInputClient.snapshot>>>();
   vi.mocked(userInputClient.snapshot).mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
-  await renew(t);
+  await replaceContext(t);
   t.context.value = "third-context"; await flushPromises();
   older.resolve({ enabled: true, generation, requests: [pending] }); await flushPromises();
   expect(t.model.blocked.value).toBe(true); expect(t.wrapper.find("input").exists()).toBe(false);

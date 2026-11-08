@@ -4904,9 +4904,10 @@ mod tests {
         }
     }
 
-    const COMMAND_NAMES: [&str; 25] = [
+    const COMMAND_NAMES: [&str; 26] = [
         "chat_bind_context_v1",
         "chat_bind_management_context_v1",
+        "chat_renew_context_v1",
         "chat_list_projects_v1",
         "chat_pick_project_v1",
         "chat_revalidate_project_v1",
@@ -7612,6 +7613,70 @@ pub(crate) struct ResyncDtoV6 {
     history: Value,
     cleanup: Option<CleanupStatusDto>,
     pending_approval_snapshot: Value,
+}
+
+/// A lease refresh leaves the current observation and UI generation intact.
+/// The renderer supplies no identity, capability, revision or expiry authority.
+#[tauri::command]
+pub async fn chat_renew_context_v1(
+    request: Value,
+    auth_runtime: State<'_, NativeAuthRuntime>,
+    chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<CommandResponse<BoundContextDto>, ChatIpcError> {
+    let request: CommandRequest<BindPayload> = decode_request(request)?;
+    if request.payload.tenant_selector.len() != 36
+        || Uuid::parse_str(&request.payload.tenant_selector).is_err()
+    {
+        return Err(ChatIpcError::request_invalid(Some(request.request_id)));
+    }
+    let generation = ipc_runtime.inner.bind_generation.load(Ordering::SeqCst);
+    let manager = chat_runtime
+        .authorization_manager()
+        .map_err(|e| map_chat_error(e, Some(request.request_id)))?;
+    let now = unix_seconds().map_err(|e| map_chat_error(e, Some(request.request_id)))?;
+    manager
+        .allowed_actions(request.context_id, now)
+        .map_err(|_| ChatIpcError::context_invalid(Some(request.request_id)))?;
+    let native = match auth_runtime
+        .chat_projection(&request.payload.tenant_selector, now)
+        .await
+    {
+        Ok(native) => native,
+        Err(error) => {
+            if !matches!(error, NativeProjectionError::Unavailable) {
+                let _ = manager.revoke_context(request.context_id);
+            }
+            return Err(map_native_projection_error(error, request.request_id));
+        }
+    };
+    let projection = AuthoritativeChatProjection::from_trusted_native_projection(
+        native.tenant_id,
+        native.authorization_revision,
+        native.expires_at,
+        native.capabilities,
+    )
+    .map_err(|e| map_chat_error(e, Some(request.request_id)))?;
+    let _guard = ipc_runtime.inner.bind_gate.lock().await;
+    if !ipc_runtime.binding_is_current(generation) {
+        return Err(ChatIpcError::request_cancelled(Some(request.request_id)));
+    }
+    // Never extend a lease that expired while the provider or bind gate was awaited.
+    let now = unix_seconds().map_err(|e| map_chat_error(e, Some(request.request_id)))?;
+    let context = manager
+        .renew(request.context_id, projection, now)
+        .map_err(|e| map_chat_error(e, Some(request.request_id)))?;
+    let allowed_actions = manager
+        .allowed_actions(context.context_id, now)
+        .map_err(|_| ChatIpcError::context_invalid(Some(request.request_id)))?;
+    Ok(CommandResponse::new(
+        request.request_id,
+        BoundContextDto {
+            context_id: context.context_id.to_string(),
+            expires_at_epoch_seconds: context.expires_at,
+            allowed_actions,
+        },
+    ))
 }
 
 /// Shared UI authority without constructing a Host, resuming sessions or dispatching.
@@ -10460,12 +10525,18 @@ pub async fn chat_context_window_v1(
     request: Value,
     chat_runtime: State<'_, ChatRuntime>,
 ) -> Result<CommandResponse<super::context_window_generated::ContextWindowSnapshot>, ChatIpcError> {
-    let r: CommandRequest<super::context_window_generated::ContextWindowQuery> = decode_request(request)?;
+    let r: CommandRequest<super::context_window_generated::ContextWindowQuery> =
+        decode_request(request)?;
     require_runtime_permissions(r.request_id)?;
-    r.payload.validate().map_err(|_| map_chat_error(ChatError::InvalidInput, Some(r.request_id)))?;
-    let session = Uuid::parse_str(&r.payload.session_id).map_err(|_| map_chat_error(ChatError::InvalidInput, Some(r.request_id)))?;
+    r.payload
+        .validate()
+        .map_err(|_| map_chat_error(ChatError::InvalidInput, Some(r.request_id)))?;
+    let session = Uuid::parse_str(&r.payload.session_id)
+        .map_err(|_| map_chat_error(ChatError::InvalidInput, Some(r.request_id)))?;
     let (_, app, _) = applications(&chat_runtime, r.request_id).await?;
-    let value = app.context_window(r.context_id, session, r.payload.include_history).await
+    let value = app
+        .context_window(r.context_id, session, r.payload.include_history)
+        .await
         .map_err(|e| map_chat_error(e, Some(r.request_id)))?;
     Ok(CommandResponse::new(r.request_id, value))
 }

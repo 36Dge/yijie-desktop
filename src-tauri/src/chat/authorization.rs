@@ -392,6 +392,72 @@ impl ChatAuthorizationManager {
         })
     }
 
+    /// Refresh only the lease of the current, still-valid authority. This never
+    /// binds a new identity or revives a context removed by expiry/logout/bind.
+    pub(crate) fn renew(
+        &self,
+        context_id: Uuid,
+        projection: AuthoritativeChatProjection,
+        now: i64,
+    ) -> Result<ChatAuthorizationContext, ChatError> {
+        if now < 0 || projection.tenant_id != self.inner.tenant_id {
+            return Err(ChatError::ScopeDenied);
+        }
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .map_err(|_| ChatError::ScopeDenied)?;
+        let record = state
+            .contexts
+            .get(&context_id)
+            .ok_or(ChatError::ScopeDenied)?;
+        if record.process_epoch != self.inner.process_epoch
+            || record.expires_at <= now
+            || projection.expires_at <= now
+            || record.authorization_revision != state.highest_revision
+            || projection.authorization_revision != record.authorization_revision
+            || projection.capabilities != record.capabilities
+        {
+            state.contexts.remove(&context_id);
+            if projection.authorization_revision > state.highest_revision {
+                state.highest_revision = projection.authorization_revision;
+                state.highest_capabilities = Some(projection.capabilities);
+            }
+            if let Some(control) = state.market_control.take() {
+                control.retire();
+            }
+            return Err(ChatError::ScopeDenied);
+        }
+        let expires_at = projection.expires_at.min(
+            now.checked_add(MAX_CONTEXT_LIFETIME_SECONDS)
+                .ok_or(ChatError::ScopeDenied)?,
+        );
+        state
+            .contexts
+            .get_mut(&context_id)
+            .ok_or(ChatError::ScopeDenied)?
+            .expires_at = expires_at;
+        Ok(ChatAuthorizationContext {
+            context_id,
+            expires_at,
+        })
+    }
+
+    pub(crate) fn revoke_context(&self, context_id: Uuid) -> Result<(), ChatError> {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .map_err(|_| ChatError::ScopeDenied)?;
+        if state.contexts.remove(&context_id).is_some() {
+            if let Some(control) = state.market_control.take() {
+                control.retire();
+            }
+        }
+        Ok(())
+    }
+
     pub fn authorize(
         &self,
         context_id: Uuid,
@@ -700,6 +766,81 @@ mod tests {
             ],
         )
         .unwrap()
+    }
+
+    #[test]
+    fn renewal_preserves_identity_and_extends_only_the_trusted_lease() {
+        let tenant = Uuid::now_v7();
+        let manager = ChatAuthorizationManager::new(&scope(tenant)).unwrap();
+        let bound = manager.bind(projection(tenant, 7, 310), 10).unwrap();
+        let renewed = manager
+            .renew(bound.context_id, projection(tenant, 7, 900), 280)
+            .unwrap();
+        assert_eq!(renewed.context_id, bound.context_id);
+        assert_eq!(renewed.expires_at, 580);
+        manager
+            .authorize(bound.context_id, ChatAction::SubmitTurn, 311)
+            .unwrap();
+        let limited = manager
+            .renew(bound.context_id, projection(tenant, 7, 550), 300)
+            .unwrap();
+        assert_eq!(limited.expires_at, 550);
+        assert!(manager
+            .authorize(bound.context_id, ChatAction::ReadSessions, 550)
+            .is_err());
+    }
+
+    #[test]
+    fn renewal_never_revives_expired_replaced_or_signed_out_contexts() {
+        let tenant = Uuid::now_v7();
+        let manager = ChatAuthorizationManager::new(&scope(tenant)).unwrap();
+        let expired = manager.bind(projection(tenant, 7, 310), 10).unwrap();
+        assert!(manager
+            .renew(expired.context_id, projection(tenant, 7, 610), 310)
+            .is_err());
+        let old = manager.bind(projection(tenant, 7, 620), 320).unwrap();
+        let current = manager.bind(projection(tenant, 7, 621), 321).unwrap();
+        assert!(manager
+            .renew(old.context_id, projection(tenant, 7, 650), 350)
+            .is_err());
+        manager
+            .authorize(current.context_id, ChatAction::ReadSessions, 351)
+            .unwrap();
+        // A late failure for the old lease must not revoke the current lease.
+        manager.revoke_context(old.context_id).unwrap();
+        manager
+            .authorize(current.context_id, ChatAction::ReadSessions, 351)
+            .unwrap();
+        manager.invalidate_all().unwrap();
+        assert!(manager
+            .renew(current.context_id, projection(tenant, 7, 660), 360)
+            .is_err());
+    }
+
+    #[test]
+    fn renewal_revokes_changed_authority_and_requires_an_explicit_bind() {
+        let tenant = Uuid::now_v7();
+        let manager = ChatAuthorizationManager::new(&scope(tenant)).unwrap();
+        let bound = manager.bind(projection(tenant, 7, 310), 10).unwrap();
+        assert!(manager
+            .renew(bound.context_id, projection(tenant, 8, 500), 200)
+            .is_err());
+        assert!(manager
+            .authorize(bound.context_id, ChatAction::ReadSessions, 201)
+            .is_err());
+        assert!(manager.bind(projection(tenant, 7, 501), 201).is_err());
+        let next = manager.bind(projection(tenant, 8, 510), 210).unwrap();
+        let changed = AuthoritativeChatProjection::from_trusted_native_projection(
+            tenant,
+            8,
+            520,
+            ["task.read".to_owned()],
+        )
+        .unwrap();
+        assert!(manager.renew(next.context_id, changed, 220).is_err());
+        assert!(manager
+            .authorize(next.context_id, ChatAction::ReadSessions, 221)
+            .is_err());
     }
 
     #[test]
