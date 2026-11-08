@@ -1313,7 +1313,7 @@ describe("FEAT-126 ChatPage", () => {
     expect(picker.props("createOpen")).toBe(false);
     expect(picker.props("selectedProjectId")).toBe(SECOND_PROJECT.projectId);
     expect(store.projects).toContainEqual(SECOND_PROJECT);
-    expect(wrapper.get(".workspace-trigger").attributes("data-yj-tooltip")).toBe("/Users/example/Yijie/Workspaces/Second Synthetic Workspace");
+    expect(wrapper.get(".workspace-trigger").attributes("data-yj-tooltip")).toBeUndefined();
     const createSession = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
     await wrapper.get("textarea").setValue("使用新建空间");
     await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();

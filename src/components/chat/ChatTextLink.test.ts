@@ -109,6 +109,31 @@ describe("conversation output file links", () => {
     ]);
     expect(wrapper.get("pre").text()).toBe("/work/例子.html");
   });
+  it("keeps selected file text without opening and preserves click and keyboard activation", async () => {
+    const { wrapper, open } = renderFile(source);
+    const link = wrapper.get('[role="link"]');
+    const selection = document.getSelection()!;
+    const range = document.createRange();
+    range.selectNodeContents(link.get("span").element);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    try {
+      await link.trigger("pointerdown", { button: 0, clientX: 10, clientY: 10 });
+      await link.trigger("click", { detail: 1, clientX: 100, clientY: 10 });
+      expect(selection.toString()).toBe("《杭州旅游介绍 (初稿).md》");
+      expect(open).not.toHaveBeenCalled();
+      await link.trigger("pointerdown", { button: 0, clientX: 100, clientY: 10 });
+      await link.trigger("click", { detail: 1, clientX: 100, clientY: 10 });
+      expect(open).toHaveBeenCalledTimes(1);
+      await link.trigger("click", { detail: 0 });
+      expect(open).toHaveBeenCalledTimes(2);
+      selection.removeAllRanges();
+      await link.trigger("click", { detail: 1 });
+      expect(open).toHaveBeenCalledTimes(3);
+    } finally {
+      selection.removeAllRanges();
+    }
+  });
   it("activates a streamed bold output only after the destination closes", async () => {
     const { wrapper } = renderFile("**[指南](file:///Users/example/Desk", true);
     expect(wrapper.text()).toBe("指南");

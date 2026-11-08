@@ -422,6 +422,97 @@ mod tests {
             cursor: None,
         }
     }
+
+    // Optional current-task capture replay. Reads only the explicitly supplied
+    // real Runtime/Host evidence; never opens the user's database or calls a model.
+    #[test]
+    #[ignore = "requires an explicitly selected real-provider capture"]
+    fn context_window_real_native_frames_preserve_context_identity() {
+        let input =
+            std::env::var("YIJIE_CONTEXT_WINDOW_CAPTURE").expect("real-provider capture required");
+        let path = std::path::Path::new(&input);
+        assert!(path.is_absolute());
+        let capture: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let observations = capture["observations"].as_array().unwrap();
+        let started = observations
+            .iter()
+            .find(|value| {
+                value["method"] == "item/started"
+                    && value["source"]["item"]["type"] == "contextCompaction"
+            })
+            .unwrap();
+        let completed = observations
+            .iter()
+            .find(|value| {
+                value["method"] == "item/completed"
+                    && value["source"]["item"]["type"] == "contextCompaction"
+            })
+            .unwrap();
+        let item_id = started["source"]["item"]["id"].as_str().unwrap();
+        let runtime_turn_id = started["source"]["turnId"].as_str().unwrap();
+        let events: Vec<NativeEvent> =
+            serde_json::from_value(capture["native_events"].clone()).unwrap();
+        let first = events
+            .iter()
+            .position(|event| event.payload.native.turn_id.as_deref() == Some(runtime_turn_id))
+            .unwrap();
+        let last = events
+            .iter()
+            .rposition(|event| event.payload.native.turn_id.as_deref() == Some(runtime_turn_id))
+            .unwrap();
+        let initial = &events[first];
+        let context = ActiveTurnContext {
+            session_id: Uuid::now_v7(),
+            task_id: Uuid::parse_str(&initial.task_id).unwrap(),
+            turn_id: Uuid::now_v7(),
+            turn_operation_id: Uuid::now_v7(),
+            agent_session_id: Uuid::parse_str(&initial.agent_session_id).unwrap(),
+            codex_thread_id: Uuid::parse_str(&initial.codex_thread_id).unwrap(),
+            runtime_turn_id: Uuid::parse_str(runtime_turn_id).unwrap(),
+            assistant_text: String::new(),
+            cursor: None,
+        };
+        let mut buffer = NativeDisplayBuffer::new(context, None).unwrap();
+        let mut frames = Vec::new();
+        for event in &events[first..=last] {
+            buffer.observe(event).unwrap();
+            let n = &event.payload.native;
+            if n.item.as_ref().is_some_and(|item| item.id == item_id)
+                && matches!(n.method.as_str(), "item/started" | "item/completed")
+            {
+                let observation = if n.method == "item/started" {
+                    started
+                } else {
+                    completed
+                };
+                frames.push(serde_json::json!({"view": buffer.view, "snapshot": observation["snapshot"], "method": n.method}));
+            }
+        }
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[0]["snapshot"]["sample"], serde_json::Value::Null);
+        assert_eq!(
+            frames[0]["snapshot"]["compactions"][0]["state"],
+            "in_progress"
+        );
+        assert_eq!(
+            frames[1]["snapshot"]["compactions"][0]["state"],
+            "completed"
+        );
+        assert_eq!(
+            frames[0]["view"]["runtimeThreadId"],
+            frames[1]["view"]["runtimeThreadId"]
+        );
+        assert_eq!(
+            frames[0]["view"]["runtimeTurnId"],
+            frames[1]["view"]["runtimeTurnId"]
+        );
+        std::fs::write(
+            path.with_file_name("native-frames.json"),
+            serde_json::to_vec_pretty(&frames).unwrap(),
+        )
+        .unwrap();
+    }
     fn event(sequence: i64, method: &str, payload: serde_json::Value) -> NativeEvent {
         let c = context();
         let mut n = serde_json::json!({"source":"runtime_notification","method":method,"threadId":c.codex_thread_id,"turnId":c.runtime_turn_id,"availability":"available"});

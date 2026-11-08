@@ -40,7 +40,16 @@ export interface NativeDisplayItem {
 }
 export interface NativeItem {
   id: string;
-  type: "userMessage" | "agentMessage" | "reasoning" | "commandExecution" | "mcpToolCall" | "webSearch" | "unknown";
+  type:
+    | "userMessage"
+    | "agentMessage"
+    | "reasoning"
+    | "commandExecution"
+    | "mcpToolCall"
+    | "webSearch"
+    | "fileChange"
+    | "subAgentActivity"
+    | "unknown";
   clientId?: string | null;
   text?: string;
   phase?: ("commentary" | "final_answer") | null;

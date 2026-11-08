@@ -17,6 +17,23 @@ function fixture(terminal=false) {
 }
 
 describe("native Tool display",()=>{
+  it("shows native file changes and child activity without inventing an MCP result or child completion", async()=>{
+    for (const raw of [
+      traceItem("patch169", "fileChange", {status:"completed",toolLabel:"修改文件",text:"新增 note.txt",outputText:"+ordinary note"}),
+      traceItem("spawn169", "subAgentActivity", {toolLabel:"启动子任务",text:"启动子任务 /root/report"}),
+    ]) {
+      const original=JSON.stringify(raw);const item=traceTurn([raw]).items[0]!;
+      if(item.execution?.kind!=="tool"||!("native" in item.execution))throw new Error("native operation missing");
+      const wrapper=mount(ChatNativeToolItem,{props:{item,execution:item.execution}});
+      const button=wrapper.get("button.chat-timeline-item-shell__disclosure");
+      if(button.attributes("aria-expanded")!=="true")await button.trigger("click");
+      expect(wrapper.text()).toContain(raw.text);
+      expect(wrapper.text()).not.toContain("工具身份信息不完整");
+      expect(wrapper.text()).not.toContain("服务返回文本");
+      if(raw.type==="subAgentActivity") {expect(wrapper.text()).toContain("已记录");expect(wrapper.text()).not.toContain("子任务已完成");}
+      expect(JSON.stringify(raw)).toBe(original);wrapper.unmount();
+    }
+  });
   it("shows a readable broker tool name without contradicting a real failed status or rewriting facts", async()=>{
     const raw=traceItem("fetch", "mcpToolCall", {status:"failed",availability:"partial",toolLabel:"yijie_market / kimi_web_fetch",mcp:{server:"yijie_market",tool:"kimi_web_fetch",resultKind:"text",texts:[{index:0,text:"普通失败说明"}],diagnostics:["content_truncated"]}});
     const before=JSON.stringify(raw); const item=traceTurn([raw]).items[0]!;

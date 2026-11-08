@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, ref, watch } from "vue";
 import type { ExpertShowcase } from "../../domain/expert-showcase";
 import YjIcon from "../yijie/YjIcon.vue";
@@ -24,16 +23,16 @@ watch(() => props.expert.iconUrl, () => { imageFailed.value = false; });
         <YjIcon v-else name="user" size="xl" :stroke-width="1.5" />
       </span>
       <span class="expert-showcase-card__intro">
-        <YjTooltip :text="expert.name"><span class="expert-showcase-card__name" >{{ expert.name }}</span></YjTooltip>
-        <YjTooltip :text="expert.description"><span class="expert-showcase-card__description" >{{ expert.description }}</span></YjTooltip>
+        <span class="expert-showcase-card__name" >{{ expert.name }}</span>
+        <span class="expert-showcase-card__description" >{{ expert.description }}</span>
       </span>
     </span>
     <span class="expert-showcase-card__tags">
-      <YjTooltip v-for="tag in visibleTags" :key="tag" :text="tag"><span   class="expert-showcase-card__tag" >{{ tag }}</span></YjTooltip>
+      <span v-for="tag in visibleTags" :key="tag"   class="expert-showcase-card__tag" >{{ tag }}</span>
     </span>
     <span class="expert-showcase-card__footer">
       <span class="expert-showcase-card__source">
-        <YjTooltip :text="expert.author ?? undefined"><span class="expert-showcase-card__author" >{{ expert.author ?? '专家资料' }}</span></YjTooltip>
+        <span class="expert-showcase-card__author" >{{ expert.author ?? '专家资料' }}</span>
         <span class="expert-showcase-card__preview">展示</span>
       </span>
       <span class="expert-showcase-card__view" aria-hidden="true">查看详情<YjIcon name="arrowUpRight" size="xs" /></span>

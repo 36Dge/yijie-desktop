@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, ref, useId, watch } from "vue";
 import { webSearchQueryTitle } from "../../domain/web-search-presentation";
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
@@ -26,7 +25,6 @@ const label = computed(() => {
 });
 // Sources belong to the native activity, not to individual queries. Keep batch
 // queries together rather than inventing a per-query result association.
-const originalQueries = computed(() => props.item.webSearch?.queries.join("\n") ?? "");
 const detail = computed(() => {
   const search = props.item.webSearch;
   return search?.action === "search" ? webSearchQueryTitle(search.queries)
@@ -53,7 +51,7 @@ watch(() => props.item.identity, () => { expanded.value = false; });
       :aria-label="`${label}${detail ? ` ${detail}` : ''}，${status}，${expanded ? '收起' : '展开'}`" @click="toggle">
       <YjIcon class="chat-web-search__globe" name="skillCrossBorderSelection" size="xs" :stroke-width="1.5" />
       <span class="chat-web-search__label">{{ label }}</span>
-      <YjTooltip v-if="detail" :text="originalQueries || detail"><span  class="chat-web-search__query" >{{ detail }}</span></YjTooltip>
+      <span v-if="detail"  class="chat-web-search__query" >{{ detail }}</span>
       <YjIcon class="chat-web-search__chevron" :name="expanded ? 'chevronDown' : 'chevronRight'"
         size="xs" :stroke-width="1.5" />
     </button>

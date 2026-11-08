@@ -68,3 +68,30 @@ FEAT-167 用户同时明确撤销旧数据兼容要求。首次切换需显式�
 `python3 -B scripts/reset-trace-v6-data.py --apply`（默认不带参数只列清单）；仅在所有易界
 进程正常停止后清理固定会话库及独立 Runtime 历史，保留凭据、配置、技能和工作空间文件。
 成功产生本地重置记录后才允许新格式客户端启动，不进行旧数据迁移。该命令不可当作日常启动步骤。
+
+## 原生问答与上下文工具（2026-11-08 本地候选）
+
+在原四组 native-tools 基础上，固定开发入口使用配对的 interaction-tools 候选：
+`YIJIE_FEAT169_INTERACTION_TOOLS=true` 与对应 Runtime/Host/生成类型/renderer 开关共同核验。
+`interaction-tools-build-candidate.mjs --freeze` 只记录已审本地来源，不是发布或验收。
+显式传 false 可选择原四组 Runtime；必须先正常结束当前任务并退出 App，再核验匹配来源重开，
+不在活跃问答中切换、不恢复旧待答请求。日常 Homes、数据格式和权限机制不变。
+
+问题卡只处理原生问答：多题、选项/自由输入、逐题跳过，X 关闭并跳过整组。停止任务使用原有停止入口。
+敏感输入默认遮罩、可显隐；提交/切换会话清除本地敏感草稿，不进入持久聊天草稿。
+答案仍提供给模型并由原生会话保存；平台凭据配置保持原连接器入口。
+可选超时由 Host 协调，交互后暂停；结果未知时只读原回执，不自动重发。
+
+
+## 原生工具搜索（FEAT-170，2026-11-08）
+
+当前原开发入口在interaction工具配对范围内默认启用YIJIE_FEAT170_TOOL_SEARCH=true；仅普通Kimi根聊天的有效MCP目录参与发现。默认模型目录及MiniMax保持关闭，无新搜索页面/IPC/capability，已有审批和结果展示不变。
+
+原生变更须先正常退出。临时停用可在同一入口设置YIJIE_FEAT170_TOOL_SEARCH=false；仍选择tool-search兼容Runtime，由Host为普通线程恢复基线目录，不自动退回旧reader。内部YIJIE_FEAT170_TOOL_SEARCH_RUNTIME由canonical launcher根据interaction配对推导，不作为用户任意来源选择器。
+
+新Runtime来源锁、原interaction构建回执和tool-search构建回执均须匹配。不要为修复来源漂移删除日常Home或改写记录。当前Runtime源fac52ad79cc7e0a379fc597a7ecfcee573205d38a60c9d0ed3a2e96871ab0f45；完整证据见元仓FEAT-170。完整原生GUI内的检索操作没有单独自动化录制，不将本机启动和分层工具验证冒称GUI E2E。
+
+
+### FEAT-170 显式桌面验收计数器
+
+`python3 -B scripts/development-client.py start-ui --tool-search-meter` 仅供已有任务级授权的原生UI验收使用。先正常退出客户端，另由验收操作者启动已有FEAT-170 Kimi-only计数器并检查原账本剩余额度；入口仅转发固定127.0.0.1:18083地址，不接受任意环境URL。计数器停止后请求失败，不回退直连；验收完正常退出App和计数器，再以普通 `pnpm client:dev` 恢复。此参数不授予付费/外部操作权限、不改变数据Homes、Runtime或审批规则。2026-11-08已完成同一原生桌面聊天的搜索、审批和真实结果链，见元仓FEAT-170的05记录；不等同整体D4。

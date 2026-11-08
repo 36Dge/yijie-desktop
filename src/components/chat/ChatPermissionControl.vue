@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, nextTick, ref, useId, watch } from "vue";
 import { NCheckbox, NModal, NPopover } from "naive-ui";
 import type { ChatPermissionState, PermissionMode } from "../../api/runtime-permission-client";
@@ -100,13 +99,11 @@ function navigate(event: KeyboardEvent): void {
   <NPopover :to="overlay ?? false" v-model:show="open" trigger="click" placement="top-start" :disabled="blocked" :show-arrow="false" raw>
     <template #trigger>
       <span class="chat-control-anchor">
-        <YjTooltip :text="blocked ? '任务运行、等待审批或同步期间不能切换权限' : `权限审批：${selected.label}，点击更改`">
-          <button ref="triggerElement" class="permission-trigger yj-control yj-control--pill" :class="{ 'is-full': state?.mode === 'full' }" type="button" :disabled="blocked" :aria-label="`权限审批：${state ? selected.label : '读取中'}`" aria-haspopup="menu" :aria-expanded="open" @keydown.down.prevent="open = !blocked" @keydown.esc="open = false">
-            <span class="permission-trigger-icon"><YjIcon :name="selected.icon" size="sm" :stroke-width="1.5" /></span>
-            <span class="permission-trigger-label">{{ saving ? '正在保存' : state ? selected.label : '读取权限' }}</span>
-            <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
-          </button>
-        </YjTooltip>
+        <button ref="triggerElement" class="permission-trigger yj-control yj-control--pill" :class="{ 'is-full': state?.mode === 'full' }" type="button" :disabled="blocked" :aria-label="`权限审批：${state ? selected.label : '读取中'}`" aria-haspopup="menu" :aria-expanded="open" @keydown.down.prevent="open = !blocked" @keydown.esc="open = false">
+          <span class="permission-trigger-icon"><YjIcon :name="selected.icon" size="sm" :stroke-width="1.5" /></span>
+          <span class="permission-trigger-label">{{ saving ? '正在保存' : state ? selected.label : '读取权限' }}</span>
+          <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
+        </button>
       </span>
     </template>
     <div ref="menuElement" class="permission-menu chat-control-menu" role="menu" aria-label="权限审批" @keydown="navigate" @keydown.esc.stop.prevent="open = false">

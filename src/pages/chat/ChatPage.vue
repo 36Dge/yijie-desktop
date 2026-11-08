@@ -17,6 +17,12 @@ import { useScheduledDraft } from "../schedules/use-scheduled-draft";
 import { queueScheduleDraftIntent, takeScheduleDraftIntent } from "../../domain/scheduled-draft-intent";
 import { usePermissionStore } from "../../stores/permission.store";
 import ChatPermissionControl from "../../components/chat/ChatPermissionControl.vue";
+import ChatUserInput from "../../components/chat/ChatUserInput.vue";
+import { useUserInput } from "../../composables/useUserInput";
+import { useContextWindow } from "../../composables/useContextWindow";
+import type { ContextWindowSnapshot } from "../../api/context-window-client";
+import { withContextWindowTimeline } from "../../domain/context-window-timeline";
+import ChatContextWindow from "../../components/chat/ChatContextWindow.vue";
 import RuntimeApprovalList from "../../components/chat/RuntimeApprovalList.vue";
 import { useRuntimePermissions } from "../../composables/useRuntimePermissions";
 import ChatModelControl from "../../components/chat/ChatModelControl.vue";
@@ -414,16 +420,17 @@ const timelineFrameProjection = createFrameBatchedProjection(
   () => !timelineSelectionActive(),
 );
 const selectConversationTimeline = createConversationTimelineSelector();
+const contextDetails = shallowRef<ContextWindowSnapshot | null>(null);
 const conversationTimeline = computed(() => {
   const sessionId = chatStore.selectedSessionId;
   return sessionId === null
     ? null
-    : measureChatRender("timeline", () => selectConversationTimeline(
+    : measureChatRender("timeline", () => withContextWindowTimeline(selectConversationTimeline(
         renderedConversationView.value,
         sessionId,
         chatStore.conversationApprovalState,
         { protectApprovalProcessContent: feat137ApprovalUiEnabled, liveTurnId: chatStore.nativeLiveTurnId },
-      ));
+      ), contextDetails.value));
 });
 const turnTiming = useChatTurnTimingDetails({
   scope: () => chatStore.context && chatStore.selectedSessionId && chatStore.hasAction("read_sessions")
@@ -509,6 +516,12 @@ const permissions = useRuntimePermissions(
   () => chatStore.selectedSessionId,
   () => expertBusy.value || isStreaming.value || composerSubmissionState.value !== "idle",
 );
+const interactionToolsEnabled = runtimePermissionsEnabled && import.meta.env.VITE_YIJIE_INTERACTION_TOOLS === "true";
+const userInput = useUserInput(
+  () => interactionToolsEnabled && !isDraftMode.value && normalPurposeReady.value && chatStore.selectedAccessMode === "live" && chatStore.hasAction("read_sessions") ? chatStore.context?.contextId ?? null : null,
+  () => routeSessionId.value ?? null,
+  () => chatStore.hasAction("submit_turn"),
+);
 const permissionCanSend = computed(() => !runtimePermissionsEnabled || (permissions.ready.value && !permissions.saving.value && !permissions.deciding.value && !permissions.approvals.value.some((r) => r.status === "pending")));
 
 const modelBusy = computed(() => expertBusy.value || isStreaming.value || composerSubmissionState.value !== "idle" || draftExecutionPending.value || permissions.busy.value || draft.writing.value || Boolean(draft.pending.value));
@@ -522,6 +535,14 @@ const models = useChatModels(() => chatStore.context?.contextId ?? null, () => r
   get: () => isNewDraftMode.value ? sharedDrafts.planProfile : sharedDrafts.newProfile,
   set: profile => { if (isNewDraftMode.value) sharedDrafts.planProfile = profile; else sharedDrafts.newProfile = profile; },
 } : undefined);
+const contextWindow = useContextWindow(
+  () => runtimePermissionsEnabled && chatStore.hasAction("read_sessions") && chatStore.selectedAccessMode === "live" ? chatStore.context?.contextId ?? null : null,
+  () => routeSessionId.value === chatStore.selectedSessionId ? routeSessionId.value : null,
+  () => models.profile.value,
+  () => models.state.value?.revision ?? null,
+  () => models.saving.value || models.loading.value || models.state.value?.state !== "ready",
+);
+watch(contextWindow.compactionSnapshot, value => { contextDetails.value = value; }, { immediate: true, flush: "sync" });
 const delivery = useChatDelivery(
   () => kimiK31Candidate && chatModelsEnabled && !isDraftMode.value && normalPurposeReady.value && chatStore.hasAction("read_sessions") ? chatStore.context?.contextId ?? null : null,
   () => routeSessionId.value,
@@ -1366,11 +1387,11 @@ onBeforeUnmount(() => {
               </template>
             </template>
             <template #item-actions="{ item }">
-              <YjTooltip v-if="item.presentation === 'user_message' && userMessageTimes[item.turnId]" :text="userMessageTimes[item.turnId]!.title"><time
+              <time v-if="item.presentation === 'user_message' && userMessageTimes[item.turnId]"
 
                 :datetime="userMessageTimes[item.turnId]!.datetime"
 
-              >{{ userMessageTimes[item.turnId]!.label }}</time></YjTooltip>
+              >{{ userMessageTimes[item.turnId]!.label }}</time>
               <ChatAnswerActions v-if="itemCopyText(item) && answerActionIds.has(item.identity)"
                 :identity="`${chatStore.context?.contextId}:${item.identity}`" :adapter="browserChatClipboardAdapter" :text="itemCopyText(item)"
                 :model-profile-id="turnModels[item.turnId]" :completed-at="nativeCompletedAt(turnTimingFacts[item.turnId])" />
@@ -1458,6 +1479,9 @@ onBeforeUnmount(() => {
     </div>
 
     <footer class="chat-workspace__composer">
+      <ChatUserInput v-if="userInput.current.value && ['pending', 'submitting'].includes(userInput.current.value.state)" :key="`${chatStore.context?.contextId}:${routeSessionId}:${userInput.current.value.request_id}`" :request="userInput.current.value" :disabled="userInput.blocked.value" :submitting="userInput.submitting.value" @interact="userInput.touch" @answer="userInput.answer" />
+      <p v-if="userInput.error.value" class="chat-workspace__composer-error" role="alert">{{ userInput.error.value }} <button type="button" :disabled="userInput.loading.value" @click="userInput.refresh">重新读取</button></p>
+      <p v-else-if="userInput.notice.value" class="chat-workspace__composer-note" role="status">{{ userInput.notice.value }} <button type="button" @click="userInput.dismissNotice">知道了</button></p>
       <RuntimeApprovalList v-if="!isDraftMode && runtimePermissionsEnabled && chatStore.selectedAccessMode === 'live'" :requests="permissions.approvals.value" :deciding="permissions.deciding.value" :connected="permissions.approvalsConnected.value && chatStore.hasAction('submit_turn')" @decision="permissions.decide" />
       <p
         v-if="chatStore.selectedAccessMode === 'history-only'"
@@ -1526,6 +1550,7 @@ onBeforeUnmount(() => {
           <ChatSkillControl :entries="skills.skills" :selected-ids="skillSelection.map(skill => skill.id)" :disabled="submitting || Boolean(expertSubmission) || modelBusy || chatStore.selectedAccessMode === 'history-only'" :loading="skills.phase === 'loading'" :refreshing="skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @select="toggleSkill" @manage="manageSkills" @close="close" />
         </template>
         <template v-if="chatModelsEnabled" #model-control>
+          <ChatContextWindow :sample="contextWindow.sample.value" />
           <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" :error="models.error.value" :retry-label="models.retryLabel.value" @select="models.select" @retry="models.retry" />
         </template>
         <template v-if="!isDraftMode && runtimePermissionsEnabled" #permission-control>

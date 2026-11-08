@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "feature": "FEAT-170",
+  "mode": "local_worktree_candidate",
+  "release": false,
+  "runtime_lock_sha256": "1492a1fc035e1753b3890ade664b3c9a4c63bb8604d73f03f73049b94bd0943f",
+  "base_build_sha256": "34c9b15e85556b3073d8ee24082b9780c939a270fb354d7f912d165cafdc2b3e"
+}

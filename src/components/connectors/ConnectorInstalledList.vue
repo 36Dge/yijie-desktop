@@ -19,7 +19,7 @@ defineEmits<{
       <button class="connector-installed__details" type="button" :aria-label="`查看 ${connector.name}，${connector.status.label}`" @click="$emit('open', connector.id)">
         <ConnectorIcon :asset-id="connector.iconAssetId" />
         <span class="connector-installed__copy">
-          <YjTooltip :text="connector.name"><strong >{{ connector.name }}</strong></YjTooltip>
+          <strong >{{ connector.name }}</strong>
           <span class="connector-installed__description">{{ connector.description }}</span>
           <span class="connector-installed__status" :class="`connector-installed__status--${connector.status.tone}`">{{ connector.status.label }}</span>
         </span>

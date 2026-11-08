@@ -405,8 +405,10 @@ impl SidecarConfig {
             ]);
         }
         if std::env::var("YIJIE_FEAT168_HOST_IMAGES").as_deref() == Ok("true")
-            && self.chat_models_enabled && self.artifact_v3_enabled
-            && cfg!(feature = "kimi-k31-pro-candidate") {
+            && self.chat_models_enabled
+            && self.artifact_v3_enabled
+            && cfg!(feature = "kimi-k31-pro-candidate")
+        {
             values.push(("YIJIE_FEAT168_HOST_IMAGES", "true".to_owned()));
         }
         if self.image_generation_enabled {
@@ -942,6 +944,30 @@ impl SidecarSupervisor {
             command.stdout(Stdio::piped()).stderr(Stdio::piped());
         } else {
             command.stdout(Stdio::null()).stderr(Stdio::null());
+        }
+        if read_exact_boolean_environment("YIJIE_FEAT169_NATIVE_TOOLS")? {
+            if !self.demo_fast || self.market_management_only() {
+                return Err(ChatError::InvalidConfiguration);
+            }
+            command.env("YIJIE_FEAT169_NATIVE_TOOLS", "true");
+        }
+        if read_exact_boolean_environment("YIJIE_FEAT169_INTERACTION_TOOLS")? {
+            if !self.demo_fast
+                || self.market_management_only()
+                || !read_exact_boolean_environment("YIJIE_FEAT169_NATIVE_TOOLS")?
+            {
+                return Err(ChatError::InvalidConfiguration);
+            }
+            command.env("YIJIE_FEAT169_INTERACTION_TOOLS", "true");
+        }
+        if read_exact_boolean_environment("YIJIE_FEAT170_TOOL_SEARCH")? {
+            if !self.demo_fast
+                || self.market_management_only()
+                || !read_exact_boolean_environment("YIJIE_FEAT169_INTERACTION_TOOLS")?
+            {
+                return Err(ChatError::InvalidConfiguration);
+            }
+            command.env("YIJIE_FEAT170_TOOL_SEARCH", "true");
         }
         if self.market_authority.is_some() {
             let manifest = std::env::var("YIJIE_MARKET_WORKER_MANIFEST")

@@ -52,12 +52,18 @@ daily_workflow_requested="$workflow_requested"
 if [[ "${1:-}" == "--development" ]]; then
   development_app="true"
   [[ "${YIJIE_DEVELOPMENT_CLIENT:-}" == "true" && "${CARGO_TARGET_DIR:-}" == "$desktop_root/.local/development/target" && "${YIJIE_WORKER_TARGET_DIR:-}" == "$desktop_root/.local/development/worker-target" ]] || fail "use pnpm client:dev for the fixed development client"
-  [[ -z "${YIJIE_FEAT164_PRIMARY_GENERATION:-}" && -z "${YIJIE_FEAT164_DAILY_BINDING_FILE:-}" && -z "${YIJIE_PERMISSION_VERIFICATION_BASE_URL:-}" ]] || fail "development cannot select a packaged generation or observation transport"
+  [[ -z "${YIJIE_FEAT164_PRIMARY_GENERATION:-}" && -z "${YIJIE_FEAT164_DAILY_BINDING_FILE:-}" ]] || fail "development cannot select a packaged generation"
+  if [[ "${YIJIE_FEAT170_TOOL_SEARCH_METER:-false}" == "true" ]]; then
+    [[ "$development_ui_bundle" == "true" && "${YIJIE_FEAT170_TOOL_SEARCH:-false}" == "true" && "${YIJIE_PERMISSION_VERIFICATION_BASE_URL:-}" == "http://127.0.0.1:18083/v1" ]] || fail "tool-search acceptance requires start-ui and the fixed meter"
+  else
+    [[ "${YIJIE_FEAT170_TOOL_SEARCH_METER:-false}" == "false" && -z "${YIJIE_PERMISSION_VERIFICATION_BASE_URL:-}" ]] || fail "development cannot select an observation transport"
+  fi
   shift
 elif [[ "${YIJIE_DEVELOPMENT_CLIENT:-false}" != "false" ]]; then
   fail "development requires its explicit canonical selector"
 fi
 [[ "$development_ui_bundle" == "false" || "$development_app" == "true" ]] || fail "UI bundle requires the canonical development entry"
+[[ "${YIJIE_FEAT170_TOOL_SEARCH_METER:-false}" == "false" || "$development_app" == "true" ]] || fail "tool-search meter requires the canonical development entry"
 # The ordinary packaged entry keeps the existing stable-only branch intact.
 if [[ "$#" -ge 1 && "$1" == "--packaged" ]]; then
   [[ "$development_app" == "false" ]] || fail "development and packaged modes cannot be combined"
@@ -111,6 +117,33 @@ daily_images="${YIJIE_FEAT168_DAILY_IMAGES:-false}"
 [[ "$daily_images" == false || ( "$daily_images" == true && "$development_app" == true && "$kimi_k31_daily" == true ) ]] || fail "daily images require the fixed development entry"
 export YIJIE_FEAT168_HOST_IMAGES="$host_images"
 if [[ "$daily_images" == true ]]; then export YIJIE_FEAT168_HOST_IMAGES=true; fi
+# FEAT-169 is the current fixed development profile, not a packaged release flag.
+export YIJIE_FEAT169_NATIVE_TOOLS=false
+if [[ "$development_app" == true && "$kimi_k31_daily" == true ]]; then
+  export YIJIE_FEAT169_NATIVE_TOOLS=true
+  node "$desktop_root/scripts/native-tools-expert-source.mjs" --prepare
+fi
+
+# Only the paired development client can answer native questions.
+if [[ "$YIJIE_FEAT169_NATIVE_TOOLS" == true ]]; then
+  export YIJIE_FEAT169_INTERACTION_TOOLS="${YIJIE_FEAT169_INTERACTION_TOOLS:-true}"
+  [[ "$YIJIE_FEAT169_INTERACTION_TOOLS" == true || "$YIJIE_FEAT169_INTERACTION_TOOLS" == false ]] || fail "invalid interaction tool flag"
+else
+  export YIJIE_FEAT169_INTERACTION_TOOLS=false
+fi
+export VITE_YIJIE_INTERACTION_TOOLS="$YIJIE_FEAT169_INTERACTION_TOOLS"
+# Keep the compatible reader when discovery is disabled; the flag only changes
+# the ordinary-thread model catalogue, never silently downgrades saved history.
+export YIJIE_FEAT170_TOOL_SEARCH_RUNTIME="$YIJIE_FEAT169_INTERACTION_TOOLS"
+# Search is only admitted by the paired ordinary-chat candidate.
+if [[ "$YIJIE_FEAT169_INTERACTION_TOOLS" == true ]]; then
+  export YIJIE_FEAT170_TOOL_SEARCH="${YIJIE_FEAT170_TOOL_SEARCH:-true}"
+  [[ "$YIJIE_FEAT170_TOOL_SEARCH" == true || "$YIJIE_FEAT170_TOOL_SEARCH" == false ]] || fail "invalid tool search flag"
+else
+  [[ "${YIJIE_FEAT170_TOOL_SEARCH:-false}" == false ]] || fail "tool search requires interaction tools"
+  export YIJIE_FEAT170_TOOL_SEARCH=false
+fi
+
 
 # FEAT-164 uses the same canonical bootstrap with a separate app identity and
 # data/binary roots. Prepare-only builds the reviewable candidate without launch.
@@ -334,6 +367,28 @@ if [[ "$chat_models_enabled" == "true" ]]; then
       candidate_lock="$desktop_root/contracts/runtime-host-images.candidate.json"
       codex_runtime_root="$workspace_root/yijie-codex/.yijie/build/host-images-v1/aarch64-apple-darwin"
     fi
+    if [[ "$YIJIE_FEAT169_NATIVE_TOOLS" == true ]]; then
+      node "$workspace_root/yijie-contracts/scripts/generate-runtime-native-tools.mjs" --check
+      candidate_lock="$desktop_root/contracts/runtime-native-tools.candidate.json"
+      native_tools_relative="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write(v.runtime_relative_path)' "$candidate_lock")"
+      [[ "$native_tools_relative" =~ ^\.yijie/build/native-tools-v1/[a-f0-9]{64}/aarch64-apple-darwin$ ]] || fail "invalid native tool artifact path"
+      codex_runtime_root="$workspace_root/yijie-codex/$native_tools_relative"
+    fi
+    if [[ "$YIJIE_FEAT169_INTERACTION_TOOLS" == true ]]; then
+      node "$workspace_root/yijie-contracts/scripts/generate-runtime-interaction-tools.mjs" --check
+      node "$workspace_root/yijie-contracts/scripts/generate-user-input.mjs" --check
+      candidate_lock="$desktop_root/contracts/runtime-interaction-tools.candidate.json"
+      interaction_relative="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write(v.runtime_relative_path)' "$candidate_lock")"
+      [[ "$interaction_relative" =~ ^\.yijie/build/interaction-tools-v1/[a-f0-9]{64}/aarch64-apple-darwin$ ]] || fail "invalid interaction tool artifact path"
+      codex_runtime_root="$workspace_root/yijie-codex/$interaction_relative"
+    fi
+    if [[ "$YIJIE_FEAT170_TOOL_SEARCH_RUNTIME" == true ]]; then
+      node "$workspace_root/yijie-contracts/scripts/generate-runtime-tool-search.mjs" --check
+      candidate_lock="$desktop_root/contracts/runtime-tool-search.candidate.json"
+      tool_search_relative="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write(v.runtime_relative_path)' "$candidate_lock")"
+      [[ "$tool_search_relative" =~ ^\.yijie/build/tool-search-v1/[a-f0-9]{64}/aarch64-apple-darwin$ ]] || fail "invalid tool search artifact path"
+      codex_runtime_root="$workspace_root/yijie-codex/$tool_search_relative"
+    fi
   else
   node "$workspace_root/yijie-contracts/scripts/generate-runtime-chat-models.mjs" --check
   node "$workspace_root/yijie-contracts/scripts/sync-runtime-chat-models.mjs" --check
@@ -531,7 +586,11 @@ node scripts/check-native-mcp.mjs --require-committed
 if [[ "${YIJIE_RUNTIME_PERMISSIONS_ENABLED:-false}" == "true" ]]; then
   node "$workspace_root/yijie-contracts/scripts/sync-runtime-approval-choices.mjs" --check
 fi
-node scripts/check-native-process.mjs --require-committed
+if [[ "$YIJIE_FEAT169_NATIVE_TOOLS" == true ]]; then
+  node scripts/check-native-process.mjs --candidate
+else
+  node scripts/check-native-process.mjs --require-committed
+fi
 YIJIE_DESKTOP_CONTRACTS_DIR="$workspace_root/yijie-contracts" \
 YIJIE_DESKTOP_AGENT_HOST_DIR="$host_root" \
   node scripts/check-agent-host-v4-contract.mjs

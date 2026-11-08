@@ -228,6 +228,8 @@ export interface ConversationNotice {
 }
 
 export interface ConversationTurn {
+  readonly nativeThreadId?: string;
+  readonly nativeTurnId?: string;
   readonly traceSequence?: string;
   readonly traceNotices?: NativeConversationView["notices"];
   readonly diagnostic?: string;
@@ -382,9 +384,11 @@ function nativeExecution(entry: NativeConversationView["items"][number], view: N
       item.status === "completed" || item.status === "failed" || item.status === "declined" ? item.status : "unknown",
     native: {source: view.source, lastMethod: entry.lastMethod, item},
   };
-  if (item.type === "mcpToolCall") return {
+  if (item.type === "mcpToolCall" || item.type === "fileChange" || item.type === "subAgentActivity") return {
     kind: "tool", status: item.status === "inProgress" ? "in_progress" :
-      item.status === "completed" || item.status === "failed" || item.status === "declined" ? item.status : "unknown",
+      item.status === "completed" || item.status === "failed" || item.status === "declined" ? item.status :
+      item.type === "subAgentActivity" && entry.lastMethod === "item/started" ? "in_progress" :
+      item.type === "subAgentActivity" && entry.lastMethod === "item/completed" ? "completed" : "unknown",
     native: {source: view.source, lastMethod: entry.lastMethod, item},
   };
   return null;
@@ -444,7 +448,7 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
       for (const k of old?.itemKeys ?? []) delete items[k];
       const nativeItems: ConversationItem[] = view.items.map(entry => {
         const item = entry.item;
-        const kind: ConversationItemKind = item.type === "userMessage" ? "user_message" : item.type === "agentMessage" ? "assistant_message" : item.type === "reasoning" ? "reasoning" : item.type === "commandExecution" ? "command" : item.type === "mcpToolCall" ? "tool" : item.type === "webSearch" ? "web_search" : "unknown";
+        const kind: ConversationItemKind = item.type === "userMessage" ? "user_message" : item.type === "agentMessage" ? "assistant_message" : item.type === "reasoning" ? "reasoning" : item.type === "commandExecution" ? "command" : ["mcpToolCall", "fileChange", "subAgentActivity"].includes(item.type) ? "tool" : item.type === "webSearch" ? "web_search" : "unknown";
         const contentBlocks: readonly TextContentBlock[] = item.type === "userMessage" && submittedText !== null
           ? submittedText
           : item.type === "reasoning"
@@ -467,6 +471,7 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
       for (const item of [...displayedNativeItems, ...localReferences]) items[itemKey(item.threadId, item.turnId, item.itemId)] = item;
       const terminal = view.terminalObserved && (view.status === "completed" || view.status === "failed" || view.status === "interrupted") ? view.status : null;
       turns[key] = {threadId: view.sessionId, turnId: view.turnId, ordinal: view.ordinal ?? old?.ordinal ?? 0,
+        nativeThreadId: view.runtimeThreadId, nativeTurnId: view.runtimeTurnId,
         source: view.source, availability: view.availability, nativeStatus: view.status, statusSource: view.statusSource, traceNotices: view.notices, traceSequence: view.cursor?.sequence,
         diagnostic: view.terminalObserved && view.status === "failed" && view.terminalErrorCode === "sessionBudgetExceeded" ? "session_budget_exceeded" : view.diagnostic ? safeConversationDiagnostic(view.diagnostic) : undefined,
         status: view.status === "inProgress" ? "in_progress" : view.status ?? "unknown",

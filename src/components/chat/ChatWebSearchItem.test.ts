@@ -43,7 +43,7 @@ describe("compact native web search disclosure", () => {
     const record = item({action: "search", queries: [query]});
     const wrapper = mount(ChatWebSearchItem, {props: {item: record, searchOccurrence: 2}});
     expect(wrapper.get("button").text()).toBe("再次搜索新丰小吃 · 推荐分店、必点小吃、分店人气");
-    expect(wrapper.get(".chat-web-search__query").attributes("data-yj-tooltip")).toBe(query);
+    expect(wrapper.get(".chat-web-search__query").attributes("data-yj-tooltip")).toBeUndefined();
     expect(record.webSearch?.queries).toEqual([query]);
   });
 

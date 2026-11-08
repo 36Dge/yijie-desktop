@@ -6,6 +6,9 @@ import {createHash} from "node:crypto";
 import {readFileSync,writeFileSync,lstatSync} from "node:fs";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
+import {verifyToolSearchBuildCandidate} from "./tool-search-build-candidate.mjs";
+import {verifyInteractionToolsBuildCandidate} from "./interaction-tools-build-candidate.mjs";
+import {verifyNativeToolsBuildCandidate} from "./native-tools-build-candidate.mjs";
 const desktop=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const contracts=path.resolve(desktop,"../yijie-contracts"),host=path.resolve(desktop,"../yijie-agent-host");
 const hash=b=>createHash("sha256").update(b).digest("hex");
@@ -81,6 +84,11 @@ export function verifyKimiK31BuildCandidate(desktopRoot,contractsRoot,hostRoot,e
  execFileSync(process.execPath,["scripts/sync-scheduled-plan-v2.mjs","--check"],{cwd:contractsRoot,stdio:"pipe"});
  execFileSync(process.execPath,["scripts/generate-scheduled-ipc-v2.mjs","--check"],{cwd:desktopRoot,stdio:"pipe"});
  const fixedDaily = env.YIJIE_DEVELOPMENT_CLIENT === "true" && env.YIJIE_FEAT164_DAILY === "true";
+ if(env.YIJIE_FEAT169_NATIVE_TOOLS === "true") {
+  checkPins(desktopRoot,hostRoot);
+  if (env.YIJIE_FEAT170_TOOL_SEARCH_RUNTIME === "true") return verifyToolSearchBuildCandidate(desktopRoot,contractsRoot,hostRoot,env);
+  return env.YIJIE_FEAT169_INTERACTION_TOOLS === "true" ? verifyInteractionToolsBuildCandidate(desktopRoot,contractsRoot,hostRoot,env) : verifyNativeToolsBuildCandidate(desktopRoot,contractsRoot,hostRoot,env);
+ }
  if(fixedDaily || env.YIJIE_FEAT168_HOST_IMAGES==="true"){
   assert.equal(env.YIJIE_KIMI_K31_CALL_SURFACES,"media");
   if(fixedDaily) {

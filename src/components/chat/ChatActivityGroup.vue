@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, inject, ref, useId } from "vue";
 import type { ConversationActivityGroup } from "../../domain/conversation-activity-presentation";
 import { summarizeActivity } from "../../domain/conversation-activity-summary";
@@ -35,7 +34,7 @@ function toggle() {
     <template v-else>
     <button class="chat-activity-group__toggle" type="button" :aria-expanded="expanded" :aria-controls="contentId" @click="toggle">
       <YjIcon :name="header.icon" size="sm" tone="muted" />
-      <YjTooltip :text="header.title"><span class="chat-activity-group__title" ><ChatThinkingIndicator :label="header.title" :active="header.state !== 'summary' && live" :paused="!visible" /></span></YjTooltip>
+      <span class="chat-activity-group__title" ><ChatThinkingIndicator :label="header.title" :active="header.state !== 'summary' && live" :paused="!visible" /></span>
       <span v-if="summary.counts" class="chat-activity-group__counts">{{ summary.counts }}</span>
       <YjIcon :name="expanded ? 'chevronDown' : 'chevronRight'" size="xs" tone="muted" />
     </button>

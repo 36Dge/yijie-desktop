@@ -10,9 +10,11 @@ import ChatTimelineItemShell, { type ChatTimelineDisclosureChange } from "./Chat
 const props = defineProps<{ item: ConversationTimelineItemViewModel; execution: ConversationNativeToolExecution; processPresentation?: boolean }>();
 const emit = defineEmits<{ "disclosure-change": [change: ChatTimelineDisclosureChange] }>();
 const native = computed(() => props.execution.native.item);
+const nativeOperation = computed(() => ["fileChange", "subAgentActivity"].includes(native.value.type));
 const mcp = computed(() => native.value.mcp);
 const identity = computed(() => mcp.value?.server && mcp.value.tool ? `${mcp.value.server} / ${mcp.value.tool}` : "工具身份信息不完整");
 const status = computed(() => {
+  if (native.value.type === "subAgentActivity") return props.item.busy ? "处理中" : "已记录";
   switch (props.execution.status) {
     case "completed": return "已完成";
     case "failed": return "调用失败";
@@ -48,12 +50,18 @@ const diagnosticLabels = {
   <ChatTimelineItemShell
     :process-presentation="processPresentation"
     :item="item" :label="activityItemTitle(item)" :status-label="status" icon="skillOperations"
-    :status-icon="item.busy ? 'pending' : execution.status === 'completed' ? 'check' : 'warning'"
-    :status-tone="item.busy ? 'primary' : execution.status === 'completed' ? 'success' : 'muted'"
+    :status-icon="item.busy ? 'pending' : native.type === 'subAgentActivity' || execution.status === 'completed' ? 'check' : 'warning'"
+    :status-tone="item.busy ? 'primary' : native.type === 'subAgentActivity' ? 'muted' : execution.status === 'completed' ? 'success' : 'muted'"
     collapsible :default-expanded="processPresentation ? false : item.busy"
     @disclosure-change="emit('disclosure-change', $event)"
   >
     <div class="native-tool" :aria-busy="item.busy">
+      <template v-if="nativeOperation">
+        <p v-if="native.text">{{ native.text }}</p>
+        <pre v-if="native.outputText">{{ native.outputText }}</pre>
+        <p v-if="native.availability !== 'available'" role="note">部分记录未完整展示。</p>
+      </template>
+      <template v-else>
       <strong>{{ native.toolDisplay?.sourceLabel || identity }}</strong>
       <p v-if="mcp?.server === 'sorftime'" class="native-tool__source">这是旧版 Sorftime 工具记录，仅供查看。新调用请从连接器页面配置并在聊天中选择 Sorftime。</p>
       <p class="native-tool__source">{{ execution.native.source === 'native_observed' ? '已观察到的原生记录' : '原生历史读取' }}</p>
@@ -73,6 +81,7 @@ const diagnosticLabels = {
         <li v-for="code in mcp.diagnostics" :key="code">{{ diagnosticLabels[code] }}</li>
       </ul>
       <p v-else-if="native.availability !== 'available'" role="note">该项内容信息不完整；这不改变原生执行结果。</p>
+      </template>
     </div>
   </ChatTimelineItemShell>
 </template>

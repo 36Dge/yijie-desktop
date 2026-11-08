@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import YjTooltip from "../yijie/YjTooltip.vue";
 import { ref } from "vue";
 import { NPopover } from "naive-ui";
 import type { RecommendedWorkflow } from "../../domain/workflow-showcase";
@@ -25,11 +24,11 @@ function openPreview() {
     </header>
     <div class="recommended-workflow-card__body workflow-showcase-card__body">
       <h3 class="recommended-workflow-card__title workflow-showcase-card__title">{{ workflow.title }}</h3>
-      <YjTooltip :text="workflow.description"><p class="recommended-workflow-card__description workflow-showcase-card__description" >{{ workflow.description }}</p></YjTooltip>
+      <p class="recommended-workflow-card__description workflow-showcase-card__description" >{{ workflow.description }}</p>
     </div>
     <div class="recommended-workflow-card__metadata workflow-showcase-card__metadata">
       <span class="workflow-showcase-card__badge yj-badge">{{ workflow.category }}</span>
-      <YjTooltip text="示例使用次数，非实时统计"><span class="recommended-workflow-card__usage"  :aria-label="`${workflow.usage} 次使用，示例统计`">{{ workflow.usage }} 次使用</span></YjTooltip>
+      <span class="recommended-workflow-card__usage"  :aria-label="`${workflow.usage} 次使用，示例统计`">{{ workflow.usage }} 次使用</span>
     </div>
     <footer class="recommended-workflow-card__footer workflow-showcase-card__footer" role="group" :aria-label="`${workflow.title}操作`">
       <button ref="previewButton" type="button" class="recommended-workflow-card__action workflow-card-action workflow-showcase-control yj-control"

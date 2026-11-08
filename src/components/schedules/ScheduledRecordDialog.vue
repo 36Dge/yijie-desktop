@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import YjTooltip from "../yijie/YjTooltip.vue";
 import { scheduleModelLabel } from "../../domain/scheduled-task-ui";
 import { chatModelsEnabled } from "../../api/chat-model-client";
 import { computed } from "vue";
 import { NButton, NCard, NModal } from "naive-ui";
 import YjIcon from "../yijie/YjIcon.vue";
 import type { RecordDetail } from "../../api/generated/scheduled-task-ipc-v2.gen";
-import { durationLabel, executionTimeLabel, recordStatus, recordTone, timingNote } from "../../domain/scheduled-task-ui";
+import { durationLabel, executionTimeLabel, recordStatus, recordTone } from "../../domain/scheduled-task-ui";
 
 const props = defineProps<{ detail: RecordDetail | null; name: string; rerunDisabled: boolean; error?: string }>();
 const emit = defineEmits<{ close: []; closed: []; rerun: []; conversation: [] }>();
@@ -31,8 +30,8 @@ const note = computed(() => {
         <template v-if="chatModelsEnabled && detail.configuration"><dt>执行模型</dt><dd>{{ scheduleModelLabel(detail.configuration.model_profile) }}</dd></template>
         <dt>执行状态</dt><dd><span class="scheduled-record-dialog__status" :data-tone="recordTone(detail.record)">{{ recordStatus(detail.record) }}</span></dd>
         <dt>触发方式</dt><dd>{{ trigger }}</dd>
-        <dt>执行时间</dt><YjTooltip :text="executionTimeLabel(detail.record.timing)"><dd >{{ executionTimeLabel(detail.record.timing, true) }}</dd></YjTooltip>
-        <dt>执行耗时</dt><YjTooltip :text="`${durationLabel(detail.record.timing)} · ${timingNote(detail.record.timing)}`"><dd >{{ durationLabel(detail.record.timing, true) }}</dd></YjTooltip>
+        <dt>执行时间</dt><dd >{{ executionTimeLabel(detail.record.timing, true) }}</dd>
+        <dt>执行耗时</dt><dd >{{ durationLabel(detail.record.timing, true) }}</dd>
       </dl>
       <p v-if="error" class="scheduled-record-dialog__error" role="alert">{{ error }}</p>
       <p v-else-if="note" class="scheduled-record-dialog__note">{{ note }}</p>

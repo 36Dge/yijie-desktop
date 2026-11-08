@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, nextTick, ref, watch } from "vue";
 import { NCard, NDropdown, NInput, NModal, type DropdownOption } from "naive-ui";
 import { isNavigationFailure, NavigationFailureType, useRouter } from "vue-router";
@@ -319,7 +318,7 @@ async function confirmRemoveProject(): Promise<void> {
             @keydown="projectKeydown(group, $event)"
           >
             <YjIcon :name="expandedProjectIds.has(group.projectId) ? 'folderOpen' : 'folder'" tone="muted" :stroke-width="1.5" />
-            <YjTooltip :text="group.label"><span class="chat-tree__project-name" >{{ group.label }}</span></YjTooltip>
+            <span class="chat-tree__project-name" >{{ group.label }}</span>
             <YjIcon v-if="group.pinnedAt !== null" name="pin" size="xs" tone="muted" />
           </button>
           <n-dropdown

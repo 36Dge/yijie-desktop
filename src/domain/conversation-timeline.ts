@@ -49,6 +49,7 @@ export type ConversationTimelineItemKind =
   | "artifact"
   | "unknown";
 export type ConversationTimelineItemPresentation =
+  | "context_update"
   | "user_message"
   | "commentary"
   | "final_answer"
@@ -155,6 +156,7 @@ export type ConversationTimelinePlanViewModel = Readonly<{
 }>;
 
 export type ConversationTimelineItemViewModel = Readonly<{
+  contextUpdateState?: "in_progress" | "completed" | "interrupted" | "unknown";
   webSearch?: ConversationItem["webSearch"];
   identity: string;
   threadId: string;
@@ -182,6 +184,8 @@ export type ConversationTimelineItemViewModel = Readonly<{
 }>;
 
 export type ConversationTimelineTurnViewModel = Readonly<{
+  nativeThreadId?: string;
+  nativeTurnId?: string;
   traceSequence?: string;
   traceNotices?: ConversationTurn["traceNotices"];
   diagnostic?: ConversationTurn["diagnostic"];
@@ -675,6 +679,7 @@ function projectTurn(
 ): ConversationTimelineTurnViewModel {
   return Object.freeze({
     liveObserved: policy?.liveTurnId === turn.turnId,
+    nativeThreadId: turn.nativeThreadId, nativeTurnId: turn.nativeTurnId,
     source: turn.source, statusSource: turn.statusSource, availability: turn.availability, submissionStatus: turn.submissionStatus, diagnostic: turn.diagnostic,
     identity: stableIdentity("timeline-turn", turn.threadId, turn.turnId),
     threadId: turn.threadId,

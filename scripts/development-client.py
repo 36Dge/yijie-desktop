@@ -90,15 +90,27 @@ def supported_go(root, env):
     raise ValueError("缺少项目要求的已安装 Go 工具链；未下载或替换任何程序。")
 
 
-def environment(root, environ):
+def environment(root, environ, tool_search_meter=False):
     # Never inherit model URLs, credentials, Homes, TAURI_CONFIG or old generation
     # selectors. Public feature flags come from the canonical shell profile.
     env = primary.build_environment(environ)
     env["PATH"] = supported_go(root, env) + os.pathsep + env["PATH"]
     selected = paths(root, Path(env["HOME"]))
     images = daily_images_setting(selected["output"])
-    return {**env, "YIJIE_DEVELOPMENT_CLIENT": "true", "YIJIE_FEAT168_DAILY_IMAGES": "true" if images else "false",
-            "CARGO_TARGET_DIR": str(selected["target"]), "YIJIE_WORKER_TARGET_DIR": str(selected["worker_target"])}
+    interaction = environ.get("YIJIE_FEAT169_INTERACTION_TOOLS", "true")
+    primary.require(interaction in ("true", "false"), "Invalid interaction tool selector.")
+    tool_search = environ.get("YIJIE_FEAT170_TOOL_SEARCH", "true" if interaction == "true" else "false")
+    primary.require(tool_search in ("true", "false"), "Invalid tool search selector.")
+    primary.require(tool_search == "false" or interaction == "true", "Tool search requires interaction tools.")
+    result = {**env, "YIJIE_FEAT170_TOOL_SEARCH": tool_search, "YIJIE_FEAT169_INTERACTION_TOOLS": interaction, "YIJIE_DEVELOPMENT_CLIENT": "true", "YIJIE_FEAT168_DAILY_IMAGES": "true" if images else "false",
+              "CARGO_TARGET_DIR": str(selected["target"]), "YIJIE_WORKER_TARGET_DIR": str(selected["worker_target"])}
+    if tool_search_meter:
+        primary.require(tool_search == "true", "Tool-search verification requires its enabled profile.")
+        # Explicit UI acceptance only. Reuse the existing fixed, bounded meter;
+        # no ambient URL or provider credential is admitted by this selector.
+        result.update(YIJIE_FEAT170_TOOL_SEARCH_METER="true",
+                      YIJIE_PERMISSION_VERIFICATION_BASE_URL="http://127.0.0.1:18083/v1")
+    return result
 
 
 def daily_images_setting(output):
@@ -126,9 +138,10 @@ def set_daily_images(selected, enabled):
         os.replace(stage, output / "host-images.json")
 
 
-def start(bundle_for_ui=False):
+def start(bundle_for_ui=False, tool_search_meter=False):
+    primary.require(not tool_search_meter or bundle_for_ui, "Tool-search meter requires start-ui.")
     selected = check()
-    env = environment(ROOT, os.environ)
+    env = environment(ROOT, os.environ, tool_search_meter=tool_search_meter)
     if env["YIJIE_FEAT168_DAILY_IMAGES"] == "true":
         primary.require((selected["native"] / "chat/conversations.db").is_file(), "缺少原日常会话库，已停止启动。")
     if bundle_for_ui:
@@ -162,7 +175,10 @@ def start(bundle_for_ui=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["start", "start-ui", "check", "ready", "images-enable", "images-pause"], default="start", nargs="?")
+    parser.add_argument("--tool-search-meter", action="store_true",
+                        help="Explicit FEAT-170 UI acceptance through the existing fixed loopback meter.")
     args = parser.parse_args()
+    primary.require(not args.tool_search_meter or args.action == "start-ui", "Tool-search meter requires start-ui.")
     if args.action in ("images-enable", "images-pause"):
         set_daily_images(check(), args.action == "images-enable")
         print("已保存日常生图设置，下次从原入口打开时生效。")
@@ -175,7 +191,7 @@ def main():
         workflow_ready()
         print("Existing authenticated workflow is ready.")
         return 0
-    return start(bundle_for_ui=args.action == "start-ui")
+    return start(bundle_for_ui=args.action == "start-ui", tool_search_meter=args.tool_search_meter)
 
 
 if __name__ == "__main__":

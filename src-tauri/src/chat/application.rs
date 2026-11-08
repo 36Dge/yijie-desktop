@@ -3365,6 +3365,18 @@ impl ConversationApplication {
     }
 }
 
+fn map_user_input_error(error: HostBridgeError) -> ChatError {
+    use super::host_domain::HostErrorCode;
+    match error.code() {
+        Some(HostErrorCode::UserInputNotFound) => ChatError::NotFound,
+        Some(HostErrorCode::UserInputConflict) => ChatError::ConversationConflict,
+        Some(HostErrorCode::UserInputUnavailable) => ChatError::Disabled,
+        Some(HostErrorCode::InvalidRequest) => ChatError::InvalidInput,
+        Some(HostErrorCode::Unauthorized | HostErrorCode::CapabilityDenied) => ChatError::ScopeDenied,
+        _ => map_host_error(error),
+    }
+}
+
 fn map_host_error(_error: HostBridgeError) -> ChatError {
     ChatError::OrchestrationUnavailable
 }
@@ -3474,6 +3486,108 @@ mod tests {
         fn load_or_create(&self, _database_exists: bool) -> Result<ReceiptKey, ChatError> {
             Ok(ReceiptKey::from_bytes([32; 32]))
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn user_input_mutations_require_submit_permission_before_session_lookup() {
+        use crate::chat::authorization::AuthoritativeChatProjection;
+        use crate::chat::database::ChatScope;
+
+        let root = std::env::temp_dir().join(format!("yijie-question-auth-{}", Uuid::now_v7()));
+        let tenant = Uuid::now_v7();
+        let scope = ChatScope::new(Uuid::now_v7().to_string(), tenant.to_string()).unwrap();
+        let authorization = ChatAuthorizationManager::new(&scope).unwrap();
+        let now = unix_seconds().unwrap();
+        let readonly = authorization
+            .bind(
+                AuthoritativeChatProjection::from_trusted_native_projection(
+                    tenant,
+                    1,
+                    now + 120,
+                    ["task.read".to_owned()],
+                )
+                .unwrap(),
+                now,
+            )
+            .unwrap();
+        let database = DatabaseWorker::start(
+            root.join("chat"),
+            scope,
+            Box::new(TestKeyStore),
+            Box::new(TestKeyStore),
+        )
+        .unwrap();
+        let application = AuthorizedConversationApplication::new(
+            ConversationApplication::new_offline(database),
+            authorization.clone(),
+        );
+        let session = Uuid::now_v7();
+        let request = Uuid::now_v7();
+        for action in ["touch", "answer"] {
+            assert!(matches!(
+                application
+                    .user_input_request(readonly.context_id, session, request, action, None)
+                    .await,
+                Err(ChatError::ScopeDenied)
+            ));
+        }
+        assert!(matches!(
+            application
+                .user_input_request(readonly.context_id, session, request, "read", None)
+                .await,
+            Err(ChatError::NotFound)
+        ));
+        let writable = authorization
+            .bind(
+                AuthoritativeChatProjection::from_trusted_native_projection(
+                    tenant,
+                    2,
+                    now + 120,
+                    ["task.read".to_owned(), "task.create".to_owned()],
+                )
+                .unwrap(),
+                now,
+            )
+            .unwrap();
+        assert!(matches!(
+            application
+                .user_input_request(writable.context_id, session, request, "touch", None)
+                .await,
+            Err(ChatError::NotFound)
+        ));
+        assert!(matches!(
+            application
+                .user_input_request(writable.context_id, session, request, "future-action", None)
+                .await,
+            Err(ChatError::InvalidInput)
+        ));
+        drop(application);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn user_input_errors_preserve_closed_meanings() {
+        use crate::chat::host_domain::HostErrorCode;
+        for (code, expected) in [
+            (HostErrorCode::UserInputNotFound, ChatError::NotFound),
+            (
+                HostErrorCode::UserInputConflict,
+                ChatError::ConversationConflict,
+            ),
+            (HostErrorCode::UserInputUnavailable, ChatError::Disabled),
+        ] {
+            assert_eq!(
+                map_user_input_error(HostBridgeError::rejected(code)),
+                expected
+            );
+        }
+        assert_eq!(
+            map_user_input_error(HostBridgeError::new(
+                super::super::host_domain::HostBridgeErrorKind::Protocol
+            )),
+            ChatError::OrchestrationUnavailable,
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -5747,5 +5861,92 @@ impl AuthorizedConversationApplication {
                     turn_operation_id: r.turn_operation_id,
                 })
         }
+    }
+}
+
+impl AuthorizedConversationApplication {
+    pub async fn user_input_snapshot(
+        &self,
+        context: Uuid,
+        session: Uuid,
+    ) -> Result<super::user_input_generated::UserInputSnapshot, ChatError> {
+        self.authorize(context, ChatAction::ReadSessions)?;
+        let id = self
+            .application
+            .database
+            .runtime_approval_session_id(session)
+            .await?;
+        self.authorize(context, ChatAction::ReadSessions)?;
+        let Some(id) = id else {
+            return Ok(super::user_input_generated::UserInputSnapshot {
+                enabled: true,
+                generation: None,
+                requests: Vec::new(),
+            });
+        };
+        let result = self
+            .application
+            .host()?
+            .user_input_snapshot(id)
+            .await
+            .map_err(map_user_input_error)?;
+        self.authorize(context, ChatAction::ReadSessions)?;
+        Ok(result)
+    }
+    pub async fn user_input_request(
+        &self,
+        context: Uuid,
+        session: Uuid,
+        id: Uuid,
+        action: &str,
+        answer: Option<&super::user_input_generated::UserInputAnswerRequest>,
+    ) -> Result<super::user_input_generated::UserInputRequest, ChatError> {
+        let permission = match action {
+            "read" => ChatAction::ReadSessions,
+            "touch" | "answer" => ChatAction::SubmitTurn,
+            _ => return Err(ChatError::InvalidInput),
+        };
+        self.authorize(context, permission)?;
+        let agent = self
+            .application
+            .database
+            .runtime_approval_session_id(session)
+            .await?
+            .ok_or(ChatError::InvalidInput)?;
+        self.authorize(context, permission)?;
+        let result = self
+            .application
+            .host()?
+            .user_input_request(agent, id, action, answer)
+            .await
+            .map_err(map_user_input_error)?;
+        self.authorize(context, permission)?;
+        Ok(result)
+    }
+}
+
+impl AuthorizedConversationApplication {
+    pub async fn context_window(
+        &self,
+        context: Uuid,
+        session: Uuid,
+        include_history: bool,
+    ) -> Result<super::context_window_generated::ContextWindowSnapshot, ChatError> {
+        self.authorize(context, ChatAction::ReadSessions)?;
+        let id = self.application.database.runtime_approval_session_id(session).await?;
+        self.authorize(context, ChatAction::ReadSessions)?;
+        let Some(id) = id else {
+            return Ok(super::context_window_generated::ContextWindowSnapshot {
+                schema_version: 1,
+                thread_id: None,
+                model_profile: None,
+                model_revision: 0,
+                sample: None,
+                compactions: Vec::new(),
+            });
+        };
+        let result = self.application.host()?.context_window(id, include_history).await.map_err(map_host_error)?;
+        self.authorize(context, ChatAction::ReadSessions)?;
+        Ok(result)
     }
 }

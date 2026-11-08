@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import YjTooltip from "../yijie/YjTooltip.vue";
 import type { YjIconName } from "../../icons/registry";
 import YjIcon from "../yijie/YjIcon.vue";
 
@@ -14,7 +13,7 @@ defineEmits<{ remove: [] }>();
 </script>
 
 <template>
-  <YjTooltip :text="unavailableReason ? `${name}：${unavailableReason}；点击移除` : `点击移除 ${name}`"><button
+  <button
     type="button"
     class="chat-composer-mention"
     :aria-label="removeLabel"
@@ -30,7 +29,7 @@ defineEmits<{ remove: [] }>();
       <span>{{ name }}</span>
       <span v-if="unavailableReason" class="chat-composer-mention__reason">{{ unavailableReason }}</span>
     </span>
-  </button></YjTooltip>
+  </button>
 </template>
 
 <style scoped>

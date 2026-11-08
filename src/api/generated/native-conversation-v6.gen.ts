@@ -57,7 +57,7 @@ export interface components {
         NativeItem: {
             id: string;
             /** @enum {string} */
-            type: "userMessage" | "agentMessage" | "reasoning" | "commandExecution" | "mcpToolCall" | "webSearch" | "unknown";
+            type: "userMessage" | "agentMessage" | "reasoning" | "commandExecution" | "mcpToolCall" | "webSearch" | "fileChange" | "subAgentActivity" | "unknown";
             clientId?: string | null;
             text?: string;
             /** @enum {string|null} */

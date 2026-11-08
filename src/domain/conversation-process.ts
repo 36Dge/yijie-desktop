@@ -71,6 +71,20 @@ export function observedProgressMessages(items: readonly ConversationTimelineIte
   return result;
 }
 
+/** Action eligibility is stricter than folding: a last unphased message stays
+ * readable if work stops after a tool, but it must not acquire answer actions.
+ * This observes item order only; it never changes the message's phase or text. */
+export function hasUnclassifiedToolContinuation(item: ConversationTimelineItemViewModel, items: readonly ConversationTimelineItemViewModel[]): boolean {
+  if (item.presentation !== "assistant_unclassified") return false;
+  const index = items.findIndex(candidate => candidate.identity === item.identity);
+  if (index < 0) return false;
+  for (const following of items.slice(index + 1)) {
+    if (following.presentation === "user_message" || following.presentation === "final_answer") return false;
+    if (["command", "tool", "web_search"].includes(following.presentation)) return true;
+  }
+  return false;
+}
+
 export function processDetailItems(items: readonly ConversationTimelineItemViewModel[]): ReadonlySet<string> {
   return new Set(items.filter(item => {
     if (item.presentation === "reasoning" || item.presentation === "unknown") return true;

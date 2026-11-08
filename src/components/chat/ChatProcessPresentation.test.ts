@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import {mount} from "@vue/test-utils";
 import {describe, expect, it} from "vitest";
+import {h} from "vue";
 import type {NativeConversationView} from "../../api/generated/native-conversation-private.gen";
 import {composeConversationView, type ConversationSnapshot} from "../../domain/conversation-view";
 import {selectConversationTimeline} from "../../domain/conversation-timeline";
@@ -30,6 +31,31 @@ function turn(view = native(), protect = false) {
 }
 
 describe("native process reading layout", () => {
+  it.each([undefined, "final_answer"] as const)("retains answer actions for an unphased body without tools or an explicit final with trailing tools (%s)", phase => {
+    const view=native();
+    view.items=[view.items[0]!,record({id:"answer",type:"agentMessage",text:"文档已生成。",availability:"available",...(phase ? {phase} : {})},1)];
+    if (phase) view.items.push(record({id:"trailing-command",type:"commandExecution",status:"failed",commandLabel:"后续检查",exitCode:1,availability:"partial"},2));
+    const wrapper=mount(ChatTurnGroup,{props:{turn:turn(view),position:1},slots:{"item-actions":({item}:{item:{itemId:string}})=>h("button",{"data-copy-item":item.itemId},"复制")}});
+    expect(wrapper.get('[data-copy-item="answer"]').isVisible()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it.each(["interrupted", "failed", "inProgress"] as const)("keeps an unphased message readable without answer actions after tool continuation (%s)", status => {
+    const view=native();view.status=status;view.terminalObserved=status!=="inProgress";
+    view.items=[view.items[0]!, record({id:"unphased",type:"agentMessage",text:"我会按约定样式生成文档。",availability:"available"},1),
+      record({id:"later-command",type:"commandExecution",status:"failed",commandLabel:"生成文档",exitCode:1,availability:"partial"},2)];
+    const before=JSON.stringify(view);
+    const wrapper=mount(ChatTurnGroup,{props:{turn:turn(view),position:1},slots:{"item-actions":({item}:{item:{itemId:string}})=>h("button",{"data-copy-item":item.itemId},"复制")}});
+    const message=wrapper.get(".chat-turn-group__item--assistant_unclassified");
+    expect(message.isVisible()).toBe(true);
+    expect(message.text()).toContain("我会按约定样式生成文档。");
+    expect(message.find('[data-copy-item="unphased"]').exists()).toBe(false);
+    expect(message.find('[role="group"]').exists()).toBe(false);
+    expect(wrapper.get('[data-copy-item="user"]').isVisible()).toBe(true);
+    expect(JSON.stringify(view)).toBe(before);
+    wrapper.unmount();
+  });
+
   it("shows only supplied search source links, distinct from answer citations", async () => {
     const view=native();
     view.items[1]!.item.webSearch!.sources=[{url:"https://example.org/statistics/2025",title:"Annual statistics"}];

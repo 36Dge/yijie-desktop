@@ -9,7 +9,8 @@ it("explains paused execution without claiming missing credentials",async()=>{
  try {
   const trigger = wrapper.get('.model-trigger');
   await trigger.trigger('mouseenter'); await flushPromises();
-  expect(document.getElementById(trigger.attributes('aria-describedby')!)?.textContent).toBe('模型暂未启用，请选择可用模型');
+  expect(trigger.attributes('aria-describedby')).toBeUndefined();
+  expect(trigger.attributes('data-yj-tooltip')).toBeUndefined();
   expect(wrapper.get('[role="status"]').text()).toBe('模型暂未启用');expect(wrapper.emitted('select')).toBeUndefined();}
  finally {wrapper.unmount();}
 });

@@ -61,6 +61,11 @@
   --yj-tooltip-arrow-height: 3px;
   --yj-tooltip-space: 5px;
   --yj-tooltip-blur: 4px;
+  /* Context usage uses its own dark surface in both themes. */
+  --yj-color-context-window-bg: #191d1e;
+  --yj-color-context-window-border: #34393b;
+  --yj-color-context-window-text: #ffffff;
+  --yj-color-context-window-muted: #a3a5a6;
   --yj-color-bg-subtle: #ffffff;
   --yj-color-bg-composer-tray: #f4f5f6;
   --yj-color-chat-user-bg: #f2f2f2;
@@ -112,6 +117,7 @@
   --yj-font-family-sans: -apple-system, blinkmacsystemfont, "Segoe UI", system-ui, sans-serif;
   --yj-font-family-mono: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
   --yj-font-size-caption: 12px;
+  --yj-font-size-context-window: 13px;
   --yj-font-size-chat-generation-notice: 11px;
   --yj-font-size-body: 14px;
   --yj-font-size-code: 13px;
@@ -124,6 +130,7 @@
   --yj-font-size-page-title: 24px;
   --yj-font-size-display: 32px;
   --yj-line-height-caption: 18px;
+  --yj-line-height-context-window: 20px;
   --yj-line-height-chat-generation-notice: 16px;
   --yj-line-height-body: 22px;
   --yj-line-height-code: 20px;

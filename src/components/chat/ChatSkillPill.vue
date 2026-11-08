@@ -19,7 +19,6 @@ defineEmits<{ remove: [id: string] }>();
     :type="removable ? 'button' : undefined"
     :disabled="removable ? disabled : undefined"
     :aria-label="removable ? `移除技能 ${entry.displayName}` : undefined"
-    :title="removable ? `${entry.displayName}${entry.unavailableReason ? `：${entry.unavailableReason}` : ''}；点击移除` : entry.displayName"
     @click="removable && !disabled && $emit('remove', entry.id)"
   >
     <span class="chat-skill-pill__icon" aria-hidden="true">

@@ -36,6 +36,8 @@ mod runtime_permissions;
 pub mod schedules;
 pub(crate) mod session_purpose_generated;
 mod sidecar;
+pub(crate) mod user_input_generated;
+pub(crate) mod context_window_generated;
 mod worker;
 
 use crate::feat126_secure_storage::Feat126SecureStorageProfile;

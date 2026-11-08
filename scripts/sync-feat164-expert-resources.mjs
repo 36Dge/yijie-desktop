@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import Ajv2020 from "ajv/dist/2020.js";
+import { nativeToolsExpertSource } from "./native-tools-expert-source.mjs";
 import { installOutput, readRegularFile, safeRelativePath, sha256, verifyBundleFiles, verifyOutput, validateResourceLock } from "./sync-desktop-skill-resources.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -25,7 +26,9 @@ export function verifyRetainedExpertResources(manifest, baselineBytes) {
 
 export async function syncFEAT164ExpertResources({ check = false, packageProducer = false, environment = process.env } = {}) {
   assert.ok(environment.YIJIE_ENV === "local" && environment.YIJIE_LOCAL_PROFILE === "demo_fast", "Expert assets are restricted to explicit local/demo_fast candidates");
-  const skillsRoot = path.resolve(root, environment.YIJIE_DESKTOP_SKILLS_DIR ?? "../yijie-skills");
+  const skillsRoot = environment.YIJIE_FEAT169_NATIVE_TOOLS === "true"
+    ? nativeToolsExpertSource(root)
+    : path.resolve(root, environment.YIJIE_DESKTOP_SKILLS_DIR ?? "../yijie-skills");
   const contractsRoot = path.resolve(root, environment.YIJIE_DESKTOP_CONTRACTS_DIR ?? "../yijie-contracts");
   assert.equal(environment.YIJIE_KIMI_K31_PRO_CANDIDATE,"true","Explicit FEAT-164 candidate required");
   const outputRoot=path.join(root,".local/feat164-kimi-k31/skill-packages-experts");

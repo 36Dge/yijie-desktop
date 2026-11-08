@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { ConversationActivityEntry } from "../../domain/conversation-activity-entry";
-import { hasReadableProcessContent } from "../../domain/conversation-process";
+import { hasReadableProcessContent, hasUnclassifiedToolContinuation } from "../../domain/conversation-process";
 import type {
   ConversationTimelineArtifactReferenceContentBlock,
   ConversationTimelineAttachmentReferenceContentBlock,
@@ -17,6 +17,7 @@ import { presentSkillMessage, type SelectedChatSkill } from "../../domain/chat-s
 import ChatSkillPill from "./ChatSkillPill.vue";
 import ChatSafeContent from "./ChatSafeContent.vue";
 import ChatDeepThinking from "./ChatDeepThinking.vue";
+import ChatContextUpdate from "./ChatContextUpdate.vue";
 import ChatToolItem from "./ChatToolItem.vue";
 import ChatNativeToolItem from "./ChatNativeToolItem.vue";
 import ChatWebSearchItem from "./ChatWebSearchItem.vue";
@@ -201,7 +202,8 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange) { emit("disclos
 function forwardApprovalDecision(change: ChatApprovalDecisionChange) { emit("approval-decision", change); }
 </script>
 <template>
-          <ChatDeepThinking v-if="item.presentation === 'reasoning'" :item="item"
+          <ChatContextUpdate v-if="item.presentation === 'context_update'" :state="item.contextUpdateState ?? 'unknown'" />
+          <ChatDeepThinking v-else-if="item.presentation === 'reasoning'" :item="item"
             :visible="visible"
             :live="visible && turn.liveObserved === true && item.busy === true" :state-message="reasoningStateMessage(item)"
             :thinking="false"
@@ -310,7 +312,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange) { emit("app
             </ChatSafeContent>
 
             <template
-              v-if="!((item.presentation === 'final_answer' || item.presentation === 'assistant_unclassified') && slots['structured-answer']) && item.presentation !== 'command' && item.presentation !== 'tool' && item.copyPolicy === 'text_and_code' && (item.kind !== 'assistant_message' || item.domainStatus === 'completed') && slots['item-actions']"
+              v-if="!processPresentation && item.presentation !== 'commentary' && !hasUnclassifiedToolContinuation(item, turn.items) && !((item.presentation === 'final_answer' || item.presentation === 'assistant_unclassified') && slots['structured-answer']) && item.presentation !== 'command' && item.presentation !== 'tool' && item.copyPolicy === 'text_and_code' && (item.kind !== 'assistant_message' || item.domainStatus === 'completed') && slots['item-actions']"
               #actions
             >
               <slot name="item-actions" :item="item" />

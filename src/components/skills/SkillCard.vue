@@ -113,10 +113,10 @@ function requestUninstall(event: MouseEvent): void {
       <img class="skill-card__icon" :src="artworkSrc" alt="" aria-hidden="true" draggable="false" />
 
       <div class="skill-card__content">
-        <YjTooltip :text="skill.displayName"><h3 :id="titleId" class="skill-card__title" >
+        <h3 :id="titleId" class="skill-card__title" >
           {{ skill.displayName }}
-        </h3></YjTooltip>
-        <YjTooltip :text="skill.description"><p :id="descriptionId" class="skill-card__description" >{{ skill.description }}</p></YjTooltip>
+        </h3>
+        <p :id="descriptionId" class="skill-card__description" >{{ skill.description }}</p>
       </div>
 
       <div class="skill-card__actions" aria-label="Skill 操作">

@@ -25,6 +25,8 @@
             "commandExecution",
             "mcpToolCall",
             "webSearch",
+            "fileChange",
+            "subAgentActivity",
             "unknown"
           ]
         },

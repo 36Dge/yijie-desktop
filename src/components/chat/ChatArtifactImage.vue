@@ -384,7 +384,7 @@ defineExpose({ openLightbox });
     aria-label="图片预览与保存"
     :aria-busy="inlineBusy ? 'true' : 'false'"
   >
-    <YjTooltip v-if="inlineLease" text="预览图片"><button
+    <button v-if="inlineLease"
 
       class="artifact-image__preview yj-control"
       data-testid="artifact-image-preview"
@@ -403,7 +403,7 @@ defineExpose({ openLightbox });
         @error="handleInlineError"
       >
       <span v-if="inlineBusy" class="artifact-image__overlay" role="status">正在安全加载图片…</span>
-    </button></YjTooltip>
+    </button>
 
     <div v-else-if="inlineBusy" class="artifact-image__placeholder" role="status">
       <YjIcon name="image" size="lg" tone="muted" />
@@ -422,7 +422,7 @@ defineExpose({ openLightbox });
     </div>
 
     <div class="artifact-image__actions">
-      <YjTooltip text="保存图片"><button class="yj-control"
+      <button class="yj-control"
         data-testid="artifact-image-save"
         type="button"
         :disabled="saving"
@@ -432,7 +432,7 @@ defineExpose({ openLightbox });
       >
         <YjIcon name="download" size="sm" />
         {{ saving ? "保存中" : "保存图片" }}
-      </button></YjTooltip>
+      </button>
     </div>
 
     <p

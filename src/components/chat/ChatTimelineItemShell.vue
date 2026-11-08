@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, ref, useId } from "vue";
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
 import type { YjIconName } from "../../icons/registry";
@@ -103,7 +102,7 @@ function toggle(): void {
       >
         <span class="chat-timeline-item-shell__identity">
           <YjIcon :name="icon" size="sm" :tone="iconTone" />
-          <YjTooltip :text="label"><strong :id="titleId" >{{ label }}</strong></YjTooltip>
+          <strong :id="titleId" >{{ label }}</strong>
         </span>
         <span :id="statusId" class="chat-timeline-item-shell__status">
           <YjIcon

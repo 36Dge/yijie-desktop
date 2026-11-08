@@ -63,6 +63,7 @@ import {
   ListTodo,
   List,
   ListFilter,
+  ListCollapse,
   ListTree,
   ListVideo,
   LoaderCircle,
@@ -129,6 +130,7 @@ import {
 } from "@lucide/vue";
 
 export const iconRegistry = {
+  contextUpdate: ListCollapse,
   modelDeepSeek: ModelDeepSeek,
   modelGlm: ModelGlm,
   modelKimi: ModelKimi,

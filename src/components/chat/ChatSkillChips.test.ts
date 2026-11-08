@@ -13,7 +13,8 @@ it("renders a removable selection with an accessible name and keeps busy control
   await remove.trigger("click");
   expect(view.emitted("remove")).toHaveLength(1);
   await view.setProps({ disabled: false, entries: [{ ...installedSkill, unavailableReason: "技能已停用" }] });
-  expect(remove.attributes("data-yj-tooltip")).toContain("技能已停用");
+  expect(remove.attributes("data-yj-tooltip")).toBeUndefined();
+  expect(remove.text()).toContain("技能已停用");
   expect(view.text()).toContain("跨境营销文案");
   view.unmount();
 });

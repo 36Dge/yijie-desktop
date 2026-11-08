@@ -75,6 +75,7 @@ export function traceCurrentStatus(turn: Turn): string | null {
   const retry = turn.traceNotices?.[turn.traceNotices.length - 1];
   if (retry?.scope === "turn" && retry.method === "error" && retry.willRetry === true && retry.sequence === turn.traceSequence) return "运行时正在重试";
   const latest = turn.items[turn.items.length - 1];
+  if (latest?.presentation === "context_update" && latest.contextUpdateState === "in_progress") return null;
   if (latest?.presentation === "commentary" && latest.busy && latest.contentBlocks.some(block => (block.type === "text" || block.type === "code") && block.text.trim())) return null;
   if (latest && ["final_answer", "assistant_unclassified"].includes(latest.presentation) && latest.contentBlocks.some(block => (block.type === "text" || block.type === "code") && block.text.trim())) return null;
   if (latest?.busy && ["command", "tool", "web_search"].includes(latest.presentation)) return null;

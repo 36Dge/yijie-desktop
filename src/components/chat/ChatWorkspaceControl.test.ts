@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { DOMWrapper, flushPromises, mount } from "@vue/test-utils";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import ChatWorkspaceControl from "./ChatWorkspaceControl.vue";
 
 const entry = { project: { projectId: "019c1a00-0000-7000-8000-000000000001", safeName: "市场调研", pinnedAt: null, lastUsedAt: 1, available: true }, path: "/Users/example/Yijie/Workspaces/市场调研" };
@@ -17,18 +17,19 @@ function menuAction(text: string) {
   return [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button => button.textContent?.includes(text))!;
 }
 describe("workspace control", () => {
-  it("opens a menu before invoking the native picker and shows the saved path", async () => {
+  it("opens a menu before invoking the native picker without adding hover hints", async () => {
     const wrapper = setup(); await wrapper.get(".workspace-trigger").trigger("click"); await flushPromises();
     expect(wrapper.emitted("open-local")).toBeUndefined();
     expect(wrapper.emitted("refresh")).toHaveLength(1);
     const option = document.querySelector<HTMLButtonElement>('[role="menuitemradio"]')!;
     expect(option.title).toBe("");
     await new DOMWrapper(option).trigger("mouseenter");
-    await vi.waitFor(() => expect(document.querySelector(".workspace-path")?.textContent).toBe(entry.path));
+    await flushPromises();
+    expect(document.querySelector(".workspace-path")).toBeNull();
     option.click(); await flushPromises();
     expect(wrapper.emitted("select")).toEqual([[entry.project.projectId]]);
     await wrapper.setProps({ selectedProjectId: entry.project.projectId });
-    expect(wrapper.get(".workspace-trigger").attributes("data-yj-tooltip")).toBe(entry.path);
+    expect(wrapper.get(".workspace-trigger").attributes("data-yj-tooltip")).toBeUndefined();
     await wrapper.get(".workspace-trigger").trigger("click"); await flushPromises();
     menuAction("不使用工作空间").click(); await flushPromises();
     expect(wrapper.emitted("select")?.slice(-1)[0]).toEqual([null]);

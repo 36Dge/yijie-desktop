@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import YjTooltip from "../../components/yijie/YjTooltip.vue";
 import { scheduleModelLabel } from "../../domain/scheduled-task-ui";
 import { chatModelsEnabled, kimiK31Candidate } from "../../api/chat-model-client";
 import { computed, inject, nextTick, ref, shallowRef, watch } from "vue";
@@ -260,7 +259,7 @@ onBeforeRouteLeave(() => {
               <p v-if="chatModelsEnabled" class="schedules-meta">执行模型：{{ scheduleModelLabel(card.model_profile) }}</p>
               <p v-if="kimiK31Candidate && card.model_profile === 'kimi-k3-max-v1'" class="schedules-meta" role="status">旧模型已退役。请编辑计划、确认新模型并保存，再重新开启或授权执行。</p>
               <div class="schedule-card__footer"><div class="schedule-card__timing">
-                <YjTooltip :text="ruleLabel(card.rule)"><p ><YjIcon name="pending" size="sm" tone="muted" /><span>{{ ruleLabel(card.rule).split(' · ')[0] }}</span></p></YjTooltip>
+                <p ><YjIcon name="pending" size="sm" tone="muted" /><span>{{ ruleLabel(card.rule).split(' · ')[0] }}</span></p>
                 <p><YjIcon :name="card.summary.effective_state === 'enabled' ? 'arrowRight' : 'stop'" size="sm" tone="muted" /><span>{{ card.summary.effective_state === 'enabled' ? `下次执行 ${timeLabel(card.summary.next_at, card.rule.time_zone)}` : card.summary.pause_reason ? pauseReasonLabels[card.summary.pause_reason] : card.summary.effective_state === 'paused' ? '已关闭' : stateLabels[card.summary.effective_state] }}</span></p>
               </div>
               <div class="schedule-card__actions">

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, onBeforeUnmount, ref, useId, watch } from "vue";
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
 import { hasReadableProcessContent } from "../../domain/conversation-process";
@@ -81,7 +80,7 @@ onBeforeUnmount(cancelScroll);
   <article class="chat-deep-thinking" :aria-label="label" :aria-busy="live ? 'true' : 'false'">
     <button class="chat-deep-thinking__toggle" type="button" :aria-expanded="expanded" :aria-controls="contentId"
       :aria-label="`${label}，${expanded ? '收起' : '展开'}`" @click="toggle">
-      <YjTooltip :text="title ?? label"><span class="chat-deep-thinking__title" ><ChatThinkingIndicator :label="title ?? label" :active="live && thinking === true" :paused="!visible" /></span></YjTooltip>
+      <span class="chat-deep-thinking__title" ><ChatThinkingIndicator :label="title ?? label" :active="live && thinking === true" :paused="!visible" /></span>
       <YjIcon class="chat-deep-thinking__chevron" :name="expanded ? 'chevronDown' : 'chevronRight'"
         size="xs" :stroke-width="1.5" tone="muted" />
     </button>

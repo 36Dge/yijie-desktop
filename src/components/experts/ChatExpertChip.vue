@@ -14,9 +14,9 @@ const emit = defineEmits<{ details: []; remove: [] }>();
         <YjIcon name="dismiss" size="sm" class="chat-expert-chip__dismiss" />
       </span>
     </button></YjTooltip>
-    <YjTooltip :text="expert.displayName"><button type="button" class="yj-control yj-control--pill chat-expert-chip__details"  :aria-label="`查看已选专家 ${expert.displayName}`" @click="emit('details')">
+    <button type="button" class="yj-control yj-control--pill chat-expert-chip__details"  :aria-label="`查看已选专家 ${expert.displayName}`" @click="emit('details')">
       <span>{{ expert.displayName }}</span>
-    </button></YjTooltip>
+    </button>
     <span v-if="pending" class="chat-expert-chip__status" role="status">正在切换专家</span>
   </div>
 </template>

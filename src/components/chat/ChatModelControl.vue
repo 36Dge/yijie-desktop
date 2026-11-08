@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, nextTick, ref, watch } from "vue";
-import { NPopover, NTooltip } from "naive-ui";
+import { NPopover } from "naive-ui";
 import type { Catalog, ProfileId } from "../../api/chat-model-client";
 import type { YjIconName } from "../../icons/registry";
 import YjIcon from "../yijie/YjIcon.vue";
@@ -72,13 +71,11 @@ function key(event: KeyboardEvent): void {
   <NPopover :to="overlay ?? false" v-model:show="open" trigger="click" placement="top-end" :show-arrow="false" :disabled="blocked" raw>
     <template #trigger>
       <span class="chat-control-anchor">
-        <YjTooltip :text="disabled ? (disabledReason ?? '当前任务结束后可切换模型') : unavailable ? `${unavailableLabel(selectedAvailability?.reason)}，请选择可用模型` : label">
-          <button ref="trigger" class="model-trigger yj-control yj-control--pill" type="button" :disabled="blocked" :aria-label="`选择对话模型，当前 ${label}`" :aria-expanded="open" aria-haspopup="menu" @keydown.stop @keydown.down.prevent="open = !blocked" @keydown.esc="open = false">
-            <span class="model-brand model-trigger-brand" :class="{ 'is-kimi': selected?.icon === 'modelKimi' }"><YjIcon :name="selected?.icon ?? 'assistant'" size="sm" /></span>
-            <span class="model-trigger-label">{{ label }}</span>
-            <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
-          </button>
-        </YjTooltip>
+        <button ref="trigger" class="model-trigger yj-control yj-control--pill" type="button" :disabled="blocked" :aria-label="`选择对话模型，当前 ${label}`" :aria-description="blocked ? disabledReason : undefined" :aria-expanded="open" aria-haspopup="menu" @keydown.stop @keydown.down.prevent="open = !blocked" @keydown.esc="open = false">
+          <span class="model-brand model-trigger-brand" :class="{ 'is-kimi': selected?.icon === 'modelKimi' }"><YjIcon :name="selected?.icon ?? 'assistant'" size="sm" /></span>
+          <span class="model-trigger-label">{{ label }}</span>
+          <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
+        </button>
       </span>
     </template>
     <div ref="menu" class="model-menu chat-control-menu" role="menu" aria-label="对话模型" @keydown="key">
@@ -88,20 +85,13 @@ function key(event: KeyboardEvent): void {
         <span v-if="!entry.available" class="model-option-status">{{ unavailableLabel(entry.reason) }}</span>
       </button>
       <span v-if="!catalog?.models.length" class="model-menu-empty">暂无可用模型</span>
-      <NTooltip arrow-point-to-center v-for="entry in upcomingModels" :key="entry.label" :to="overlay ?? false" placement="top"  :style="{ zoom: 'var(--yj-ui-scale, 1)' }">
-        <template #trigger>
-          <span class="model-coming-soon">
-            <button class="chat-control-option" type="button" role="menuitemradio" :aria-checked="false" :aria-label="`${entry.label}，即将支持`" disabled>
-              <span class="model-brand"><YjIcon :name="entry.icon" size="sm" /></span>
-              <span class="model-option-label">{{ entry.label }}</span>
-            </button>
-          </span>
-        </template>
-        即将支持
-      </NTooltip>
+      <button v-for="entry in upcomingModels" :key="entry.label" class="chat-control-option" type="button" role="menuitemradio" :aria-checked="false" :aria-label="`${entry.label}，即将支持`" disabled>
+        <span class="model-brand"><YjIcon :name="entry.icon" size="sm" /></span>
+        <span class="model-option-label">{{ entry.label }}</span>
+      </button>
     </div>
   </NPopover>
-  <YjTooltip v-if="error" :text="error"><button  class="model-retry yj-control" type="button" :disabled="saving || disabled"  :aria-label="retryLabel ?? '重试模型操作'" @click="emit('retry')">{{ retryLabel ?? "重试" }}</button></YjTooltip>
+  <button v-if="error"  class="model-retry yj-control" type="button" :disabled="saving || disabled"  :aria-label="retryLabel ?? '重试模型操作'" @click="emit('retry')">{{ retryLabel ?? "重试" }}</button>
   <span class="sr-only" role="status">{{ error || (unavailable ? unavailableLabel(selectedAvailability?.reason) : '') }}</span>
 </template>
 
@@ -143,16 +133,12 @@ function key(event: KeyboardEvent): void {
   background: var(--yj-color-model-kimi-bg);
   color: var(--yj-color-model-kimi-ink);
 }
-.model-trigger-brand { border-radius: var(--yj-radius-full); }
 .model-menu {
   width: min(var(--yj-layout-model-menu-width), calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-10)));
 }
 .model-option-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .model-menu [aria-checked="true"] .model-option-label { font-weight: var(--yj-font-weight-semibold); }
 .model-option-status { font-size: var(--yj-font-size-caption); }
-.model-coming-soon { display: block; cursor: not-allowed; }
-/* Let the wrapper receive hover events even in browsers that suppress them on disabled buttons. */
-.model-coming-soon button { pointer-events: none; }
 .model-menu-empty { display: block; padding: var(--yj-space-3); color: var(--yj-color-text-secondary); }
 .model-retry { color: var(--yj-color-semantic-warning-ink); }
 </style>

@@ -205,8 +205,8 @@ it("opens a compact record dialog from the record card or its title without a vi
   const list = root.get('ul[aria-label="执行记录"]');
   expect(list.text()).toContain("2026-09-23 16:14"); expect(list.text()).toContain("3 秒");
   expect(list.get('.scheduled-records__status').text()).toBe("已结束");
-  expect(list.get('.scheduled-records__status').attributes("data-yj-tooltip")).toBe("执行已结束");
-  expect(list.get('[data-yj-tooltip="2.505 秒"]').text()).toBe("耗时 3 秒");
+  expect(list.get('.scheduled-records__status').attributes("data-yj-tooltip")).toBeUndefined();
+  expect(list.get('.scheduled-records__duration').text()).toBe("耗时 3 秒");
   for (const text of ["业务结果尚未评估", "聊天关联", "运行时快照", "计划当前", "整理每日摘要", "GMT+"]) expect(list.text()).not.toContain(text);
   await root.get('.scheduled-records__card').trigger("click"); await flushPromises();
   const modal = new DOMWrapper(document.querySelector('[aria-label="执行记录详情"]')!);
@@ -214,7 +214,7 @@ it("opens a compact record dialog from the record card or its title without a vi
   expect(modal.text()).toContain("午夜闹铃"); expect(modal.text()).toContain("手动触发");
   expect(modal.text()).toContain("2026-09-23 16:14"); expect(modal.text()).toContain("3 秒");
   expect(modal.text()).not.toContain("整理每日摘要"); expect(modal.text()).not.toContain("业务结果尚未评估");
-  expect(modal.find('[data-yj-tooltip*="Asia/Shanghai"]').exists()).toBe(true);
+  expect(modal.find('[data-yj-tooltip*="Asia/Shanghai"]').exists()).toBe(false);
   expect(modal.findAll('button').find(button => button.text() === "查看完整对话")?.attributes("disabled")).toBeDefined();
   await modal.get('.n-card-header__close').trigger("click"); await flushPromises();
   await root.get('.scheduled-records__card .scheduled-records__title').trigger("click"); await flushPromises();

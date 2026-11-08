@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import ChatArtifactReport from "./ChatArtifactReport.vue";
 import { chatArtifactReportNativeClient } from "../../api/chat-artifact-report-native-client";
-import YjTooltip from "../yijie/YjTooltip.vue";
 import { NModal, NTooltip } from "naive-ui";
 import YjIcon from "../yijie/YjIcon.vue";
 import { MAX_PREVIEW_TABS } from "../../domain/conversation-file-preview";
@@ -21,7 +20,7 @@ defineExpose({ toggle, openFile, opened });
       <div class="document-sidebar__tabs" data-tauri-drag-region>
         <div ref="tabStrip" class="document-sidebar__tablist" :style="{ '--preview-tab-count': state.tabs.length }" role="tablist" aria-label="预览标签页">
           <div v-for="tab in state.tabs" :key="tab.id" class="document-sidebar__tab-wrap" :data-preview-tab="tab.id" :class="{ 'is-active': tab.id === state.activeId }">
-            <YjTooltip placement="left" :text="tab.file ? `${tab.file.name} · ${tab.file.source.kind === 'attachment' ? '已发送附件' : '生成产物'}` : '新标签页'"><button :id="`preview-tab-${tab.id}`" type="button" role="tab" :data-tab-id="tab.id" :aria-selected="tab.id === state.activeId" aria-controls="conversation-file-preview" :tabindex="tab.id === state.activeId ? 0 : -1"  @click="selectTab(tab.id)" @keydown="keyTab($event, tab.id)"><YjIcon name="file" size="sm" :stroke-width="1.5" /><span>{{ tab.file?.name ?? '新标签页' }}</span></button></YjTooltip>
+            <button :id="`preview-tab-${tab.id}`" type="button" role="tab" :data-tab-id="tab.id" :aria-selected="tab.id === state.activeId" aria-controls="conversation-file-preview" :tabindex="tab.id === state.activeId ? 0 : -1"  @click="selectTab(tab.id)" @keydown="keyTab($event, tab.id)"><YjIcon name="file" size="sm" :stroke-width="1.5" /><span>{{ tab.file?.name ?? '新标签页' }}</span></button>
             <NTooltip arrow-point-to-center placement="left">
               <template #trigger><button class="document-sidebar__tab-close" type="button" :aria-label="`关闭 ${tab.file?.name ?? '新标签页'}`" @click="closeTab(tab.id)"><YjIcon name="dismiss" size="xs" :stroke-width="1.5" /></button></template>
               关闭

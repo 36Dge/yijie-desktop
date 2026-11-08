@@ -10413,3 +10413,117 @@ pub async fn chat_model_submit_v1(
         },
     ))
 }
+
+// Private IPC carries only the existing local session binding plus the generated
+// public answer. No new capability, approval decision or persistent draft.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UserInputLookupPayload {
+    session_id: Uuid,
+    input_request_id: Uuid,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UserInputAnswerPayload {
+    session_id: Uuid,
+    input_request_id: Uuid,
+    answer: super::user_input_generated::UserInputAnswerRequest,
+}
+fn require_user_input(id: Uuid) -> Result<(), ChatIpcError> {
+    require_runtime_permissions(id)?;
+    if std::env::var("YIJIE_FEAT169_INTERACTION_TOOLS").as_deref() != Ok("true") {
+        return Err(map_chat_error(ChatError::Disabled, Some(id)));
+    }
+    Ok(())
+}
+#[tauri::command]
+pub async fn chat_user_input_snapshot_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+) -> Result<CommandResponse<super::user_input_generated::UserInputSnapshot>, ChatIpcError> {
+    let r: CommandRequest<PermissionSessionPayload> = decode_request(request)?;
+    require_user_input(r.request_id)?;
+    let session = r
+        .payload
+        .session_id
+        .ok_or_else(|| map_chat_error(ChatError::InvalidInput, Some(r.request_id)))?;
+    let (_, app, _) = applications(&chat_runtime, r.request_id).await?;
+    let value = app
+        .user_input_snapshot(r.context_id, session)
+        .await
+        .map_err(|e| map_chat_error(e, Some(r.request_id)))?;
+    Ok(CommandResponse::new(r.request_id, value))
+}
+
+#[tauri::command]
+pub async fn chat_context_window_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+) -> Result<CommandResponse<super::context_window_generated::ContextWindowSnapshot>, ChatIpcError> {
+    let r: CommandRequest<super::context_window_generated::ContextWindowQuery> = decode_request(request)?;
+    require_runtime_permissions(r.request_id)?;
+    r.payload.validate().map_err(|_| map_chat_error(ChatError::InvalidInput, Some(r.request_id)))?;
+    let session = Uuid::parse_str(&r.payload.session_id).map_err(|_| map_chat_error(ChatError::InvalidInput, Some(r.request_id)))?;
+    let (_, app, _) = applications(&chat_runtime, r.request_id).await?;
+    let value = app.context_window(r.context_id, session, r.payload.include_history).await
+        .map_err(|e| map_chat_error(e, Some(r.request_id)))?;
+    Ok(CommandResponse::new(r.request_id, value))
+}
+async fn user_input_lookup(
+    request: Value,
+    runtime: &ChatRuntime,
+    action: &str,
+) -> Result<CommandResponse<super::user_input_generated::UserInputRequest>, ChatIpcError> {
+    let r: CommandRequest<UserInputLookupPayload> = decode_request(request)?;
+    require_user_input(r.request_id)?;
+    let (_, app, _) = applications(runtime, r.request_id).await?;
+    let value = app
+        .user_input_request(
+            r.context_id,
+            r.payload.session_id,
+            r.payload.input_request_id,
+            action,
+            None,
+        )
+        .await
+        .map_err(|e| map_chat_error(e, Some(r.request_id)))?;
+    Ok(CommandResponse::new(r.request_id, value))
+}
+#[tauri::command]
+pub async fn chat_user_input_read_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+) -> Result<CommandResponse<super::user_input_generated::UserInputRequest>, ChatIpcError> {
+    user_input_lookup(request, &chat_runtime, "read").await
+}
+#[tauri::command]
+pub async fn chat_user_input_touch_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+) -> Result<CommandResponse<super::user_input_generated::UserInputRequest>, ChatIpcError> {
+    user_input_lookup(request, &chat_runtime, "touch").await
+}
+#[tauri::command]
+pub async fn chat_user_input_answer_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+) -> Result<CommandResponse<super::user_input_generated::UserInputRequest>, ChatIpcError> {
+    let r: CommandRequest<UserInputAnswerPayload> = decode_request(request)?;
+    require_user_input(r.request_id)?;
+    r.payload
+        .answer
+        .validate()
+        .map_err(|_| map_chat_error(ChatError::InvalidInput, Some(r.request_id)))?;
+    let (_, app, _) = applications(&chat_runtime, r.request_id).await?;
+    let value = app
+        .user_input_request(
+            r.context_id,
+            r.payload.session_id,
+            r.payload.input_request_id,
+            "answer",
+            Some(&r.payload.answer),
+        )
+        .await
+        .map_err(|e| map_chat_error(e, Some(r.request_id)))?;
+    Ok(CommandResponse::new(r.request_id, value))
+}

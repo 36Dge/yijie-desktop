@@ -2573,6 +2573,135 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn user_input_bridge_preserves_valid_closed_errors() {
+        let token = TestToken::new(0o600);
+        for (status, code, expected) in [
+            (
+                "404 Not Found",
+                "not_found",
+                HostErrorCode::UserInputNotFound,
+            ),
+            ("409 Conflict", "conflict", HostErrorCode::UserInputConflict),
+            (
+                "503 Service Unavailable",
+                "unavailable",
+                HostErrorCode::UserInputUnavailable,
+            ),
+        ] {
+            let (port, server) = serve(vec![
+                ready_response(NONCE),
+                json_response(status, &serde_json::json!({"error":{"code":code,"message":"User input request unavailable"}}).to_string()),
+            ]).await;
+            let client = bridge(port, token.path.clone(), NONCE);
+            let error = client
+                .user_input_request(Uuid::now_v7(), Uuid::now_v7(), "read", None)
+                .await
+                .unwrap_err();
+            assert_eq!(error.code(), Some(expected));
+            assert_eq!(server.await.unwrap().len(), 2);
+        }
+    }
+
+    #[test]
+    fn user_input_bridge_does_not_infer_absence_from_ambiguous_errors() {
+        for (status, body) in [
+            (StatusCode::NOT_FOUND, "ordinary route missing"),
+            (
+                StatusCode::NOT_FOUND,
+                r#"{"error":{"code":"future_code","message":"ordinary failure"}}"#,
+            ),
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                r#"{"error":{"code":"not_found","message":"ordinary failure"}}"#,
+            ),
+            (StatusCode::NOT_FOUND, r#"{"error":{}}"#),
+        ] {
+            assert_eq!(
+                parse_user_input_rejection_body(status, body.as_bytes()).kind(),
+                HostBridgeErrorKind::Protocol
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn user_input_bridge_uses_original_binding_and_redacted_generated_answer() {
+        let session = Uuid::now_v7();
+        let id = Uuid::now_v7();
+        let operation = Uuid::now_v7();
+        let row = serde_json::json!({"request_id":id,"turn_id":"ordinary-turn","item_id":"ordinary-item","state":"pending","timeout_paused":false,"questions":[{"id":"colour","header":"颜色","question":"普通选择","isOther":true,"isSecret":true}]});
+        let mut paused = row.clone();
+        paused["timeout_paused"] = true.into();
+        let mut receipt = row.clone();
+        receipt["state"] = "answered".into();
+        receipt["questions"] = serde_json::json!([]);
+        receipt["operation_id"] = operation.to_string().into();
+        let (port, server) = serve(vec![
+            ready_response(NONCE),
+            json_response(
+                "200 OK",
+                &serde_json::json!({"enabled":true,"requests":[row]}).to_string(),
+            ),
+            ready_response(NONCE),
+            json_response("200 OK", &paused.to_string()),
+            ready_response(NONCE),
+            json_response("200 OK", &receipt.to_string()),
+        ])
+        .await;
+        let token = TestToken::new(0o600);
+        let client = bridge(port, token.path.clone(), NONCE);
+        let snapshot = client.user_input_snapshot(session).await.unwrap();
+        assert_eq!(snapshot.requests[0].request_id, id.to_string());
+        assert!(
+            client
+                .user_input_request(session, id, "touch", None)
+                .await
+                .unwrap()
+                .timeout_paused
+        );
+        let answer:super::super::user_input_generated::UserInputAnswerRequest=serde_json::from_value(serde_json::json!({"operation_id":operation,"answers":{"colour":{"answers":["ordinary-sensitive-blue"]}}})).unwrap();
+        assert!(!format!("{answer:?}").contains("ordinary-sensitive-blue"));
+        assert_eq!(
+            client
+                .user_input_request(session, id, "answer", Some(&answer))
+                .await
+                .unwrap()
+                .state,
+            "answered"
+        );
+        let requests = server.await.unwrap();
+        assert!(requests[1].starts_with(&format!("GET /v1/agent-sessions/{session}/user-input ")));
+        assert!(requests[3].starts_with(&format!(
+            "POST /v1/agent-sessions/{session}/user-input/{id}/touch "
+        )));
+        assert!(requests[5].starts_with(&format!(
+            "POST /v1/agent-sessions/{session}/user-input/{id}/answer "
+        )));
+        assert!(requests[5].contains("ordinary-sensitive-blue"));
+        assert!(requests[5]
+            .to_ascii_lowercase()
+            .contains("authorization: bearer "));
+    }
+
+    #[tokio::test]
+    async fn context_window_bridge_reads_without_model_or_mutation_requests() {
+        let session = Uuid::now_v7();
+        let row = serde_json::json!({
+            "schema_version": 1, "thread_id": "native-thread", "model_profile": "ordinary",
+            "model_revision": 1, "sample": null,
+            "compactions": [{"item_id": "native-item", "turn_id": "native-turn", "state": "in_progress"}]
+        });
+        let (port, server) = serve(vec![ready_response(NONCE), json_response("200 OK", &row.to_string())]).await;
+        let token = TestToken::new(0o600);
+        let client = bridge(port, token.path.clone(), NONCE);
+        let value = client.context_window(session, true).await.unwrap();
+        assert!(value.sample.is_none());
+        assert_eq!(value.compactions[0].state, "in_progress");
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].starts_with(&format!("GET /v1/agent-sessions/{session}/context-window?include_history=true ")));
+    }
+
+    #[tokio::test]
     async fn command_approval_choices_read_legacy_without_downgrading_decisions() {
         let session = Uuid::now_v7();
         let id = Uuid::now_v7();
@@ -4071,3 +4200,139 @@ mod tests {
 }
 
 mod scheduled_draft;
+
+// Native question transport shares the existing authenticated loopback client.
+impl HostBridge {
+    pub async fn context_window(
+        &self,
+        session: Uuid,
+        include_history: bool,
+    ) -> Result<super::context_window_generated::ContextWindowSnapshot, HostBridgeError> {
+        require_non_nil(session)?;
+        let response = self
+            .authorized_request(Method::GET, &format!("/v1/agent-sessions/{session}/context-window?include_history={include_history}"))
+            .await?
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(|_| transport_error())?;
+        if response.status() != StatusCode::OK {
+            return Err(parse_rejection(response).await);
+        }
+        let value: super::context_window_generated::ContextWindowSnapshot =
+            serde_json::from_slice(&read_json_body(response).await?).map_err(|_| protocol_error())?;
+        value.validate().map_err(|_| protocol_error())?;
+        Ok(value)
+    }
+
+    pub async fn user_input_snapshot(
+        &self,
+        session: Uuid,
+    ) -> Result<super::user_input_generated::UserInputSnapshot, HostBridgeError> {
+        require_non_nil(session)?;
+        let response = self
+            .authorized_request(
+                Method::GET,
+                &format!("/v1/agent-sessions/{session}/user-input"),
+            )
+            .await?
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(|_| transport_error())?;
+        if response.status() != StatusCode::OK {
+            return Err(parse_user_input_rejection(response).await);
+        }
+        let value: super::user_input_generated::UserInputSnapshot =
+            serde_json::from_slice(&read_json_body(response).await?)
+                .map_err(|_| protocol_error())?;
+        value.validate().map_err(|_| protocol_error())?;
+        let mut ids = std::collections::HashSet::new();
+        if value.requests.iter().any(|r| {
+            !ids.insert(r.request_id.clone())
+                || !matches!(r.state.as_str(), "pending" | "submitting")
+        }) {
+            return Err(protocol_error());
+        }
+        Ok(value)
+    }
+    pub async fn user_input_request(
+        &self,
+        session: Uuid,
+        id: Uuid,
+        action: &str,
+        answer: Option<&super::user_input_generated::UserInputAnswerRequest>,
+    ) -> Result<super::user_input_generated::UserInputRequest, HostBridgeError> {
+        require_non_nil(session)?;
+        require_non_nil(id)?;
+        let base = format!("/v1/agent-sessions/{session}/user-input/{id}");
+        let response = match action {
+            "read" => self
+                .authorized_request(Method::GET, &base)
+                .await?
+                .timeout(REQUEST_TIMEOUT)
+                .send()
+                .await
+                .map_err(|_| transport_error())?,
+            "touch" => {
+                self.send_json(
+                    Method::POST,
+                    &format!("{base}/touch"),
+                    &serde_json::json!({}),
+                )
+                .await?
+            }
+            "answer" => {
+                let input = answer.ok_or_else(protocol_error)?;
+                input.validate().map_err(|_| protocol_error())?;
+                self.send_json(
+                    Method::POST,
+                    &format!("{base}/answer"),
+                    &serde_json::to_value(input).map_err(|_| protocol_error())?,
+                )
+                .await?
+            }
+            _ => return Err(protocol_error()),
+        };
+        if response.status() != StatusCode::OK {
+            return Err(parse_user_input_rejection(response).await);
+        }
+        let value: super::user_input_generated::UserInputRequest =
+            serde_json::from_slice(&read_json_body(response).await?)
+                .map_err(|_| protocol_error())?;
+        value.validate().map_err(|_| protocol_error())?;
+        if value.request_id != id.to_string() {
+            return Err(protocol_error());
+        }
+        Ok(value)
+    }
+}
+
+// Question routes have their own existing closed error contract. A plain 404,
+// unknown code or malformed body cannot prove that an original request ended.
+async fn parse_user_input_rejection(response: Response) -> HostBridgeError {
+    let status = response.status();
+    let Ok(bytes) = read_json_body(response).await else {
+        return protocol_error();
+    };
+    parse_user_input_rejection_body(status, &bytes)
+}
+
+fn parse_user_input_rejection_body(status: StatusCode, bytes: &[u8]) -> HostBridgeError {
+    let Ok(value) = serde_json::from_slice::<super::user_input_generated::UserInputError>(bytes)
+    else {
+        return protocol_error();
+    };
+    if value.validate().is_err() {
+        return protocol_error();
+    }
+    let code = match (status, value.error.code.as_str()) {
+        (StatusCode::BAD_REQUEST, "invalid_request") => HostErrorCode::InvalidRequest,
+        (StatusCode::UNAUTHORIZED, "unauthorized") => HostErrorCode::Unauthorized,
+        (StatusCode::NOT_FOUND, "not_found") => HostErrorCode::UserInputNotFound,
+        (StatusCode::CONFLICT, "conflict") => HostErrorCode::UserInputConflict,
+        (StatusCode::SERVICE_UNAVAILABLE, "unavailable") => HostErrorCode::UserInputUnavailable,
+        _ => return protocol_error(),
+    };
+    HostBridgeError::rejected(code)
+}

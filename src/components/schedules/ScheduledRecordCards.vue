@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import YjTooltip from "../yijie/YjTooltip.vue";
 import { NButton } from "naive-ui";
 import type { RecordRow, RecordView } from "../../api/generated/scheduled-task-ipc-v2.gen";
 import { durationLabel, executionTimeLabel, recordElementId, recordStatus, recordTone } from "../../domain/scheduled-task-ui";
@@ -45,15 +44,15 @@ function conversationAvailable(row: RecordRow) {
     <ul role="list" class="scheduled-records__grid" aria-label="执行记录">
       <li role="listitem" v-for="row in rows" :key="JSON.stringify(row.record.key)" class="scheduled-records__card" :data-tone="recordTone(row.record)" @click="openCard($event, row)">
         <div class="scheduled-records__topline">
-          <YjTooltip :text="executionTimeLabel(row.record.timing)"><span class="scheduled-records__time" >{{ timeText(row.record) }}</span></YjTooltip>
-          <YjTooltip :text="recordStatus(row.record)"><span class="scheduled-records__status" >{{ statusLabel(row.record) }}</span></YjTooltip>
+          <span class="scheduled-records__time" >{{ timeText(row.record) }}</span>
+          <span class="scheduled-records__status" >{{ statusLabel(row.record) }}</span>
         </div>
-        <h2><YjTooltip :text="row.name"><button :id="recordElementId(row.record)" class="scheduled-records__title"  :aria-label="`查看 ${row.name} 的执行记录详情`" @click.stop="emit('open', row)">{{ row.name }}</button></YjTooltip></h2>
+        <h2><button :id="recordElementId(row.record)" class="scheduled-records__title"  :aria-label="`查看 ${row.name} 的执行记录详情`" @click.stop="emit('open', row)">{{ row.name }}</button></h2>
         <p v-if="row.record.kind === 'run' && row.record.attention === 'needs_attention'" class="scheduled-records__note">审批或执行结果待核对</p>
         <div class="scheduled-records__footer">
           <div class="scheduled-records__meta">
             <span>{{ triggerLabel(row.record) }}</span>
-            <YjTooltip v-if="row.record.timing.duration !== 'not_started'" :text="durationLabel(row.record.timing)"><span  class="scheduled-records__duration" >耗时 {{ durationLabel(row.record.timing, true) }}</span></YjTooltip>
+            <span v-if="row.record.timing.duration !== 'not_started'"  class="scheduled-records__duration" >耗时 {{ durationLabel(row.record.timing, true) }}</span>
           </div>
           <div class="scheduled-records__actions" data-record-actions @click.stop>
             <ScheduledCardAction v-if="row.record.kind === 'run'" :id="`schedule-rerun-${row.record.run.run_id}`" icon="rerun" :label="rerunHint(row)" :disabled="rerunDisabled || rerunUnavailable(row)" @click="emit('rerun', row)" />
