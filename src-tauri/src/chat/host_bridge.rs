@@ -1002,7 +1002,7 @@ impl HostBridge {
         self.open_event_stream(
             session_id,
             cursor,
-            if super::artifact_media::files_enabled() {
+            if super::artifact_media::files_enabled() || super::document_runtime::enabled() {
                 12
             } else if super::artifact_media::enabled() {
                 9

@@ -1,0 +1,546 @@
+{
+  "schema_version": 1,
+  "feature": "FEAT-171",
+  "platform": "macos-arm64",
+  "minimum_macos": "14.0",
+  "cpython": {
+    "version": "3.12.16",
+    "license": "Python-2.0 / PSF license stack",
+    "source_url": "https://www.python.org/ftp/python/3.12.16/Python-3.12.16.tar.xz",
+    "release_url": "https://www.python.org/downloads/release/python-31216/",
+    "license_url": "https://docs.python.org/3.12/license.html",
+    "upstream_source_sha256": "b5796915dc45ff745cfb4e990a7e7c93d6f546328a102ce31448d69ebc37575c",
+    "distribution": "Yijie build from pinned source into application-owned relocatable prefix; no user installation or venv based on system Python",
+    "product_binary_sha256": null,
+    "build_status": "NOT RUN"
+  },
+  "libreoffice": {
+    "version": "26.8.2",
+    "arch": "aarch64",
+    "upstream_mac_minimum": "11",
+    "license": "MPL-2.0 for main code; included third-party licenses must be preserved; contribution dual-license statement is not whole-binary license",
+    "license_url": "https://www.libreoffice.org/licenses/",
+    "requirements_url": "https://www.libreoffice.org/system-requirements/",
+    "upstream_artifact_url": "https://download.documentfoundation.org/libreoffice/stable/26.8.2/mac/aarch64/LibreOffice_26.8.2_MacOS_aarch64.dmg",
+    "upstream_metadata_url": "https://download.documentfoundation.org/libreoffice/stable/26.8.2/mac/aarch64/LibreOffice_26.8.2_MacOS_aarch64.dmg.mirrorlist",
+    "upstream_size_bytes": 299236406,
+    "upstream_sha256": "9f24fe83ab1ed5c95eb3df580119f32932f713e577feeac02bf619fb00749b55",
+    "product_distribution_plan": "build separately from exact upstream source/version using canonical build, include full corresponding sources/notices and internal third-party license inventory; do not copy Codex runtime or overwrite a signed upstream app",
+    "binary_downloaded_or_installed": false,
+    "product_binary_sha256": null,
+    "final_sbom_status": "NOT RUN"
+  },
+  "fonts": [
+    {
+      "name": "Noto Sans CJK SC",
+      "version": "Sans2.004",
+      "license": "OFL-1.1",
+      "tag_object": {
+        "sha": "523d033d6cb47f4a80c58a35753646f5c3608a78",
+        "type": "commit",
+        "url": "https://api.github.com/repos/notofonts/noto-cjk/git/commits/523d033d6cb47f4a80c58a35753646f5c3608a78"
+      },
+      "source_file": "Sans/Variable/TTF/NotoSansCJKsc-VF.ttf",
+      "source_git_blob": "e67840913223f5c5db60570ce5bf001b0e079d42",
+      "source_size_bytes": 36144788,
+      "source_url": "https://github.com/notofonts/noto-cjk/blob/Sans2.004/Sans/Variable/TTF/NotoSansCJKsc-VF.ttf",
+      "license_url": "https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/LICENSE",
+      "build_plan": "fonttools 4.60.1 instantiate wght=400,700; rename family YiJie Document Sans, preserve OFL and notices; ship static glyf TrueType, not CFF OTF or variable font",
+      "derived_outputs_sha256": null,
+      "derived_outputs_status": "NOT BUILT"
+    }
+  ],
+  "python_packages": [
+    {
+      "name": "python-docx",
+      "version": "1.2.0",
+      "scope": "runtime",
+      "license_metadata": "MIT",
+      "requires_python": ">=3.9",
+      "requires_dist": [
+        "lxml>=3.1.0",
+        "typing_extensions>=4.9.0"
+      ],
+      "selected_extras": [],
+      "metadata_source": "https://pypi.org/pypi/python-docx/1.2.0/json",
+      "project_source": "https://pypi.org/project/python-docx/1.2.0/",
+      "upstream_artifacts_metadata_only": [
+        {
+          "filename": "python_docx-1.2.0-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/d0/00/1e03a4989fa5795da308cd774f05b704ace555a70f9bf9d3be057b680bcf/python_docx-1.2.0-py3-none-any.whl",
+          "kind": "bdist_wheel",
+          "size_bytes": 252987,
+          "sha256": "3fd478f3250fbbbfd3b94fe1e985955737c145627498896a8a6bf81f4baf66c7",
+          "yanked": false
+        },
+        {
+          "filename": "python_docx-1.2.0.tar.gz",
+          "url": "https://files.pythonhosted.org/packages/a9/f7/eddfe33871520adab45aaa1a71f0402a2252050c14c7e3009446c8f4701c/python_docx-1.2.0.tar.gz",
+          "kind": "sdist",
+          "size_bytes": 5723256,
+          "sha256": "7bc9d7b7d8a69c9c02ca09216118c86552704edc23bac179283f2e38f86220ce",
+          "yanked": false
+        }
+      ]
+    },
+    {
+      "name": "python-pptx",
+      "version": "1.0.2",
+      "scope": "runtime",
+      "license_metadata": "MIT",
+      "requires_python": ">=3.8",
+      "requires_dist": [
+        "Pillow>=3.3.2",
+        "XlsxWriter>=0.5.7",
+        "lxml>=3.1.0",
+        "typing-extensions>=4.9.0"
+      ],
+      "selected_extras": [],
+      "metadata_source": "https://pypi.org/pypi/python-pptx/1.0.2/json",
+      "project_source": "https://pypi.org/project/python-pptx/1.0.2/",
+      "upstream_artifacts_metadata_only": [
+        {
+          "filename": "python_pptx-1.0.2-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/d9/4f/00be2196329ebbff56ce564aa94efb0fbc828d00de250b1980de1a34ab49/python_pptx-1.0.2-py3-none-any.whl",
+          "kind": "bdist_wheel",
+          "size_bytes": 472788,
+          "sha256": "160838e0b8565a8b1f67947675886e9fea18aa5e795db7ae531606d68e785cba",
+          "yanked": false
+        },
+        {
+          "filename": "python_pptx-1.0.2.tar.gz",
+          "url": "https://files.pythonhosted.org/packages/52/a9/0c0db8d37b2b8a645666f7fd8accea4c6224e013c42b1d5c17c93590cd06/python_pptx-1.0.2.tar.gz",
+          "kind": "sdist",
+          "size_bytes": 10109297,
+          "sha256": "479a8af0eaf0f0d76b6f00b0887732874ad2e3188230315290cd1f9dd9cc7095",
+          "yanked": false
+        }
+      ]
+    },
+    {
+      "name": "openpyxl",
+      "version": "3.1.5",
+      "scope": "runtime",
+      "license_metadata": "MIT",
+      "requires_python": ">=3.8",
+      "requires_dist": [
+        "et-xmlfile"
+      ],
+      "selected_extras": [],
+      "metadata_source": "https://pypi.org/pypi/openpyxl/3.1.5/json",
+      "project_source": "https://pypi.org/project/openpyxl/3.1.5/",
+      "upstream_artifacts_metadata_only": [
+        {
+          "filename": "openpyxl-3.1.5-py2.py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/c0/da/977ded879c29cbd04de313843e76868e6e13408a94ed6b987245dc7c8506/openpyxl-3.1.5-py2.py3-none-any.whl",
+          "kind": "bdist_wheel",
+          "size_bytes": 250910,
+          "sha256": "5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2",
+          "yanked": false
+        },
+        {
+          "filename": "openpyxl-3.1.5.tar.gz",
+          "url": "https://files.pythonhosted.org/packages/3d/f9/88d94a75de065ea32619465d2f77b29a0469500e99012523b91cc4141cd1/openpyxl-3.1.5.tar.gz",
+          "kind": "sdist",
+          "size_bytes": 186464,
+          "sha256": "cf0e3cf56142039133628b5acffe8ef0c12bc902d2aadd3e0fe5878dc08d1050",
+          "yanked": false
+        }
+      ]
+    },
+    {
+      "name": "reportlab",
+      "version": "4.4.9",
+      "scope": "runtime",
+      "license_metadata": "BSD license (see license.txt for details), Copyright (c) 2000-2025, ReportLab Inc.",
+      "requires_python": "<4,>=3.9",
+      "requires_dist": [
+        "pillow>=9.0.0",
+        "charset-normalizer",
+        "rl_accel<1.1,>=0.9.0; extra == \"accel\"",
+        "rl_renderPM<4.1,>=4.0.3; extra == \"renderpm\"",
+        "rlPyCairo<1,>=0.2.0; extra == \"pycairo\"",
+        "freetype-py<2.4,>=2.3.0; extra == \"pycairo\"",
+        "rlbidi; extra == \"bidi\"",
+        "uharfbuzz; extra == \"shaping\""
+      ],
+      "selected_extras": [],
+      "metadata_source": "https://pypi.org/pypi/reportlab/4.4.9/json",
+      "project_source": "https://pypi.org/project/reportlab/4.4.9/",
+      "upstream_artifacts_metadata_only": [
+        {
+          "filename": "reportlab-4.4.9-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/17/77/546e50edfaba6a0e58e8ec5fdc4446510227cec9e8f40172b60941d5a633/reportlab-4.4.9-py3-none-any.whl",
+          "kind": "bdist_wheel",
+          "size_bytes": 1954401,
+          "sha256": "68e2d103ae8041a37714e8896ec9b79a1c1e911d68c3bd2ea17546568cf17bfd",
+          "yanked": false
+        },
+        {
+          "filename": "reportlab-4.4.9.tar.gz",
+          "url": "https://files.pythonhosted.org/packages/1a/39/42cf24aee570a80e1903221ae3a92a2e34c324794a392eb036cbb6dc3839/reportlab-4.4.9.tar.gz",
+          "kind": "sdist",
+          "size_bytes": 3911246,
+          "sha256": "7cf487764294ee791a4781f5a157bebce262a666ae4bbb87786760a9676c9378",
+          "yanked": false
+        }
+      ]
+    },
+    {
+      "name": "pypdf",
+      "version": "6.10.0",
+      "scope": "runtime",
+      "license_metadata": "BSD-3-Clause",
+      "requires_python": ">=3.9",
+      "requires_dist": [
+        "typing_extensions>=4.0; python_version < \"3.11\"",
+        "cryptography; extra == \"crypto\"",
+        "PyCryptodome; extra == \"cryptodome\"",
+        "flit; extra == \"dev\"",
+        "pip-tools; extra == \"dev\"",
+        "pre-commit; extra == \"dev\"",
+        "pytest-cov; extra == \"dev\"",
+        "pytest-socket; extra == \"dev\"",
+        "pytest-timeout; extra == \"dev\"",
+        "pytest-xdist; extra == \"dev\"",
+        "wheel; extra == \"dev\"",
+        "myst_parser; extra == \"docs\"",
+        "sphinx; extra == \"docs\"",
+        "sphinx_rtd_theme; extra == \"docs\"",
+        "cryptography; extra == \"full\"",
+        "Pillow>=8.0.0; extra == \"full\"",
+        "Pillow>=8.0.0; extra == \"image\""
+      ],
+      "selected_extras": [],
+      "metadata_source": "https://pypi.org/pypi/pypdf/6.10.0/json",
+      "project_source": "https://pypi.org/project/pypdf/6.10.0/",
+      "upstream_artifacts_metadata_only": [
+        {
+          "filename": "pypdf-6.10.0-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/55/f2/7ebe366f633f30a6ad105f650f44f24f98cb1335c4157d21ae47138b3482/pypdf-6.10.0-py3-none-any.whl",
+          "kind": "bdist_wheel",
+          "size_bytes": 334459,
+          "sha256": "90005e959e1596c6e6c84c8b0ad383285b3e17011751cedd17f2ce8fcdfc86de",
+          "yanked": false
+        },
+        {
+          "filename": "pypdf-6.10.0.tar.gz",
+          "url": "https://files.pythonhosted.org/packages/b8/9f/ca96abf18683ca12602065e4ed2bec9050b672c87d317f1079abc7b6d993/pypdf-6.10.0.tar.gz",
+          "kind": "sdist",
+          "size_bytes": 5314833,
+          "sha256": "4c5a48ba258c37024ec2505f7e8fd858525f5502784a2e1c8d415604af29f6ef",
+          "yanked": false
+        }
+      ]
+    },
+    {
+      "name": "lxml",
+      "version": "6.1.1",
+      "scope": "runtime",
+      "license_metadata": "BSD-3-Clause",
+      "requires_python": ">=3.8",
+      "requires_dist": [
+        "cssselect>=0.7; extra == \"cssselect\"",
+        "html5lib; extra == \"html5\"",
+        "BeautifulSoup4; extra == \"htmlsoup\"",
+        "lxml_html_clean; extra == \"html-clean\""
+      ],
+      "selected_extras": [],
+      "metadata_source": "https://pypi.org/pypi/lxml/6.1.1/json",
+      "project_source": "https://pypi.org/project/lxml/6.1.1/",
+      "upstream_artifacts_metadata_only": [
+        {
+          "filename": "lxml-6.1.1-cp312-cp312-macosx_10_13_universal2.whl",
+          "url": "https://files.pythonhosted.org/packages/6a/6e/c4add832b6fc1e887125b96f880d7b9b70aae5248718e046b1704bcac4b9/lxml-6.1.1-cp312-cp312-macosx_10_13_universal2.whl",
+          "kind": "bdist_wheel",
+          "size_bytes": 8570821,
+          "sha256": "104c09bda8d2a562824c0e319d0768ce26a779b7601e0931d33b09b53c392ef7",
+          "yanked": false
+        },
+        {
+          "filename": "lxml-6.1.1.tar.gz",
+          "url": "https://files.pythonhosted.org/packages/05/3b/aab6728cae887456f409b4d75e8a01856e4f04bd510de38052a47768b680/lxml-6.1.1.tar.gz",
+          "kind": "sdist",
+          "size_bytes": 4197430,
+          "sha256": "ba96ae44888e0185281e937633a743ea90d5a196c6000f82565ebb0580012d40",
+          "yanked": false
+        }
+      ]
+    },
+    {
+      "name": "Pillow",
+      "version": "13.0.0",
+      "scope": "runtime",
+      "license_metadata": "MIT-CMU",
+      "requires_python": ">=3.11",
+      "requires_dist": [
+        "furo; extra == \"docs\"",
+        "olefile; extra == \"docs\"",
+        "sphinx>=8.2; extra == \"docs\"",
+        "sphinx-autobuild; extra == \"docs\"",
+        "sphinx-copybutton; extra == \"docs\"",
+        "sphinx-inline-tabs; extra == \"docs\"",
+        "sphinxext-opengraph; extra == \"docs\"",
+        "olefile; extra == \"fpx\"",
+        "olefile; extra == \"mic\"",
+        "arro3-compute; extra == \"test-arrow\"",
+        "arro3-core; extra == \"test-arrow\"",
+        "nanoarrow; extra == \"test-arrow\"",
+        "pyarrow; extra == \"test-arrow\"",
+        "coverage>=7.4.2; extra == \"tests\"",
+        "defusedxml; extra == \"tests\"",
+        "markdown2; extra == \"tests\"",
+        "olefile; extra == \"tests\"",
+        "packaging; extra == \"tests\"",
+        "psutil; (sys_platform == \"linux\" or sys_platform == \"darwin\") and extra == \"tests\"",
+        "pytest; extra == \"tests\"",
+        "pytest-cov; extra == \"tests\"",
+        "pytest-timeout; extra == \"tests\"",
+        "pytest-xdist; extra == \"tests\"",
+        "setuptools; extra == \"tests\"",
+        "trove-classifiers>=2024.10.12; extra == \"tests\"",
+        "defusedxml; extra == \"xmp\""
+      ],
+      "selected_extras": [],
+      "metadata_source": "https://pypi.org/pypi/Pillow/13.0.0/json",
+      "project_source": "https://pypi.org/project/Pillow/13.0.0/",
+      "upstream_artifacts_metadata_only": [
+        {
+          "filename": "pillow-13.0.0-cp312-cp312-macosx_11_0_arm64.whl",
+          "url": "https://files.pythonhosted.org/packages/39/4b/f2ed53d83aa44ac19599ac0a54897f867fafb95f406980d1e24083f8cbe3/pillow-13.0.0-cp312-cp312-macosx_11_0_arm64.whl",
+          "kind": "bdist_wheel",
+          "size_bytes": 4852329,
+          "sha256": "fc481f742ccda20e9ed760b8f978dff50f2a4e9bc253ac167fb0a05b0783ef52",
+          "yanked": false
+        },
+        {
+          "filename": "pillow-13.0.0.tar.gz",
+          "url": "https://files.pythonhosted.org/packages/ce/a4/9cc30690a394a8305e8be4c9036aa16d0dfddadd09079860b582f562496d/pillow-13.0.0.tar.gz",
+          "kind": "sdist",
+          "size_bytes": 47058631,
+          "sha256": "cdcd1ba258178f7356d74170c9a81ba4eab6a5d55748bc402a5a2a6fe6be3510",
+          "yanked": false
+        }
+      ]
+    },
+    {
+      "name": "typing_extensions",
+      "version": "4.15.0",
+      "scope": "runtime",
+      "license_metadata": "PSF-2.0",
+      "requires_python": ">=3.9",
+      "requires_dist": [],
+      "selected_extras": [],
+      "metadata_source": "https://pypi.org/pypi/typing_extensions/4.15.0/json",
+      "project_source": "https://pypi.org/project/typing_extensions/4.15.0/",
+      "upstream_artifacts_metadata_only": [
+        {
+          "filename": "typing_extensions-4.15.0-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/18/67/36e9267722cc04a6b9f15c7f3441c2363321a3ea07da7ae0c0707beb2a9c/typing_extensions-4.15.0-py3-none-any.whl",
+          "kind": "bdist_wheel",
+          "size_bytes": 44614,
+          "sha256": "f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548",
+          "yanked": false
+        },
+        {
+          "filename": "typing_extensions-4.15.0.tar.gz",
+          "url": "https://files.pythonhosted.org/packages/72/94/1a15dd82efb362ac84269196e94cf00f187f7ed21c242792a923cdb1c61f/typing_extensions-4.15.0.tar.gz",
+          "kind": "sdist",
+          "size_bytes": 109391,
+          "sha256": "0cea48d173cc12fa28ecabc3b837ea3cf6f38c6d1136f85cbaaf598984861466",
+          "yanked": false
+        }
+      ]
+    },
+    {
+      "name": "XlsxWriter",
+      "version": "3.2.9",
+      "scope": "runtime",
+      "license_metadata": "BSD-2-Clause",
+      "requires_python": ">=3.8",
+      "requires_dist": [],
+      "selected_extras": [],
+      "metadata_source": "https://pypi.org/pypi/XlsxWriter/3.2.9/json",
+      "project_source": "https://pypi.org/project/XlsxWriter/3.2.9/",
+      "upstream_artifacts_metadata_only": [
+        {
+          "filename": "xlsxwriter-3.2.9-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/3a/0c/3662f4a66880196a590b202f0db82d919dd2f89e99a27fadef91c4a33d41/xlsxwriter-3.2.9-py3-none-any.whl",
+          "kind": "bdist_wheel",
+          "size_bytes": 175315,
+          "sha256": "9a5db42bc5dff014806c58a20b9eae7322a134abb6fce3c92c181bfb275ec5b3",
+          "yanked": false
+        },
+        {
+          "filename": "xlsxwriter-3.2.9.tar.gz",
+          "url": "https://files.pythonhosted.org/packages/46/2c/c06ef49dc36e7954e55b802a8b231770d286a9758b3d936bd1e04ce5ba88/xlsxwriter-3.2.9.tar.gz",
+          "kind": "sdist",
+          "size_bytes": 215940,
+          "sha256": "254b1c37a368c444eac6e2f867405cc9e461b0ed97a3233b2ac1e574efb4140c",
+          "yanked": false
+        }
+      ]
+    },
+    {
+      "name": "et_xmlfile",
+      "version": "2.0.0",
+      "scope": "runtime",
+      "license_metadata": "MIT",
+      "requires_python": ">=3.8",
+      "requires_dist": [],
+      "selected_extras": [],
+      "metadata_source": "https://pypi.org/pypi/et_xmlfile/2.0.0/json",
+      "project_source": "https://pypi.org/project/et_xmlfile/2.0.0/",
+      "upstream_artifacts_metadata_only": [
+        {
+          "filename": "et_xmlfile-2.0.0-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/c1/8b/5fe2cc11fee489817272089c4203e679c63b570a5aaeb18d852ae3cbba6a/et_xmlfile-2.0.0-py3-none-any.whl",
+          "kind": "bdist_wheel",
+          "size_bytes": 18059,
+          "sha256": "7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa",
+          "yanked": false
+        },
+        {
+          "filename": "et_xmlfile-2.0.0.tar.gz",
+          "url": "https://files.pythonhosted.org/packages/d3/38/af70d7ab1ae9d4da450eeec1fa3918940a5fafb9055e934af8d6eb0c2313/et_xmlfile-2.0.0.tar.gz",
+          "kind": "sdist",
+          "size_bytes": 17234,
+          "sha256": "dab3f4764309081ce75662649be815c4c9081e88f0837825f90fd28317d4da54",
+          "yanked": false
+        }
+      ]
+    },
+    {
+      "name": "charset-normalizer",
+      "version": "3.4.4",
+      "scope": "runtime",
+      "license_metadata": "MIT",
+      "requires_python": ">=3.7",
+      "requires_dist": [],
+      "selected_extras": [],
+      "metadata_source": "https://pypi.org/pypi/charset-normalizer/3.4.4/json",
+      "project_source": "https://pypi.org/project/charset-normalizer/3.4.4/",
+      "upstream_artifacts_metadata_only": [
+        {
+          "filename": "charset_normalizer-3.4.4-cp312-cp312-macosx_10_13_universal2.whl",
+          "url": "https://files.pythonhosted.org/packages/f3/85/1637cd4af66fa687396e757dec650f28025f2a2f5a5531a3208dc0ec43f2/charset_normalizer-3.4.4-cp312-cp312-macosx_10_13_universal2.whl",
+          "kind": "bdist_wheel",
+          "size_bytes": 208425,
+          "sha256": "0a98e6759f854bd25a58a73fa88833fba3b7c491169f86ce1180c948ab3fd394",
+          "yanked": false
+        },
+        {
+          "filename": "charset_normalizer-3.4.4-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/0a/4c/925909008ed5a988ccbb72dcc897407e5d6d3bd72410d69e051fc0c14647/charset_normalizer-3.4.4-py3-none-any.whl",
+          "kind": "bdist_wheel",
+          "size_bytes": 53402,
+          "sha256": "7a32c560861a02ff789ad905a2fe94e3f840803362c84fecf1851cb4cf3dc37f",
+          "yanked": false
+        },
+        {
+          "filename": "charset_normalizer-3.4.4.tar.gz",
+          "url": "https://files.pythonhosted.org/packages/13/69/33ddede1939fdd074bce5434295f38fae7136463422fe4fd3e0e89b98062/charset_normalizer-3.4.4.tar.gz",
+          "kind": "sdist",
+          "size_bytes": 129418,
+          "sha256": "94537985111c35f28720e43603b8e7b43a6ecfb2ce1d3058bbe955b73404e21a",
+          "yanked": false
+        }
+      ]
+    },
+    {
+      "name": "defusedxml",
+      "version": "0.7.1",
+      "scope": "runtime",
+      "license_metadata": "PSFL",
+      "requires_python": ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*",
+      "requires_dist": [],
+      "selected_extras": [],
+      "metadata_source": "https://pypi.org/pypi/defusedxml/0.7.1/json",
+      "project_source": "https://pypi.org/project/defusedxml/0.7.1/",
+      "upstream_artifacts_metadata_only": [
+        {
+          "filename": "defusedxml-0.7.1-py2.py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/07/6c/aa3f2f849e01cb6a001cd8554a88d4c77c5c1a31c95bdf1cf9301e6d9ef4/defusedxml-0.7.1-py2.py3-none-any.whl",
+          "kind": "bdist_wheel",
+          "size_bytes": 25604,
+          "sha256": "a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61",
+          "yanked": false
+        },
+        {
+          "filename": "defusedxml-0.7.1.tar.gz",
+          "url": "https://files.pythonhosted.org/packages/0f/d5/c66da9b79e5bdb124974bfe172b4daf3c984ebd9c2a06e2b8a4dc7331c72/defusedxml-0.7.1.tar.gz",
+          "kind": "sdist",
+          "size_bytes": 75520,
+          "sha256": "1bb3032db185915b62d7c6209c5a8792be6a32ab2fedacc84e01b52c51aa3e69",
+          "yanked": false
+        }
+      ]
+    },
+    {
+      "name": "fonttools",
+      "version": "4.60.1",
+      "scope": "build-fonts-only",
+      "license_metadata": "MIT",
+      "requires_python": ">=3.9",
+      "requires_dist": [
+        "lxml>=4.0; extra == \"lxml\"",
+        "brotli>=1.0.1; platform_python_implementation == \"CPython\" and extra == \"woff\"",
+        "brotlicffi>=0.8.0; platform_python_implementation != \"CPython\" and extra == \"woff\"",
+        "zopfli>=0.1.4; extra == \"woff\"",
+        "unicodedata2>=15.1.0; python_version <= \"3.12\" and extra == \"unicode\"",
+        "lz4>=1.7.4.2; extra == \"graphite\"",
+        "scipy; platform_python_implementation != \"PyPy\" and extra == \"interpolatable\"",
+        "munkres; platform_python_implementation == \"PyPy\" and extra == \"interpolatable\"",
+        "pycairo; extra == \"interpolatable\"",
+        "matplotlib; extra == \"plot\"",
+        "sympy; extra == \"symfont\"",
+        "xattr; sys_platform == \"darwin\" and extra == \"type1\"",
+        "skia-pathops>=0.5.0; extra == \"pathops\"",
+        "uharfbuzz>=0.23.0; extra == \"repacker\"",
+        "lxml>=4.0; extra == \"all\"",
+        "brotli>=1.0.1; platform_python_implementation == \"CPython\" and extra == \"all\"",
+        "brotlicffi>=0.8.0; platform_python_implementation != \"CPython\" and extra == \"all\"",
+        "zopfli>=0.1.4; extra == \"all\"",
+        "unicodedata2>=15.1.0; python_version <= \"3.12\" and extra == \"all\"",
+        "lz4>=1.7.4.2; extra == \"all\"",
+        "scipy; platform_python_implementation != \"PyPy\" and extra == \"all\"",
+        "munkres; platform_python_implementation == \"PyPy\" and extra == \"all\"",
+        "pycairo; extra == \"all\"",
+        "matplotlib; extra == \"all\"",
+        "sympy; extra == \"all\"",
+        "xattr; sys_platform == \"darwin\" and extra == \"all\"",
+        "skia-pathops>=0.5.0; extra == \"all\"",
+        "uharfbuzz>=0.23.0; extra == \"all\""
+      ],
+      "selected_extras": [],
+      "metadata_source": "https://pypi.org/pypi/fonttools/4.60.1/json",
+      "project_source": "https://pypi.org/project/fonttools/4.60.1/",
+      "upstream_artifacts_metadata_only": [
+        {
+          "filename": "fonttools-4.60.1-cp312-cp312-macosx_10_13_universal2.whl",
+          "url": "https://files.pythonhosted.org/packages/e3/f7/a10b101b7a6f8836a5adb47f2791f2075d044a6ca123f35985c42edc82d8/fonttools-4.60.1-cp312-cp312-macosx_10_13_universal2.whl",
+          "kind": "bdist_wheel",
+          "size_bytes": 2832953,
+          "sha256": "7b0c6d57ab00dae9529f3faf187f2254ea0aa1e04215cf2f1a8ec277c96661bc",
+          "yanked": false
+        },
+        {
+          "filename": "fonttools-4.60.1-py3-none-any.whl",
+          "url": "https://files.pythonhosted.org/packages/c7/93/0dd45cd283c32dea1545151d8c3637b4b8c53cdb3a625aeb2885b184d74d/fonttools-4.60.1-py3-none-any.whl",
+          "kind": "bdist_wheel",
+          "size_bytes": 1143175,
+          "sha256": "906306ac7afe2156fcf0042173d6ebbb05416af70f6b370967b47f8f00103bbb",
+          "yanked": false
+        },
+        {
+          "filename": "fonttools-4.60.1.tar.gz",
+          "url": "https://files.pythonhosted.org/packages/4b/42/97a13e47a1e51a5a7142475bbcf5107fe3a68fc34aef331c897d5fb98ad0/fonttools-4.60.1.tar.gz",
+          "kind": "sdist",
+          "size_bytes": 3559823,
+          "sha256": "ef00af0439ebfee806b25f24c8f92109157ff3fac5731dc7867957812e87b8d9",
+          "yanked": false
+        }
+      ]
+    }
+  ]
+}

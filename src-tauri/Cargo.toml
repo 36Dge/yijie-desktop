@@ -1,5 +1,6 @@
 [package]
 name = "yijie-desktop"
+default-run = "yijie-desktop"
 version = "0.1.0"
 description = "Yijie AI Mac desktop app"
 authors = ["Yijie AI"]

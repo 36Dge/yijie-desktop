@@ -661,7 +661,7 @@ fn extract_pdf_document(
         Ok(Err(_)) if writer.truncated => {}
         Ok(Err(_)) | Err(_) => return Err(AttachmentImportError::ParseFailed),
     }
-    bounded_normalized_text(&writer.value)
+    bounded_document_text(&writer.value)
 }
 
 struct BoundedPdfText {
@@ -730,7 +730,6 @@ fn preflight_pdf(content: &[u8]) -> Result<pdf_extract::Document, AttachmentImpo
         b"ObjStm".as_slice(),
         b"XRef".as_slice(),
         b"XRefStm".as_slice(),
-        b"Prev".as_slice(),
         b"Encrypt".as_slice(),
     ]
     .iter()
@@ -747,6 +746,9 @@ fn preflight_pdf(content: &[u8]) -> Result<pdf_extract::Document, AttachmentImpo
     if document.objects.is_empty()
         || document.objects.len() > MAX_PDF_OBJECTS
         || document.trailer.get(b"Encrypt").is_ok()
+        // Trailer Prev is an incremental xref chain. Outline /Prev is an
+        // ordinary sibling reference in a valid multi-page document.
+        || document.trailer.get(b"Prev").is_ok()
     {
         return Err(AttachmentImportError::InvalidContent);
     }
@@ -780,6 +782,12 @@ fn preflight_pdf(content: &[u8]) -> Result<pdf_extract::Document, AttachmentImpo
         let compressed_bytes = u64::try_from(stream.content.len())
             .map_err(|_| AttachmentImportError::InvalidContent)?;
         let is_image = pdf_stream_has_subtype(stream, b"Image");
+        if is_image {
+            let width=stream.dict.get(b"Width").and_then(pdf_extract::Object::as_i64).map_err(|_|AttachmentImportError::InvalidContent)?;
+            let height=stream.dict.get(b"Height").and_then(pdf_extract::Object::as_i64).map_err(|_|AttachmentImportError::InvalidContent)?;
+            if width<=0 || height<=0 || width>i64::from(MAX_IMAGE_DIMENSION) || height>i64::from(MAX_IMAGE_DIMENSION)
+                || width.checked_mul(height).is_none_or(|v|v as u64>MAX_IMAGE_PIXELS) {return Err(AttachmentImportError::InvalidContent)}
+        }
         let decoded = if stream.dict.get(b"Filter").is_err() {
             Some(stream.content.clone())
         } else {
@@ -802,11 +810,11 @@ fn preflight_pdf(content: &[u8]) -> Result<pdf_extract::Document, AttachmentImpo
             .map(|value| value.len() as u64)
             .unwrap_or(compressed_bytes);
         if uncompressed_bytes > MAX_PDF_STREAM_BYTES
-            || compression_ratio_exceeded(
+            || (!is_image && compression_ratio_exceeded(
                 compressed_bytes,
                 uncompressed_bytes,
                 MAX_PDF_COMPRESSION_RATIO,
-            )
+            ))
         {
             return Err(AttachmentImportError::InvalidContent);
         }
@@ -1188,7 +1196,9 @@ fn extract_text_document(
     Ok(Detection {
         kind: AttachmentKind::File,
         media_type,
-        extracted_text: Some(bounded_normalized_text(&text)?),
+        extracted_text: Some(if matches!(extension, "txt" | "md" | "markdown" | "html" | "htm" | "csv" | "json") {
+            bounded_document_text(&text)?
+        } else { bounded_normalized_text(&text)? }),
     })
 }
 
@@ -1225,7 +1235,7 @@ fn extract_ooxml(
             break;
         }
     }
-    Ok((media_type, bounded_normalized_text(&output)?))
+    Ok((media_type, bounded_document_text(&output)?))
 }
 
 pub(crate) fn validate_office_artifact_content(
@@ -1304,7 +1314,7 @@ fn preflight_ooxml(
             .ok_or(AttachmentImportError::InvalidContent)?;
         if total_size > MAX_OOXML_UNCOMPRESSED_BYTES
             || name.to_ascii_lowercase().contains("vbaproject")
-            || name.to_ascii_lowercase().ends_with(".bin")
+            || (name.to_ascii_lowercase().ends_with(".bin") && !normal_printer_settings(&name,file.size()))
         {
             return Err(AttachmentImportError::InvalidContent);
         }
@@ -1346,12 +1356,36 @@ fn preflight_ooxml(
     let mut actual_total_size = 0_u64;
     let content_types = read_ooxml_entry(archive, "[Content_Types].xml", &mut actual_total_size)?;
     validate_ooxml_main_content_type(&content_types, marker, main_content_type)?;
+    if names.iter().any(|name|name.ends_with(".bin")) {
+        validate_printer_settings_type(&content_types, extension)?;
+    }
     Ok(OoxmlPreflight {
         names,
         media_type,
         prefixes,
         actual_total_size,
     })
+}
+
+fn normal_printer_settings(name:&str,size:u64)->bool {
+    if size==0 || size>64*1024 {return false}
+    ["word/printerSettings/printerSettings","ppt/printerSettings/printerSettings","xl/printerSettings/printerSettings"].iter().any(|prefix|{
+        name.strip_prefix(prefix).and_then(|v|v.strip_suffix(".bin")).is_some_and(|serial| !serial.is_empty() && serial.len()<=8 && serial.bytes().all(|b|b.is_ascii_digit()))
+    })
+}
+fn validate_printer_settings_type(content:&[u8],extension:&str)->Result<(),AttachmentImportError>{
+    let prefix=match extension {"docx"=>"wordprocessingml","pptx"=>"presentationml","xlsx"=>"spreadsheetml",_=>return Err(AttachmentImportError::InvalidContent)};
+    let expected=format!("application/vnd.openxmlformats-officedocument.{prefix}.printerSettings");
+    let mut reader=Reader::from_reader(content);let mut found=false;
+    loop {match reader.read_event(){
+        Ok(Event::Start(element))|Ok(Event::Empty(element)) if element.local_name().as_ref()==b"Default" => {
+            let mut ext=Vec::new();let mut kind=Vec::new();
+            for attribute in element.attributes(){let attribute=attribute.map_err(|_|AttachmentImportError::InvalidContent)?;match attribute.key.as_ref(){b"Extension"=>ext=attribute.value.into_owned(),b"ContentType"=>kind=attribute.value.into_owned(),_=>{}}}
+            if ext==b"bin"{if found || kind!=expected.as_bytes(){return Err(AttachmentImportError::InvalidContent)}found=true;}
+        }
+        Ok(Event::Eof)=>return if found {Ok(())}else{Err(AttachmentImportError::InvalidContent)},
+        Err(_)=>return Err(AttachmentImportError::InvalidContent),_=>{}
+    }}
 }
 
 fn read_ooxml_entry(
@@ -1471,7 +1505,9 @@ fn extract_xml_text(content: &[u8]) -> Result<String, AttachmentImportError> {
             break;
         }
     }
-    bounded_normalized_text(&output)
+    // An empty XML part (for example an unused header) does not invalidate
+    // another part's body. Whole-document admission decides the empty state.
+    if output.trim().is_empty() { Ok(String::new()) } else { bounded_normalized_text(&output) }
 }
 
 fn strip_markup(value: &str) -> String {
@@ -1527,6 +1563,13 @@ fn bounded_normalized_text(value: &str) -> Result<String, AttachmentImportError>
         return Err(AttachmentImportError::ParseFailed);
     }
     Ok(truncate_utf8(&normalized, MAX_EXTRACTED_TEXT_BYTES).to_owned())
+}
+
+fn bounded_document_text(value: &str) -> Result<String, AttachmentImportError> {
+    if value.trim().is_empty() && super::document_runtime::enabled() {
+        return Ok("[文档解析信息] 原件没有可提取的文本，可能为空正文或扫描内容；未执行 OCR。".to_owned());
+    }
+    bounded_normalized_text(value)
 }
 
 fn chunk_text(value: &str) -> Vec<String> {

@@ -384,11 +384,11 @@ function nativeExecution(entry: NativeConversationView["items"][number], view: N
       item.status === "completed" || item.status === "failed" || item.status === "declined" ? item.status : "unknown",
     native: {source: view.source, lastMethod: entry.lastMethod, item},
   };
-  if (item.type === "mcpToolCall" || item.type === "fileChange" || item.type === "subAgentActivity") return {
+  if (item.type === "mcpToolCall" || item.type === "fileChange" || item.type === "subAgentActivity" || item.type === "imageView") return {
     kind: "tool", status: item.status === "inProgress" ? "in_progress" :
       item.status === "completed" || item.status === "failed" || item.status === "declined" ? item.status :
-      item.type === "subAgentActivity" && entry.lastMethod === "item/started" ? "in_progress" :
-      item.type === "subAgentActivity" && entry.lastMethod === "item/completed" ? "completed" : "unknown",
+      ["subAgentActivity", "imageView"].includes(item.type) && entry.lastMethod === "item/started" ? "in_progress" :
+      ["subAgentActivity", "imageView"].includes(item.type) && entry.lastMethod === "item/completed" ? "completed" : "unknown",
     native: {source: view.source, lastMethod: entry.lastMethod, item},
   };
   return null;
@@ -448,7 +448,7 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
       for (const k of old?.itemKeys ?? []) delete items[k];
       const nativeItems: ConversationItem[] = view.items.map(entry => {
         const item = entry.item;
-        const kind: ConversationItemKind = item.type === "userMessage" ? "user_message" : item.type === "agentMessage" ? "assistant_message" : item.type === "reasoning" ? "reasoning" : item.type === "commandExecution" ? "command" : ["mcpToolCall", "fileChange", "subAgentActivity"].includes(item.type) ? "tool" : item.type === "webSearch" ? "web_search" : "unknown";
+        const kind: ConversationItemKind = item.type === "userMessage" ? "user_message" : item.type === "agentMessage" ? "assistant_message" : item.type === "reasoning" ? "reasoning" : item.type === "commandExecution" ? "command" : ["mcpToolCall", "fileChange", "subAgentActivity", "imageView"].includes(item.type) ? "tool" : item.type === "webSearch" ? "web_search" : "unknown";
         const contentBlocks: readonly TextContentBlock[] = item.type === "userMessage" && submittedText !== null
           ? submittedText
           : item.type === "reasoning"

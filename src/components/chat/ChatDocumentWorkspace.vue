@@ -7,7 +7,7 @@ import { MAX_PREVIEW_TABS } from "../../domain/conversation-file-preview";
 import { useConversationDocumentPreview } from "../../composables/useConversationDocumentPreview";
 const props = defineProps<{ contextId: string | null; scopeKey: string; enabled: boolean }>();
 const emit = defineEmits<{ expanded: [value: boolean]; restoreTrigger: [] }>();
-const { opened, media, closeMedia, syncViewport, fullscreen, fullscreenTarget, state, active, geometry, metadata, phase, error, notice, dragging, capacityText, toggle, toggleFullscreen, openFile, collapse, createTab, selectTab, closeTab, keyTab, navigate, resetWidth, keyResize, startDrag, moveDrag, endDrag, reload } = useConversationDocumentPreview(props, emit);
+const { opened, media, closeMedia, syncViewport, fullscreen, fullscreenTarget, state, active, geometry, metadata, phase, error, notice, dragging, capacityText, toggle, toggleFullscreen, openFile, collapse, createTab, selectTab, closeTab, keyTab, navigate, selectViewMode, resetWidth, keyResize, startDrag, moveDrag, endDrag, reload } = useConversationDocumentPreview(props, emit);
 defineExpose({ toggle, openFile, opened });
 </script>
 
@@ -42,9 +42,10 @@ defineExpose({ toggle, openFile, opened });
           </NTooltip>
         </div>
       </div>
-      <div v-if="!media && phase === 'ready' && metadata && (metadata.sections.length > 1 || metadata.previousOffset !== null || metadata.nextOffset !== null)"
+      <div v-if="!media && phase === 'ready' && metadata && (metadata.availableModes?.length || metadata.sections.length > 1 || metadata.previousOffset !== null || metadata.nextOffset !== null)"
         class="document-sidebar__reading" aria-label="阅读选项">
-        <select v-if="metadata.sections.length > 1" :value="metadata.section" :aria-label="metadata.kind === 'xlsx' ? '工作表' : '页码'" @change="navigate(Number(($event.target as HTMLSelectElement).value), 0)"><option v-for="section in metadata.sections" :key="section.id" :value="section.id">{{ section.label }}</option></select>
+        <select v-if="metadata.availableModes?.length" :value="metadata.viewMode" aria-label="阅读方式" @change="selectViewMode(($event.target as HTMLSelectElement).value as 'layout' | 'content')"><option v-for="mode in metadata.availableModes" :key="mode" :value="mode">{{ mode === 'layout' ? '版式' : metadata.kind === 'xlsx' ? '表格' : '正文' }}</option></select>
+        <select v-if="metadata.sections.length > 1" :value="metadata.section" :aria-label="metadata.kind === 'xlsx' && metadata.viewMode !== 'layout' ? '工作表' : '页码'" @change="navigate(Number(($event.target as HTMLSelectElement).value), 0)"><option v-for="section in metadata.sections" :key="section.id" :value="section.id">{{ section.label }}</option></select>
         <button v-if="metadata.previousOffset !== null" type="button" @click="navigate(metadata!.section, metadata!.previousOffset!)">上一段</button>
         <button v-if="metadata.nextOffset !== null" type="button" @click="navigate(metadata!.section, metadata!.nextOffset!)">下一段</button>
       </div>

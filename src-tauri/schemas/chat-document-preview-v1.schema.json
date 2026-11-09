@@ -7,7 +7,7 @@
   ],
   "x-event": "chat-document-preview-invalidated",
   "x-authority": "Existing Native context/owner/tenant and a committed artifact, bound attachment, or exact file reference in the named assistant item. Local references are read only below Desktop or the scoped session workspace.",
-  "x-compatibility": "Adds a scoped message-file location lookup for workspace-relative tooltips. Only locate returns located/path. Existing open/resize/position/close responses retain their shape. No storage migration or Runtime contract change.",
+  "x-compatibility": "FEAT-171 adds optional layout/content selection and capability metadata. Missing mode preserves default reader behavior when document runtime is disabled. Paired source-generated UI sends mode only after Native advertises availableModes; no new command, storage migration or file authority.",
   "definitions": {
     "Source": {
       "oneOf": [
@@ -151,6 +151,14 @@
               "type": "null"
             }
           ]
+        },
+        "viewMode": {
+          "type": "string",
+          "enum": [
+            "layout",
+            "content"
+          ],
+          "description": "Optional FEAT-171 paired Native input. Defaults to layout for DOCX/PPTX and content for XLSX."
         }
       },
       "required": [
@@ -400,6 +408,24 @@
               "type": "null"
             }
           ]
+        },
+        "viewMode": {
+          "type": "string",
+          "enum": [
+            "layout",
+            "content"
+          ]
+        },
+        "availableModes": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "type": "string",
+            "enum": [
+              "layout",
+              "content"
+            ]
+          }
         }
       },
       "required": [

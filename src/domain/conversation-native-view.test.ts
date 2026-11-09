@@ -6,6 +6,16 @@ import { validateNativeHistory, validateNativeViewEvent } from "../api/generated
 const legacy: ConversationSnapshot = {threads:[{threadId:"local-session",status:"ready"}],turns:[{threadId:"local-session",turnId:"local-turn",ordinal:0,status:"failed",terminalStatus:"failed"}],items:[{threadId:"local-session",turnId:"local-turn",itemId:"old-display",ordinal:0,kind:"assistant_message",status:"completed",contentBlocks:[{type:"text",blockIndex:0,text:"old archive"}]}]};
 const native: NativeConversationView = {sessionId:"local-session",turnId:"local-turn",runtimeThreadId:"runtime-thread",runtimeTurnId:"runtime-turn",source:"native_observed",revision:"2",availability:"partial",status:"failed",terminalObserved:true,items:[{item:{id:"native-a",type:"agentMessage",phase:"final_answer",text:"original final",availability:"available"},ordinal:0,lastMethod:"item/completed"},{item:{id:"native-r",type:"reasoning",content:["unfinished"],availability:"available"},ordinal:1,lastMethod:"item/started"}]};
 describe("FEAT-132 readonly native view",()=>{
+ it("FEAT171 displays native image viewing and preserves observed lifecycle", () => {
+  for (const [lastMethod,status] of [["item/started","in_progress"],["item/completed","completed"],["thread/read","unknown"]] as const) {
+   const observed: NativeConversationView = {...native, items:[{ordinal:0,lastMethod,item:{id:"view-page",type:"imageView",availability:"available",toolLabel:"查看图片"}}]};
+   expect(validateNativeHistory({views:[observed],submissions:[],remainingTurnIds:[],historyAvailability:"partial"})).toBe(true);
+   const before=JSON.stringify(observed);
+   const item=Object.values(composeConversationView(legacy,[observed]).items)[0]!;
+   expect(item.kind).toBe("tool"); expect(item.execution?.status).toBe(status);
+   expect(JSON.stringify(observed)).toBe(before);
+  }
+ });
  it("FEAT165 retains independent local attachments across submission, native observation and history replay", () => {
   const attachment = {type: "attachment_reference" as const, blockIndex: 1, attachmentId: "local-attachment", kind: "file" as const, name: "sample.pdf", mediaType: "application/pdf", sizeBytes: 594, status: "bound", expiresAt: 2_000_000_000};
   const snapshot: ConversationSnapshot = {...legacy, items: [{threadId: "local-session", turnId: "local-turn", itemId: "local-message", ordinal: 0, kind: "user_message", status: "completed", contentBlocks: [{type: "text", blockIndex: 0, text: "分析这个文件"}, attachment]}]};

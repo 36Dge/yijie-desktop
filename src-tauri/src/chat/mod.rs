@@ -11,6 +11,18 @@ mod database;
 mod document_preview_content;
 pub(crate) mod document_preview_native;
 mod document_preview_pdf;
+
+/// Shared admission/renderer for the application-owned document QA executable.
+/// This is an in-process Rust interface, not a renderer IPC or permission grant.
+pub fn render_document_pdf_for_cli(
+    bytes: &[u8],
+    page: usize,
+) -> Result<(usize, usize, Vec<u8>), String> {
+    attachment::validate_pdf_artifact_content(bytes)
+        .map_err(|_| "PDF does not satisfy the existing document admission limits".to_owned())?;
+    document_preview_pdf::render(bytes, page)
+        .map_err(|_| "PDF page is unavailable or exceeds the existing rendering limits".to_owned())
+}
 mod message_file_preview;
 #[cfg(target_os = "macos")]
 pub(crate) use database::isolated_model_migration::{
@@ -2048,3 +2060,6 @@ mod feat164_boundary_tests;
 
 #[cfg(test)]
 mod model_test_support;
+pub(crate) mod document_runtime;
+#[allow(dead_code)]
+mod document_runtime_generated;

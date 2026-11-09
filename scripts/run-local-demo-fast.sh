@@ -53,7 +53,9 @@ if [[ "${1:-}" == "--development" ]]; then
   development_app="true"
   [[ "${YIJIE_DEVELOPMENT_CLIENT:-}" == "true" && "${CARGO_TARGET_DIR:-}" == "$desktop_root/.local/development/target" && "${YIJIE_WORKER_TARGET_DIR:-}" == "$desktop_root/.local/development/worker-target" ]] || fail "use pnpm client:dev for the fixed development client"
   [[ -z "${YIJIE_FEAT164_PRIMARY_GENERATION:-}" && -z "${YIJIE_FEAT164_DAILY_BINDING_FILE:-}" ]] || fail "development cannot select a packaged generation"
-  if [[ "${YIJIE_FEAT170_TOOL_SEARCH_METER:-false}" == "true" ]]; then
+  if [[ "${YIJIE_FEAT171_DOCUMENT_METER:-false}" == "true" ]]; then
+    [[ "$development_ui_bundle" == "true" && "${YIJIE_FEAT171_DOCUMENT_RUNTIME:-false}" == "true" && "${YIJIE_FEAT170_TOOL_SEARCH_METER:-false}" == "false" && "${YIJIE_PERMISSION_VERIFICATION_BASE_URL:-}" == "http://127.0.0.1:18083/v1" ]] || fail "document acceptance requires start-ui and the fixed meter"
+  elif [[ "${YIJIE_FEAT170_TOOL_SEARCH_METER:-false}" == "true" ]]; then
     [[ "$development_ui_bundle" == "true" && "${YIJIE_FEAT170_TOOL_SEARCH:-false}" == "true" && "${YIJIE_PERMISSION_VERIFICATION_BASE_URL:-}" == "http://127.0.0.1:18083/v1" ]] || fail "tool-search acceptance requires start-ui and the fixed meter"
   else
     [[ "${YIJIE_FEAT170_TOOL_SEARCH_METER:-false}" == "false" && -z "${YIJIE_PERMISSION_VERIFICATION_BASE_URL:-}" ]] || fail "development cannot select an observation transport"
@@ -64,6 +66,7 @@ elif [[ "${YIJIE_DEVELOPMENT_CLIENT:-false}" != "false" ]]; then
 fi
 [[ "$development_ui_bundle" == "false" || "$development_app" == "true" ]] || fail "UI bundle requires the canonical development entry"
 [[ "${YIJIE_FEAT170_TOOL_SEARCH_METER:-false}" == "false" || "$development_app" == "true" ]] || fail "tool-search meter requires the canonical development entry"
+[[ "${YIJIE_FEAT171_DOCUMENT_METER:-false}" == "false" || "$development_app" == "true" ]] || fail "document meter requires the canonical development entry"
 # The ordinary packaged entry keeps the existing stable-only branch intact.
 if [[ "$#" -ge 1 && "$1" == "--packaged" ]]; then
   [[ "$development_app" == "false" ]] || fail "development and packaged modes cannot be combined"
@@ -394,6 +397,15 @@ if [[ "$chat_models_enabled" == "true" ]]; then
   node "$workspace_root/yijie-contracts/scripts/sync-runtime-chat-models.mjs" --check
   candidate_lock="$desktop_root/contracts/runtime-chat-models.candidate.json"
   codex_runtime_root="${YIJIE_DEMO_FAST_RUNTIME_ROOT:-$workspace_root/yijie-codex/.yijie/build/chat-models-web-sources/aarch64-apple-darwin}"
+  fi
+  # The document Runtime includes the preceding interaction/tool-search chain.
+  # Select it last so those base profiles cannot overwrite this paired runtime.
+  if [[ "${YIJIE_FEAT171_DOCUMENT_RUNTIME:-false}" == true ]]; then
+    node "$workspace_root/yijie-contracts/scripts/generate-runtime-documents.mjs" --check
+    candidate_lock="$desktop_root/contracts/runtime-documents.candidate.json"
+    document_relative="$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1])).runtime_relative_path)' "$candidate_lock")"
+    [[ "$document_relative" =~ ^\.yijie/build/document-runtime-v1/[a-f0-9]{64}/aarch64-apple-darwin$ ]] || fail "invalid document Runtime path"
+    codex_runtime_root="$workspace_root/yijie-codex/$document_relative"
   fi
   codex_binary="$codex_runtime_root/codex"
   codex_manifest="$codex_runtime_root/runtime-manifest.json"

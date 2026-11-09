@@ -3875,6 +3875,13 @@ impl ChatRepository {
         message_id: &str,
         now: i64,
     ) -> Result<Vec<HostTurnInputBlock>, ChatError> {
+        if super::document_runtime::enabled() {
+            // Rehydrate only already-bound documents in this same conversation.
+            // Original operation/attachment paths stay stable across cache TTL
+            // and normal reopen. This does not alter the request/digest or add
+            // a new userMessage, and it never extends primary 7-day retention.
+            let _ = self.restore_recent_document_inputs(message_id, now);
+        }
         let query_text: String = self
             .connection
             .query_row(
@@ -3961,6 +3968,19 @@ impl ChatRepository {
                     if row.9.ok_or(ChatError::DatabaseUnavailable)? <= now {
                         return Err(ChatError::NotFound);
                     }
+                    if super::document_runtime::enabled() {
+                        let operation: String = self.connection.query_row(
+                            "SELECT t.operation_id FROM chat_turns t JOIN chat_messages m ON m.turn_id=t.id JOIN chat_sessions s ON s.id=t.session_id WHERE m.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3",
+                            params![message_id, self.scope.owner_user_id, self.scope.tenant_id], |r| r.get(0),
+                        ).map_err(map_sqlite_error)?;
+                        super::document_runtime::stage_input(
+                            parse_uuid_value(&operation)?, attachment_id,
+                            row.5.as_deref().ok_or(ChatError::DatabaseUnavailable)?,
+                            row.8.as_deref().ok_or(ChatError::DatabaseUnavailable)?,
+                            row.7.as_deref().ok_or(ChatError::DatabaseUnavailable)?,
+                            row.9.ok_or(ChatError::DatabaseUnavailable)?, now,
+                        )?;
+                    }
                     let remaining_context_bytes =
                         MAX_FILE_CONTEXT_BYTES.saturating_sub(file_context_bytes);
                     let file_context_budget = remaining_context_bytes / remaining_file_blocks;
@@ -4024,6 +4044,26 @@ impl ChatRepository {
             }
         }
         Ok(content_blocks)
+    }
+
+    fn restore_recent_document_inputs(&self, message_id: &str, now: i64) -> Result<(), ChatError> {
+        let mut statement = self.connection.prepare(
+            "SELECT t.operation_id,a.id,a.media_type,a.content_blob,a.sha256,a.expires_at
+             FROM chat_messages current
+             JOIN chat_sessions s ON s.id=current.session_id
+             JOIN chat_messages m ON m.session_id=s.id AND m.id!=current.id AND m.role='user' AND m.status='committed'
+             JOIN chat_turns t ON t.id=m.turn_id AND t.runtime_turn_id IS NOT NULL
+             JOIN chat_message_content_blocks b ON b.message_id=m.id AND b.block_type='file'
+             JOIN chat_attachments a ON a.id=b.attachment_id
+             WHERE current.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3 AND a.expires_at>?4
+             ORDER BY m.created_at DESC,b.block_ordinal ASC LIMIT 10"
+        ).map_err(map_sqlite_error)?;
+        let rows = statement.query_map(params![message_id,self.scope.owner_user_id,self.scope.tenant_id,now], |r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,Vec<u8>>(3)?,r.get::<_,String>(4)?,r.get::<_,i64>(5)?))).map_err(map_sqlite_error)?;
+        for row in rows {
+            let (operation,attachment,mime,bytes,sha,expires)=row.map_err(map_sqlite_error)?;
+            super::document_runtime::stage_input(parse_uuid_value(&operation)?,parse_uuid_value(&attachment)?,&mime,&bytes,&sha,expires,now)?;
+        }
+        Ok(())
     }
 
     pub fn enqueue_interrupt(
@@ -10521,6 +10561,36 @@ mod tests {
         );
         drop(repository);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[ignore = "Run with the explicit isolated FEAT-171 document environment"]
+    fn normal_document_rehydrates_only_committed_files_in_the_same_conversation() {
+        assert!(super::super::document_runtime::enabled());
+        let root=fs::canonicalize(std::env::temp_dir()).unwrap().join(format!("yijie-document-reopen-{}",Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repository=open_repository_for_scope(&root,71,scope());
+        let project=register_synthetic_project(&mut repository,&root);
+        let now=unix_seconds().unwrap();let bytes=br#"{"identifier":"00017","count":42}"#.to_vec();
+        let prepared=crate::chat::attachment::prepare_bytes("normal.json".into(),bytes.clone(),now).unwrap();
+        let attachment=prepared.id;
+        repository.store_attachment(prepared,DraftTarget::New).unwrap();
+        let first=repository.create_session_and_enqueue_multimodal(project,&[DraftContentBlock::File(attachment)],Uuid::now_v7(),1).unwrap();
+        repository.connection.execute("UPDATE chat_messages SET status='committed' WHERE turn_id=?1 AND role='user'",[first.turn_id.to_string()]).unwrap();
+        repository.connection.execute("UPDATE chat_turns SET status='completed',runtime_turn_id=?1 WHERE id=?2",params![Uuid::now_v7().to_string(),first.turn_id.to_string()]).unwrap();
+        let operation:String=repository.connection.query_row("SELECT operation_id FROM chat_turns WHERE id=?1",[first.turn_id.to_string()],|r|r.get(0)).unwrap();
+        let path=super::super::document_runtime::state_root().unwrap().join("inputs").join(&operation).join(format!("{attachment}.json"));
+        let unrelated=repository.create_session_and_enqueue(project,"另一个普通对话",Uuid::now_v7()).unwrap();
+        let unrelated_message:String=repository.connection.query_row("SELECT id FROM chat_messages WHERE turn_id=?1 AND role='user'",[unrelated.turn_id.to_string()],|r|r.get(0)).unwrap();
+        repository.restore_recent_document_inputs(&unrelated_message,now+86401).unwrap();
+        assert!(!path.exists());
+        let next=Uuid::now_v7();
+        repository.connection.execute("INSERT INTO chat_messages(id,session_id,role,content,status,ordinal,created_at) VALUES (?1,?2,'user','继续修改','pending',2,?3)",params![next.to_string(),first.session_id.to_string(),now+86401]).unwrap();
+        repository.restore_recent_document_inputs(&next.to_string(),now+86401).unwrap();
+        assert_eq!(fs::read(&path).unwrap(),bytes);
+        let stored:Vec<u8>=repository.connection.query_row("SELECT content_blob FROM chat_attachments WHERE id=?1",[attachment.to_string()],|r|r.get(0)).unwrap();
+        assert_eq!(stored,bytes);
+        drop(repository);fs::remove_dir_all(path.parent().unwrap()).unwrap();fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

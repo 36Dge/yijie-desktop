@@ -1,6 +1,6 @@
 //! Read-only presentation adapters. Storage, admission and text parsing remain
 //! owned by the existing attachment/artifact modules; nothing is executed here.
-use super::artifact_file_native::{project_file_preview, FilePreviewProjection};
+use super::artifact_file_native::project_file_preview;
 use super::artifact_native::ArtifactNativeCode as Code;
 use super::attachment;
 use quick_xml::{events::Event, Reader};
@@ -549,33 +549,76 @@ pub(super) fn render(
             "text/csv" => "text/csv",
             _ => "application/json",
         };
-        let body = match project_file_preview(mime, bytes)? {
-            FilePreviewProjection::Text {
-                text, truncated, ..
-            } => {
-                result.partial = truncated;
-                if mime == "text/markdown" {
-                    result.html = markdown::page(&text, dark, zoom);
-                    return Ok(result);
-                }
-                format!("<pre>{}</pre>", escape(&text))
+        // Keep admission/JSON validation shared with the existing reader, then
+        // paginate the complete bounded source instead of its first projection.
+        let _admitted = project_file_preview(mime, bytes)?;
+        let text = std::str::from_utf8(bytes)
+            .map_err(|_| Code::IntegrityFailed)?
+            .trim_start_matches('\u{feff}');
+        if mime == "text/csv" {
+            let rows = super::artifact_file_native::parse_csv(text)?;
+            if bytes.len() > 128 * 1024 || rows.iter().any(|r| r.iter().any(|c| c.len() > 16384)) {
+                let chars = text.chars().collect::<Vec<_>>();
+                let start = offset.min(chars.len());
+                let end = (start + 16000).min(chars.len());
+                result.offset = start;
+                result.next = (end < chars.len()).then_some(end);
+                result.previous = (start > 0).then_some(start.saturating_sub(16000));
+                result.html=page(&format!("<p class=\"notice\">内容较长，按原始 CSV 分段展示；字段内容未截断</p><pre>{}</pre>",escape(&chars[start..end].iter().collect::<String>())),dark,zoom);
+                return Ok(result);
             }
-            FilePreviewProjection::Csv { rows, truncated } => {
-                result.partial = truncated;
-                format!(
-                    "<table>{}</table>",
-                    rows.iter()
-                        .map(|r| format!(
-                            "<tr>{}</tr>",
-                            r.iter()
-                                .map(|c| format!("<td>{}</td>", escape(c)))
-                                .collect::<String>()
-                        ))
-                        .collect::<String>()
-                )
+            let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
+            let windows = columns.max(1).div_ceil(12);
+            let batches = rows.len().max(1).div_ceil(50);
+            let selected = offset.min(windows * batches - 1);
+            let row_start = selected / windows * 50;
+            let col_start = selected % windows * 12;
+            let body = rows
+                .iter()
+                .skip(row_start)
+                .take(50)
+                .map(|r| {
+                    format!(
+                        "<tr>{}</tr>",
+                        r.iter()
+                            .skip(col_start)
+                            .take(12)
+                            .map(|c| format!("<td>{}</td>", escape(c)))
+                            .collect::<String>()
+                    )
+                })
+                .collect::<String>();
+            if body.len() > TEXT_BUDGET {
+                return Err(Code::LimitExceeded);
             }
+            result.offset = selected;
+            result.next = (selected + 1 < windows * batches).then_some(selected + 1);
+            result.previous = (selected > 0).then_some(selected.saturating_sub(1));
+            result.html = page(
+                &format!(
+                    "<p class=\"notice\">第 {}–{} 行 · 第 {}–{} 列</p><table>{body}</table>",
+                    row_start + 1,
+                    (row_start + 50).min(rows.len()),
+                    col_start + 1,
+                    (col_start + 12).min(columns)
+                ),
+                dark,
+                zoom,
+            );
+            return Ok(result);
+        }
+        let chars = text.chars().collect::<Vec<_>>();
+        let start = offset.min(chars.len());
+        let end = (start + 16000).min(chars.len());
+        let slice = chars[start..end].iter().collect::<String>();
+        result.offset = start;
+        result.next = (end < chars.len()).then_some(end);
+        result.previous = (start > 0).then_some(start.saturating_sub(16000));
+        result.html = if mime == "text/markdown" {
+            markdown::page(&slice, dark, zoom)
+        } else {
+            page(&format!("<pre>{}</pre>", escape(&slice)), dark, zoom)
         };
-        result.html = page(&body, dark, zoom);
         return Ok(result);
     }
     if mime == "application/pdf" {
@@ -731,7 +774,9 @@ fn cell_value(
 ) -> String {
     let raw = n.child("v").map(|v| v.text.as_str()).unwrap_or("");
     if let Some(formula) = n.child("f") {
-        if raw.is_empty() {
+        // An explicit empty string result is a calculated value (e.g. IF).
+        // Only absent/numeric-empty caches should be labelled uncalculated.
+        if raw.is_empty() && !(n.attr("t") == "str" && n.child("v").is_some()) {
             return format!("={}（无已保存计算结果）", formula.text);
         }
     }

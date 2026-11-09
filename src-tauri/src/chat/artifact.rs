@@ -3204,6 +3204,17 @@ mod tests {
             .map(|(kind, mime, name)| (kind, mime, name, fs::read(root.join(name)).unwrap()))
             .collect();
         }
+        if let Some(root)=std::env::var_os("YIJIE_FEAT171_NORMAL_DOCUMENTS") {
+            let root=std::path::PathBuf::from(root);
+            cases=[("txt","text/plain"),("md","text/markdown"),("html","text/html"),("csv","text/csv"),("json","application/json"),
+                ("docx","application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+                ("pptx","application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+                ("xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),("pdf","application/pdf")]
+                .into_iter().map(|(ext,mime)|{
+                    let name=match ext {"txt"=>"sample.txt","md"=>"sample.md","html"=>"sample.html","csv"=>"sample.csv","json"=>"sample.json","docx"=>"sample.docx","pptx"=>"sample.pptx","xlsx"=>"sample.xlsx",_=>"sample.pdf"};
+                    (ArtifactKind::File,mime,name,fs::read(root.join(name)).unwrap())
+                }).collect();
+        }
         let mut cases: Vec<_> = cases.into_iter()
             .map(|(kind, mime, name, bytes)| (kind, mime, name, bytes, ArtifactProvenance::Tool))
             .collect();

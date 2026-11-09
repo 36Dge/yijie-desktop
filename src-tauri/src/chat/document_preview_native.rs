@@ -71,6 +71,8 @@ struct Viewport {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Location {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    view_mode: Option<String>,
     section: usize,
     offset: usize,
     zoom: f64,
@@ -110,6 +112,7 @@ impl Action {
         // The fixed daily client can read conversation outputs. Admission of
         // candidate attachments and the associated storage migration stay separate.
         file_candidate
+            || super::document_runtime::enabled()
             || !matches!(
                 self,
                 Self::Open {
@@ -139,6 +142,10 @@ struct Request {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    view_mode: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    available_modes: Option<Vec<&'static str>>,
     kind: &'static str,
     revision: String,
     expires_at: i64,
@@ -336,6 +343,10 @@ pub async fn chat_document_preview_v1(
                 ..
             } => {
                 if !matches!(theme.as_str(), "light" | "dark")
+                    || location
+                        .view_mode
+                        .as_deref()
+                        .is_some_and(|m| !matches!(m, "layout" | "content"))
                     || !location.zoom.is_finite()
                     || !(0.5..=3.0).contains(&location.zoom)
                     || !location.scroll_x.is_finite()
@@ -379,15 +390,59 @@ pub async fn chat_document_preview_v1(
                 let dark = theme == "dark";
                 let revision = stored.revision.clone();
                 let expires = stored.expires.min(now().map_err(fail)? + 1800);
-                let presentation = tokio::task::spawn_blocking(move || {
-                    content::render(
+                let office_format = super::document_runtime::extension(&stored.mime)
+                    .filter(|f| matches!(*f, "docx" | "pptx" | "xlsx"));
+                let modes = (super::document_runtime::enabled() && office_format.is_some())
+                    .then_some(vec!["layout", "content"]);
+                let mode = modes.as_ref().map(|_| {
+                    if location.view_mode.as_deref() == Some("content")
+                        || (location.view_mode.is_none() && office_format == Some("xlsx"))
+                    {
+                        "content"
+                    } else {
+                        "layout"
+                    }
+                });
+                let document_work = mode.is_some().then(super::document_runtime::begin_work);
+                let (presentation, layout_unavailable) = tokio::task::spawn_blocking(move || {
+                    let _work_lease = document_work;
+                    if mode == Some("layout") {
+                        let layout_result = super::document_runtime::layout_pdf(
+                            &stored.bytes,
+                            &stored.mime,
+                            &stored.revision,
+                        )
+                        .and_then(|pdf| {
+                            content::render(
+                                "application/pdf",
+                                &pdf,
+                                render_location.section,
+                                0,
+                                dark,
+                                render_location.zoom,
+                            )
+                        });
+                        if let Ok(mut layout) = layout_result {
+                            layout.kind = office_format.ok_or(Code::Unsupported)?;
+                            return Ok((layout, false));
+                        }
+                    }
+                    let mut presentation = content::render(
                         &stored.mime,
                         &stored.bytes,
                         render_location.section,
                         render_location.offset,
                         dark,
                         render_location.zoom,
-                    )
+                    )?;
+                    if mode == Some("content") && office_format == Some("xlsx") {
+                        if super::document_runtime::style_sheet(&mut presentation).is_err() {
+                            // Reading an already parsed workbook must not depend
+                            // on the optional generation/layout environment.
+                            return Ok((presentation, true));
+                        }
+                    }
+                    Ok((presentation, mode == Some("layout")))
                 })
                 .await
                 .map_err(|_| fail(Code::Unavailable))?
@@ -409,6 +464,12 @@ pub async fn chat_document_preview_v1(
                     return Err(fail(Code::Expired));
                 }
                 let metadata = DocumentMetadata {
+                    view_mode: if layout_unavailable {
+                        Some("content")
+                    } else {
+                        mode
+                    },
+                    available_modes: modes,
                     kind: presentation.kind,
                     revision: revision.clone(),
                     expires_at: expires,
@@ -418,9 +479,13 @@ pub async fn chat_document_preview_v1(
                     next_offset: presentation.next,
                     previous_offset: presentation.previous,
                     partial: presentation.partial,
-                    notice: presentation
-                        .partial
-                        .then_some("部分内容预览：存在截断或未呈现对象"),
+                    notice: if layout_unavailable {
+                        Some("专用版式或字体暂不可用，当前展示正文或表格；原件保持不变")
+                    } else {
+                        presentation
+                            .partial
+                            .then_some("部分内容预览：存在截断或未呈现对象")
+                    },
                 };
                 let app = webview.app_handle().clone();
                 let parent = webview.clone();
@@ -756,10 +821,10 @@ window.addEventListener('load',()=>window.scrollTo({},{}),{{once:true}});
             .with_custom_protocol("yijie-document".into(),move|_,request|{
                 let uri=request.uri().to_string();
                 let (mime,body)=if resource_live.load(Ordering::Acquire)&&request.method()=="GET"&&uri==root{("text/html; charset=utf-8",html.clone())}
-                    else if resource_live.load(Ordering::Acquire)&&request.method()=="GET"{uri.strip_prefix("yijie-document://preview/").and_then(|k|assets.get(k)).map(|b|("image/png",b.clone())).unwrap_or(("text/plain",vec![]))}
+                    else if resource_live.load(Ordering::Acquire)&&request.method()=="GET"{uri.strip_prefix("yijie-document://preview/").and_then(|k|assets.get(k).map(|b|(if k.starts_with("font/"){"font/ttf"}else{"image/png"},b.clone()))).unwrap_or(("text/plain",vec![]))}
                     else{("text/plain",vec![])};
                 wry::http::Response::builder().status(if body.is_empty(){404}else{200}).header("Content-Type",mime).header("Cache-Control","no-store").header("X-Content-Type-Options","nosniff")
-                    .header("Content-Security-Policy",if video { "sandbox; default-src 'none'; style-src 'unsafe-inline'; media-src data:; base-uri 'none'; form-action 'none'" } else { "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: yijie-document:; font-src data:; connect-src 'none'; media-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" })
+                    .header("Content-Security-Policy",if video { "sandbox; default-src 'none'; style-src 'unsafe-inline'; media-src data:; base-uri 'none'; form-action 'none'" } else { "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: yijie-document:; font-src data: yijie-document:; connect-src 'none'; media-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" })
                     .body(std::borrow::Cow::Owned(body)).expect("constant resource headers")
             })
             .with_on_page_load_handler(move|event,_|{if matches!(event,wry::PageLoadEvent::Finished){let app=load_app.clone();let _=load_app.run_on_main_thread(move||{CURRENT.with(|s|{if let Some(v)=s.borrow_mut().as_mut().filter(|v|v.id==id){v.loaded=true;let _=v.webview.set_visible(v.visible);}});let _=app.emit_to("main","chat-document-preview-loaded",serde_json::json!({"viewId":id}));});}})

@@ -49,6 +49,7 @@ export interface NativeItem {
     | "webSearch"
     | "fileChange"
     | "subAgentActivity"
+    | "imageView"
     | "unknown";
   clientId?: string | null;
   text?: string;

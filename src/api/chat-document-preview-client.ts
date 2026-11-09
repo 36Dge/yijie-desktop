@@ -12,6 +12,8 @@ function object(value: unknown): Record<string, unknown> {
 function document(value: unknown): Document | null {
   if (value === null) return null;
   const d = object(value);
+  if (d.viewMode !== undefined && !["layout", "content"].includes(String(d.viewMode))) throw new DocumentPreviewError("artifact_native_unavailable");
+  if (d.availableModes !== undefined && (!Array.isArray(d.availableModes) || d.availableModes.length > 2 || d.availableModes.some(v => !["layout", "content"].includes(String(v))))) throw new DocumentPreviewError("artifact_native_unavailable");
   if (!["html", "text", "docx", "pptx", "xlsx", "pdf", "image", "video"].includes(String(d.kind)) || typeof d.revision !== "string" || !/^[a-f0-9]{64}$/.test(d.revision) || !Number.isSafeInteger(d.expiresAt) || Number(d.expiresAt) <= 0 || !Array.isArray(d.sections) || d.sections.length > 512 || typeof d.partial !== "boolean" || (d.notice !== null && (typeof d.notice !== "string" || d.notice.length > 512))) throw new DocumentPreviewError("artifact_native_unavailable");
   for (const key of ["section", "offset", "nextOffset", "previousOffset"]) {
     if ((key === "nextOffset" || key === "previousOffset") && d[key] === null) continue;

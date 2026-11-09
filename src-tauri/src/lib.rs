@@ -1,4 +1,5 @@
 pub mod chat;
+mod document_application;
 #[cfg(feature = "feat126-s10-driver")]
 mod feat126_s10_driver;
 mod feat126_secure_storage;
@@ -121,6 +122,10 @@ async fn get_my_capabilities(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if let Err(error) = document_application::bootstrap() {
+        eprintln!("Document application startup unavailable: {error}");
+        return;
+    }
     let context = tauri::generate_context!();
     let isolated_migration = std::env::args().any(|arg| arg == "--feat164-migrate-isolated-k3");
     let daily_migration = std::env::args().any(|arg| arg == "--feat164-migrate-daily-k3");

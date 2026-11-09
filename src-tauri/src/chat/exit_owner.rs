@@ -168,6 +168,14 @@ impl ExitOwner {
             app.state::<crate::workflows::WorkflowRuntime>()
                 .shutdown_for_app_exit()
                 .await;
+            while super::document_runtime::work_pending() {
+                app.state::<ChatRuntime>().lifecycle.transition(Phase::StopPending);
+                if !reported {
+                    eprintln!("FEAT-171 STOP_PENDING: waiting for normal document preview completion");
+                    reported = true;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
             loop {
                 if app
                     .state::<ChatRuntime>()

@@ -1,3 +1,4 @@
+import {verifyDocumentBuildCandidate} from "./document-build-candidate.mjs";
 // FEAT-164 local provenance. Immutable mode checks Git objects and actual build
 // inputs independently. A source pin alone is not G2V or release qualification.
 import assert from "node:assert/strict";
@@ -84,6 +85,7 @@ export function verifyKimiK31BuildCandidate(desktopRoot,contractsRoot,hostRoot,e
  execFileSync(process.execPath,["scripts/sync-scheduled-plan-v2.mjs","--check"],{cwd:contractsRoot,stdio:"pipe"});
  execFileSync(process.execPath,["scripts/generate-scheduled-ipc-v2.mjs","--check"],{cwd:desktopRoot,stdio:"pipe"});
  const fixedDaily = env.YIJIE_DEVELOPMENT_CLIENT === "true" && env.YIJIE_FEAT164_DAILY === "true";
+ if(env.YIJIE_FEAT171_DOCUMENT_RUNTIME === "true") return verifyDocumentBuildCandidate(desktopRoot,contractsRoot,hostRoot,env);
  if(env.YIJIE_FEAT169_NATIVE_TOOLS === "true") {
   checkPins(desktopRoot,hostRoot);
   if (env.YIJIE_FEAT170_TOOL_SEARCH_RUNTIME === "true") return verifyToolSearchBuildCandidate(desktopRoot,contractsRoot,hostRoot,env);

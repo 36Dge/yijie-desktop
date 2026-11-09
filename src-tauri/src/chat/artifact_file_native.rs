@@ -803,7 +803,7 @@ enum CsvState {
     AfterQuote,
 }
 
-fn parse_csv(normalized: &str) -> Result<Vec<Vec<String>>, ArtifactNativeCode> {
+pub(super) fn parse_csv(normalized: &str) -> Result<Vec<Vec<String>>, ArtifactNativeCode> {
     let mut rows = Vec::new();
     let mut row = Vec::new();
     let mut field = String::new();

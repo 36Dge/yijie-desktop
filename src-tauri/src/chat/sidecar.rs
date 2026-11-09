@@ -533,6 +533,7 @@ fn kimi_k31_surface_settings(
         "market" => (true, false, false),
         "experts" => (true, true, false),
         "media" => (true, true, true),
+        "documents" if super::document_runtime::enabled() => (false, false, true),
         _ => return Err(ChatError::InvalidConfiguration),
     };
     if (market, experts, media) == expected {
@@ -968,6 +969,25 @@ impl SidecarSupervisor {
                 return Err(ChatError::InvalidConfiguration);
             }
             command.env("YIJIE_FEAT170_TOOL_SEARCH", "true");
+        }
+        if read_exact_boolean_environment("YIJIE_FEAT171_DOCUMENT_RUNTIME")? {
+            if !self.demo_fast
+                || self.market_management_only()
+                || !read_exact_boolean_environment("YIJIE_FEAT169_INTERACTION_TOOLS")?
+            {
+                return Err(ChatError::InvalidConfiguration);
+            }
+            command.env("YIJIE_FEAT171_DOCUMENT_RUNTIME", "true");
+            for key in [
+                "YIJIE_DOCUMENT_BUNDLE_DIR",
+                "YIJIE_DOCUMENT_BUNDLE_SHA256",
+                "YIJIE_DOCUMENT_STATE_ROOT",
+            ] {
+                command.env(
+                    key,
+                    std::env::var(key).unwrap_or_default(),
+                );
+            }
         }
         if self.market_authority.is_some() {
             let manifest = std::env::var("YIJIE_MARKET_WORKER_MANIFEST")

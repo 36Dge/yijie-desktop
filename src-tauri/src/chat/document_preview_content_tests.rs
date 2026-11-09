@@ -108,6 +108,30 @@ fn normal_xlsx_renders_cells_merges_shared_strings_and_cached_formulas() {
 }
 
 #[test]
+fn normal_xlsx_empty_string_formula_cache_is_distinct_from_missing_cache() {
+    let cached = xml(br#"<c t="str"><f>IF(A1=0,"",1)</f><v/></c>"#).unwrap();
+    let missing = xml(br#"<c><f>IF(A1=0,"",1)</f><v/></c>"#).unwrap();
+    assert_eq!(
+        cell_value(
+            cached.child("c").unwrap(),
+            &[],
+            &[],
+            &BTreeMap::new(),
+            false
+        ),
+        ""
+    );
+    assert!(cell_value(
+        missing.child("c").unwrap(),
+        &[],
+        &[],
+        &BTreeMap::new(),
+        false
+    )
+    .contains("无已保存计算结果"));
+}
+
+#[test]
 fn normal_docx_long_body_has_bounded_continuation_and_blank_page_is_readable() {
     let paragraphs = (0..2000)
         .map(|i| {
@@ -219,10 +243,73 @@ fn markdown_sidebar_renders_document_structure_and_read_only_reference_labels() 
 }
 
 #[test]
-fn markdown_sidebar_keeps_the_partial_notice_for_a_bounded_text_projection() {
-    let source = "# 阅读清单\n\n".to_owned() + &"- 待办\n".repeat(2_001);
+fn normal_document_markdown_continuation_reaches_the_remaining_text() {
+    let source = "# 阅读清单\n\n".to_owned() + &"- 待办\n".repeat(4_001) + "\n结尾标记\n";
     let view = render("text/markdown", source.as_bytes(), 0, 0, true, 1.0).unwrap();
-    assert!(view.partial);
+    assert!(!view.partial);
     assert!(view.html.contains("<h1>阅读清单</h1>"));
     assert!(view.html.contains("<li>待办</li>"));
+    let next = render(
+        "text/markdown",
+        source.as_bytes(),
+        0,
+        view.next.unwrap(),
+        true,
+        1.0,
+    )
+    .unwrap();
+    assert!(next.html.contains("结尾标记"));
+    assert_eq!(next.next, None);
+    assert_eq!(next.previous, Some(0));
+}
+
+#[test]
+fn normal_document_csv_continuation_preserves_quoted_text_and_later_rows() {
+    let mut text = "id,name\n".to_owned();
+    for row in 0..230 {
+        text += &format!("{row:05},\"city,{row}\"\n");
+    }
+    let mut offset = 0;
+    let mut count = 0;
+    loop {
+        let p = render("text/csv", text.as_bytes(), 0, offset, false, 1.0).unwrap();
+        if count == 0 {
+            assert!(p.html.contains("00000"));
+            assert!(p.html.contains("city,0"));
+        }
+        count += 1;
+        match p.next {
+            Some(next) => offset = next,
+            None => {
+                assert!(p.html.contains("00229"));
+                break;
+            }
+        }
+    }
+    assert_eq!(count, 5);
+    let long = format!("id,note\n00017,\"{} END\"\n", "杭州".repeat(20000));
+    let mut offset = 0;
+    loop {
+        let p = render("text/csv", long.as_bytes(), 0, offset, false, 1.0).unwrap();
+        assert!(p.html.contains("按原始 CSV 分段展示"));
+        match p.next {
+            Some(next) => offset = next,
+            None => {
+                assert!(p.html.contains("END"));
+                break;
+            }
+        }
+    }
+}
+
+#[test]
+fn normal_document_office_pdf_outline_is_accepted() {
+    let Some(path) = std::env::var_os("YIJIE_DOCUMENT_TEST_PRESENTATION_PDF") else {
+        return;
+    };
+    let bytes = std::fs::read(path).unwrap();
+    assert!(attachment::validate_pdf_artifact_content(&bytes).is_ok());
+    let pages = render("application/pdf", &bytes, 1, 0, false, 1.0).unwrap();
+    assert_eq!(pages.sections.len(), 2);
+    assert_eq!(pages.section, 1);
 }

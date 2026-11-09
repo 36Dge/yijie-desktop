@@ -102,6 +102,21 @@ it("requires Native load completion, then revokes the view on scope change", asy
     w.vm.toggle(); await flushPromises(); expect(w.findAll('[role="tab"]')).toHaveLength(1);
   } finally { w.unmount(); }
 });
+it("allows normal first Office conversion beyond the text preview deadline", async () => {
+  vi.useFakeTimers();
+  let resolve!: (value: unknown)=>void;
+  native.run.mockImplementation(async (_context, action) => action.action === "open" ? new Promise(r=>{resolve=r;}) : ({document:null,position:null}));
+  const w=create();
+  try {
+    await flushPromises(); w.vm.openFile({...file("office"),name:"office.docx",mediaType:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"}); await flushPromises();
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(w.text()).toContain("正在加载预览"); expect(w.text()).not.toContain("加载超时");
+    const open=native.run.mock.calls.find(c=>c[1].action==="open")![1];
+    resolve({document}); await flushPromises();
+    native.events.get("chat-document-preview-loaded")!({payload:{viewId:open.viewId}}); await flushPromises();
+    expect(w.text()).toContain("只读内容已加载");
+  } finally {w.unmount();vi.useRealTimers();}
+});
 it("releases content in the background and reauthorizes on return", async () => {
   const w=create(); try {
     await flushPromises();w.vm.openFile(file("one"));await flushPromises();
@@ -319,6 +334,24 @@ it("keeps the worksheet and segment controls when there is more content to read"
     const latestOpen = native.run.mock.calls.filter(call => call[1].action === "open").pop();
     expect(latestOpen?.[1].location.section).toBe(1);
   } finally { w.unmount(); }
+});
+
+it("switches an advertised document layout to content using the same authorized source", async () => {
+  native.run.mockImplementation(async (_context, action) => ({
+    document: action.action === "open" ? { ...document, kind: "docx", viewMode: action.location.viewMode ?? "layout", availableModes: ["layout", "content"] } : null,
+    position: null,
+  }));
+  const w=create();
+  try {
+    w.vm.openFile({ ...file("letter"), name:"letter.docx", mediaType:"application/vnd.openxmlformats-officedocument.wordprocessingml.document" }); await flushPromises();
+    const initial=native.run.mock.calls.find(call=>call[1].action==="open")![1];
+    native.events.get("chat-document-preview-loaded")!({payload:{viewId:initial.viewId}}); await flushPromises();
+    expect(w.get('[aria-label="阅读方式"]').text()).toContain("版式");
+    await w.get('[aria-label="阅读方式"]').setValue("content"); await flushPromises();
+    const latest=native.run.mock.calls.filter(call=>call[1].action==="open").pop()![1];
+    expect(latest.source).toEqual(initial.source);
+    expect(latest.location).toMatchObject({viewMode:"content",section:0,offset:0});
+  } finally {w.unmount();}
 });
 
 it("opens a message file with its exact scoped reference and reuses its tab for the same path", async () => {

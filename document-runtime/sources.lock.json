@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "version": "26.8.2.2",
+  "provenance": "Official The Document Foundation mirror metadata, 2026-11-09. Upstream app build 26.8.2; originals preserved; only new private font resources assembled.",
+  "archives": [
+    {
+      "url": "https://download.documentfoundation.org/libreoffice/src/26.8.2/libreoffice-26.8.2.2.tar.xz",
+      "sha256": "f0012302d9cc70955bd55890d3aaccf6c55677c4a6a46e1003f996b1b0dae8e7",
+      "size_bytes": 302823256
+    },
+    {
+      "url": "https://download.documentfoundation.org/libreoffice/src/26.8.2/libreoffice-dictionaries-26.8.2.2.tar.xz",
+      "sha256": "d1b206157ea69249d754cabd8e9213b9dc69fc072fca91f51a681e95228239e0",
+      "size_bytes": 62318564
+    },
+    {
+      "url": "https://download.documentfoundation.org/libreoffice/src/26.8.2/libreoffice-help-26.8.2.2.tar.xz",
+      "sha256": "e7e0270c30b13c4c52acae57e6c7529dc2146d9946123b5da17ae236e3bb4f68",
+      "size_bytes": 53513028
+    },
+    {
+      "url": "https://download.documentfoundation.org/libreoffice/src/26.8.2/libreoffice-translations-26.8.2.2.tar.xz",
+      "sha256": "1a3b6077ebfac899f2c31666d283e29e94c2d30704dd162fda7ba06d77212dd2",
+      "size_bytes": 236276788
+    }
+  ]
+}
