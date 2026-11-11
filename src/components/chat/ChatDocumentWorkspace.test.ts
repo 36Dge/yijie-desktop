@@ -7,13 +7,17 @@ import { createMemoryHistory, createRouter } from "vue-router";
 import YjAppShell from "../yijie/YjAppShell.vue";
 import ChatDocumentWorkspace from "./ChatDocumentWorkspace.vue";
 import { MIN_PREVIEW_WIDTH, MIN_PREVIEW_WORKSPACE, type PreviewFile } from "../../domain/conversation-file-preview";
-const native = vi.hoisted(() => ({ run: vi.fn(), events: new Map<string, (event: { payload: unknown }) => void>() }));
+const native = vi.hoisted(() => ({ run: vi.fn(), saveFile: vi.fn(), saveReport: vi.fn(), events: new Map<string, (event: { payload: unknown }) => void>() }));
 vi.mock("../../api/chat-document-preview-client", async original => ({ ...await original<object>(), documentPreviewClient: { run: native.run } }));
+vi.mock("../../api/chat-artifact-file-native-client", async original => ({ ...await original<object>(), chatArtifactFileNativeClient: { saveFile: native.saveFile } }));
+vi.mock("../../api/chat-artifact-report-native-client", async original => ({ ...await original<object>(), chatArtifactReportNativeClient: { saveReport: native.saveReport } }));
 vi.mock("@tauri-apps/api/event", () => ({ TauriEvent:{WINDOW_FOCUS:"tauri://focus",WINDOW_BLUR:"tauri://blur"}, listen: vi.fn(async (name, callback) => { native.events.set(name,callback); return () => native.events.delete(name); }) }));
 const file = (id: string): PreviewFile => ({ source: { kind: "artifact", sessionId: "s", turnId: "t", artifactId: id }, name: `${id}.txt`, mediaType: "text/plain", status: "ready", expiresAt: null });
-const document = { kind: "text", revision: "a".repeat(64), expiresAt: Math.floor(Date.now()/1000)+600, sections: [], section: 0, offset: 0, nextOffset: null, previousOffset: null, partial: false, notice: null };
+const document = { kind: "text", revision: "a".repeat(64), expiresAt: Math.floor(Date.now()/1000)+600, sections: [], section: 0, offset: 0, nextOffset: null, previousOffset: null, partial: false, notice: null, locationSupported: true };
 beforeEach(() => {
   native.events.clear(); native.run.mockReset();
+  native.saveFile.mockReset().mockResolvedValue({status:"cancelled",code:null});
+  native.saveReport.mockReset().mockResolvedValue({status:"cancelled",code:null});
   vi.spyOn(HTMLElement.prototype,"clientWidth","get").mockReturnValue(1028);
   vi.spyOn(HTMLElement.prototype,"getBoundingClientRect").mockReturnValue({ x:0,y:0,width:1028,height:600,top:0,left:0,right:1028,bottom:600,toJSON:()=>({}) });
   native.run.mockImplementation(async (_context, action) => ({ status: action.action === "open" ? "ready" : "closed", viewId: action.viewId, document: action.action === "open" ? document : null, position: null }));
@@ -126,6 +130,48 @@ it("releases content in the background and reauthorizes on return", async () => 
     native.events.get("tauri://focus")!({payload:null});await flushPromises();
     expect(native.run.mock.calls.filter(c=>c[1].action==="open")).toHaveLength(2);
   } finally {w.unmount();}
+});
+
+it("shows a continuous PDF without page selection or pagination controls", async () => {
+  native.run.mockImplementation(async (_context, action) => ({status:"ready", document:action.action==="open" ? {...document, kind:"pdf", sections:[]} : null}));
+  const w=create(); try {
+    await flushPromises(); w.vm.openFile({...file("book"), name:"book.pdf", mediaType:"application/pdf"}); await flushPromises();
+    const open=native.run.mock.calls.find(c=>c[1].action==="open")![1];
+    native.events.get("chat-document-preview-loaded")!({payload:{viewId:open.viewId}}); await flushPromises();
+    expect(w.text()).toContain("只读内容已加载");
+    expect(w.find('select').exists()).toBe(false);
+    expect(w.text()).not.toContain("下一页");
+    expect(w.find('[aria-label="文件路径"]').exists()).toBe(true);
+  } finally { w.unmount(); }
+});
+
+it("does not reopen a background reader on visibility, theme or context refresh", async () => {
+  vi.spyOn(globalThis.document, "visibilityState", "get").mockReturnValue("visible");
+  const w=create(); try {
+    await flushPromises(); w.vm.openFile(file("one")); await flushPromises();
+    native.events.get("tauri://blur")!({payload:null}); await flushPromises();
+    globalThis.document.dispatchEvent(new Event("visibilitychange"));
+    globalThis.document.documentElement.dataset.theme = "dark";
+    await w.setProps({contextId:"renewed"}); await flushPromises();
+    expect(native.run.mock.calls.filter(c=>c[1].action==="open")).toHaveLength(1);
+    expect(w.text()).toContain("预览已暂停");
+    native.events.get("tauri://focus")!({payload:null}); await flushPromises();
+    const opens=native.run.mock.calls.filter(c=>c[1].action==="open");
+    expect(opens).toHaveLength(2); expect(opens[1]![0]).toBe("renewed");
+  } finally { w.unmount(); delete globalThis.document.documentElement.dataset.theme; }
+});
+
+it("discards an in-flight reader after switching applications without reopening it", async () => {
+  let resolve!: (value: unknown)=>void;
+  native.run.mockImplementation(async (_context, action) => action.action === "open" ? new Promise(r=>{resolve=r;}) : ({document:null,position:null}));
+  const w=create(); try {
+    await flushPromises(); w.vm.openFile(file("one")); await flushPromises();
+    native.events.get("tauri://blur")!({payload:null}); await flushPromises();
+    globalThis.document.dispatchEvent(new Event("visibilitychange"));
+    resolve({document}); await flushPromises();
+    expect(native.run.mock.calls.filter(c=>c[1].action==="open")).toHaveLength(1);
+    expect(w.text()).toContain("预览已暂停");
+  } finally { w.unmount(); }
 });
 
 it("retains tabs across temporary same-session readiness refresh, but clears on authority change", async () => {
@@ -383,6 +429,8 @@ it("opens a published report using its specialized reader in the active tab", as
     const viewer = w.getComponent({name: "ChatArtifactReport"});
     expect(viewer.props("artifact")).toEqual(artifact);
     expect(w.findAll('[role="tab"]')).toHaveLength(1);
+    await w.get('[aria-label="另存为"]').trigger('click'); await flushPromises();
+    expect(native.saveReport).toHaveBeenCalledExactlyOnceWith('scope',{sessionId:'s',turnId:'t',artifactId:'report'});
     expect(native.run).not.toHaveBeenCalled();
     await w.get('[aria-label="收起右侧面板"]').trigger("click"); await flushPromises();
     expect(w.find(".document-sidebar__artifact").exists()).toBe(false);
@@ -425,5 +473,124 @@ it("returns to the selected document and reading position when a media dialog cl
     const last = native.run.mock.calls.filter(call=>call[1].action === "open").pop()![1];
     expect(last.source).toEqual(first.source);
     expect(last.location.scrollY).toBe(84);
+  } finally {w.unmount();}
+});
+
+it("shows the active document toolbar and routes artifact Save As through the existing client", async () => {
+  native.run.mockImplementation(async (_context, action) => ({ status: action.action === 'open' ? 'ready' : action.action === 'locate' ? 'located' : 'closed', viewId: action.viewId, document: action.action === 'open' ? document : null, position: null, ...(action.action === 'locate' ? {path:'/ordinary/workspace/report.pdf'} : {}) }));
+  const w=create();
+  try {
+    await flushPromises(); w.vm.toggle(); await flushPromises();
+    expect(w.find('[aria-label="文档操作"]').exists()).toBe(false);
+    w.vm.openFile({...file("report"),name:"报告.pdf",mediaType:"application/pdf"}); await flushPromises();
+    expect(w.get('.document-toolbar__name').text()).toBe('报告.pdf');
+    expect(w.get('[role="tab"] svg path').attributes('fill')).toBe('var(--yj-color-document-pdf)');
+    await w.get('[aria-label="文件路径"]').trigger('focus'); await flushPromises();
+    expect(w.getComponent({name:'ChatDocumentToolbar'}).props('path')).toBe('/ordinary/workspace/report.pdf');
+    expect(native.run.mock.calls.find(call=>call[1].action==='locate')?.[1]).toEqual({action:'locate',viewId:expect.any(String),source:file('report').source,revision:document.revision});
+    const save=w.get('[aria-label="另存为"]');
+    expect(save.attributes('data-yj-tooltip')).toBe('另存为');
+    await save.trigger('click'); await flushPromises();
+    expect(native.saveFile).toHaveBeenCalledExactlyOnceWith('scope',{sessionId:'s',turnId:'t',artifactId:'report'});
+    expect(w.find('.artifact-file__feedback').exists()).toBe(false);
+  } finally {w.unmount();}
+});
+
+it("locates only the current message reference and discards an old path after context changes", async () => {
+  let resolve!: (value: unknown)=>void;
+  native.run.mockImplementation(async (_context,action)=> action.action==='locate'
+    ? new Promise(r=>{resolve=r;}) : ({status:action.action==='open'?'ready':'closed',viewId:action.viewId,document:action.action==='open'?document:null,position:null}));
+  const w=create();
+  const source={kind:'messageFile' as const,sessionId:'s',turnId:'t',itemId:'answer',reference:'notes/West Lake.md'};
+  try {
+    await flushPromises(); w.vm.openFile({...file('local'),name:'West Lake.md',mediaType:'',source}); await flushPromises();
+    expect(w.get('[role="tab"] svg path').attributes('fill')).toBe('var(--yj-color-document-markdown)');
+    expect(w.get('[aria-label="另存为"]').attributes('disabled')).toBeDefined();
+    await w.get('[aria-label="文件路径"]').trigger('focus'); await flushPromises();
+    expect(native.run.mock.calls.find(call=>call[1].action==='locate')?.[1].source).toEqual(source);
+    await w.setProps({contextId:'renewed'}); await flushPromises();
+    resolve({status:'located',path:'/ordinary/notes/West Lake.md',document:null,position:null}); await flushPromises();
+    expect(w.getComponent({name:'ChatDocumentToolbar'}).props('path')).toBeNull();
+    expect(w.getComponent({name:'ChatDocumentToolbar'}).props('pathOpen')).toBe(false);
+  } finally {w.unmount();}
+});
+
+it.each(['messageFile','attachment'] as const)("saves %s only with Native capability and the previewed revision", async kind => {
+  let finish!: (value: unknown)=>void;
+  native.run.mockImplementation(async (_context,action)=> action.action==='save'
+    ? new Promise(r=>{finish=r;}) : ({status:action.action==='open'?'ready':'closed',viewId:action.viewId,document:action.action==='open'?{...document,saveSupported:true}:null,position:null}));
+  const source=kind==='messageFile'
+    ? {kind,sessionId:'s',turnId:'t',itemId:'answer',reference:'/ordinary/report.txt'}
+    : {kind,sessionId:'s',messageId:'m',attachmentId:'a'};
+  const w=create();
+  try {
+    await flushPromises(); w.vm.openFile({...file('source'),source}); await flushPromises();
+    const save=w.get('[aria-label="另存为"]');
+    expect(save.attributes('disabled')).toBeUndefined();
+    await save.trigger('click'); await save.trigger('click'); await flushPromises();
+    const calls=native.run.mock.calls.filter(call=>call[1].action==='save');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.[0]).toBe('scope');
+    expect(calls[0]?.[1]).toEqual({action:'save',viewId:expect.any(String),source,revision:document.revision});
+    finish({status:'cancelled',document:null,position:null}); await flushPromises();
+    expect(save.attributes('disabled')).toBeUndefined();
+    expect(native.saveFile).not.toHaveBeenCalled();
+    expect(w.text()).not.toContain('已取消保存');
+  } finally {w.unmount();}
+});
+
+it("shows the authorized full path only when the path control is opened", async () => {
+  const source={kind:'messageFile' as const,sessionId:'s',turnId:'t',itemId:'answer',reference:'notes/West Lake.md'};
+  native.run.mockImplementation(async (_context,action)=> ({
+    status:action.action==='open'?'ready':action.action==='locate'?'located':'closed',viewId:action.viewId,
+    document:action.action==='open'?document:null,position:null,
+    ...(action.action==='locate'?{path:'/ordinary/workspace/notes/West Lake.md'}:{}),
+  }));
+  const w=create();
+  try {
+    await flushPromises(); w.vm.openFile({...file('local'),name:'West Lake.md',source}); await flushPromises();
+    expect(native.run.mock.calls.filter(call=>call[1].action==='locate')).toHaveLength(0);
+    await w.get('[aria-label="文件路径"]').trigger('focus'); await flushPromises();
+    const toolbar=w.getComponent({name:'ChatDocumentToolbar'});
+    expect(toolbar.props('path')).toBe('/ordinary/workspace/notes/West Lake.md');
+    expect(toolbar.props('pathState')).toBe('ready');
+    await w.get('[aria-label="文件路径"]').trigger('keydown',{key:'Escape'}); await flushPromises();
+    expect(toolbar.props('pathOpen')).toBe(false);
+  } finally {w.unmount();}
+});
+
+it("keeps the Native document visible while the path popup stays in the header area", async () => {
+  const rootBounds={x:0,y:0,width:1180,height:760,top:0,left:0,right:1180,bottom:760,toJSON:()=>({})};
+  vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(function(this:HTMLElement) {
+    if (this.classList.contains('document-sidebar__viewport')) return {...rootBounds,x:844,y:112,width:336,height:648,left:844,top:112,right:1180,bottom:760};
+    if (this.getAttribute('aria-label')==='文件路径') return {...rootBounds,x:1030,y:72,width:32,height:32,left:1030,top:72,right:1062,bottom:104};
+    if (this.classList.contains('n-popover')) return {...rootBounds,x:844,y:8,width:320,height:56,left:844,top:8,right:1164,bottom:64};
+    return rootBounds;
+  });
+  native.run.mockImplementation(async (_context,action)=>({status:action.action==='open'?'ready':action.action==='locate'?'located':action.action==='resize'?'resized':'closed',viewId:action.viewId,document:action.action==='open'?document:null,position:null,...(action.action==='locate'?{path:'/ordinary/workspace/report.txt'}:{})}));
+  const w=create();
+  try {
+    await flushPromises(); w.vm.openFile(file('report')); await flushPromises();
+    const open=native.run.mock.calls.find(call=>call[1].action==='open')![1];
+    native.events.get('chat-document-preview-loaded')!({payload:{viewId:open.viewId}});
+    await vi.waitFor(()=>expect(native.run.mock.calls.some(call=>call[1].action==='resize'&&call[1].visible)).toBe(true));
+    const start=native.run.mock.calls.length;
+    await w.get('[aria-label="文件路径"]').trigger('focus'); await flushPromises();
+    const popover=w.getComponent({name:'ChatDocumentToolbar'}).findComponent({name:'Popover'});
+    expect(popover.props('placement')).toBe('top-end');
+    expect(popover.props('flip')).toBe(false);
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))); await flushPromises();
+    expect(native.run.mock.calls.slice(start).filter(call=>['close','open'].includes(call[1].action)||call[1].action==='resize'&&!call[1].visible)).toHaveLength(0);
+    expect(w.getComponent({name:'ChatDocumentToolbar'}).props('path')).toBe('/ordinary/workspace/report.txt');
+  } finally {w.unmount();}
+});
+
+it("does not send a stored-file location request to an older Native reader", async () => {
+  native.run.mockImplementation(async (_context,action)=>({status:action.action==='open'?'ready':'closed',viewId:action.viewId,document:action.action==='open'?{...document,locationSupported:undefined}:null,position:null}));
+  const w=create();
+  try {
+    await flushPromises(); w.vm.openFile(file('older-reader')); await flushPromises();
+    expect(w.get('[aria-label="文件路径"]').attributes('disabled')).toBeDefined();
+    expect(native.run.mock.calls.filter(call=>call[1].action==='locate')).toHaveLength(0);
   } finally {w.unmount();}
 });

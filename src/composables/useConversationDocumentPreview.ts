@@ -37,6 +37,10 @@ let mutationObserver: MutationObserver | undefined;
 let themeObserver: MutationObserver | undefined;
 let unlisteners: UnlistenFn[] = [];
 let disposed = false;
+// Page visibility can become "visible" while another macOS app is still key.
+// Only the native window focus event may resume a suspended reader.
+let windowFocused = true;
+const canPresent = () => windowFocused && document.visibilityState !== "hidden";
 let epoch = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let deadline: ReturnType<typeof setTimeout> | undefined;
@@ -77,7 +81,7 @@ function syncViewport() {
     }
     const bounds = measuredViewport();
     if (!bounds) return;
-    const visible = presenting.value && phase.value === "ready" && document.visibilityState !== "hidden" && !blockingOverlayVisible();
+    const visible = presenting.value && phase.value === "ready" && canPresent() && !blockingOverlayVisible();
     const last = view.bounds;
     if (visible === view.visible && bounds.x === last.x && bounds.y === last.y &&
         bounds.width === last.width && bounds.height === last.height && bounds.dpr === last.dpr) return;
@@ -118,7 +122,7 @@ async function pump() {
   const viewId = newId();
   try {
     await Promise.all([...closeTasks]); await nextTick();
-    if (job.epoch !== epoch || !presenting.value || !job.tab.file) return;
+    if (job.epoch !== epoch || !presenting.value || !job.tab.file || !canPresent()) return;
     const bounds = measuredViewport(); if (!bounds) throw new DocumentPreviewError("artifact_native_unavailable");
     const view: NativeView = { id: viewId, context: job.context, tab: job.tab, loaded: false, bounds, visible: false }; current = view;
     const result = await documentPreviewClient.run(job.context, { action: "open", viewId, source: job.tab.file.source, viewport: bounds, location: job.tab.location, theme: document.documentElement.dataset.theme === "dark" ? "dark" : "light" });
@@ -146,6 +150,7 @@ function reload(preserve = true) {
   error.value = null;
   const tab = media.value ?? active.value;
   if (!presenting.value || !props.enabled || !props.contextId || !tab?.file) { phase.value = "empty"; return; }
+  if (!canPresent()) { phase.value = "paused"; return; }
   if (tab.file.status === "expired" || (tab.file.expiresAt !== null && tab.file.expiresAt <= Date.now() / 1000)) { invalidate("artifact_native_expired"); return; }
   if (tab.file.artifact?.kind === "report") {
     // Structured reports use their existing scoped report reader.
@@ -302,7 +307,7 @@ function suspend() {
 function visibility() {
   cancelDrag();
   if (document.visibilityState === "hidden") suspend();
-  else if (presenting.value && phase.value === "paused") reload();
+  else if (windowFocused && presenting.value && phase.value === "paused") reload();
 }
 watch(opened, value => emit("expanded", value), { immediate: true });
 watch(() => geometry.value.right, () => { void nextTick(syncViewport); });
@@ -334,8 +339,8 @@ onMounted(async () => {
     const callbacks = await Promise.allSettled([
       listen<Loaded>("chat-document-preview-loaded", ({ payload }) => { if (payload && current?.id === payload.viewId) { current.loaded = true; loaded(); } }),
       listen<Invalidated>("chat-document-preview-invalidated", ({ payload }) => { if (payload && current?.id === payload.viewId) invalidate(`artifact_native_${payload.reason}`); }),
-      listen(TauriEvent.WINDOW_BLUR, suspend, { target: { kind: "Window", label: "main" } }),
-      listen(TauriEvent.WINDOW_FOCUS, () => { if (presenting.value && phase.value === "paused") reload(); }, { target: { kind: "Window", label: "main" } }),
+      listen(TauriEvent.WINDOW_BLUR, () => { windowFocused = false; suspend(); }, { target: { kind: "Window", label: "main" } }),
+      listen(TauriEvent.WINDOW_FOCUS, () => { windowFocused = true; if (presenting.value && phase.value === "paused") reload(); }, { target: { kind: "Window", label: "main" } }),
     ]);
     const registered = callbacks.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
     if (disposed) registered.forEach(stop => stop()); else unlisteners = registered;

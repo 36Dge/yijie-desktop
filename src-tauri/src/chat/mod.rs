@@ -9,8 +9,11 @@ mod authorization;
 pub(crate) mod connectors;
 mod database;
 mod document_preview_content;
+mod document_preview_location;
 pub(crate) mod document_preview_native;
 mod document_preview_pdf;
+mod document_preview_pdf_pages;
+mod document_preview_save;
 
 /// Shared admission/renderer for the application-owned document QA executable.
 /// This is an in-process Rust interface, not a renderer IPC or permission grant.

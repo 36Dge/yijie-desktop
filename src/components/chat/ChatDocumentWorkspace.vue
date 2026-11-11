@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import ChatArtifactReport from "./ChatArtifactReport.vue";
+import ChatDocumentToolbar from "./ChatDocumentToolbar.vue";
+import { chatDocumentIcon } from "../../domain/chat-file-presentation";
+import { useDocumentToolbar } from "../../composables/useDocumentToolbar";
 import { chatArtifactReportNativeClient } from "../../api/chat-artifact-report-native-client";
 import { NModal, NTooltip } from "naive-ui";
 import YjIcon from "../yijie/YjIcon.vue";
@@ -8,6 +11,14 @@ import { useConversationDocumentPreview } from "../../composables/useConversatio
 const props = defineProps<{ contextId: string | null; scopeKey: string; enabled: boolean }>();
 const emit = defineEmits<{ expanded: [value: boolean]; restoreTrigger: [] }>();
 const { opened, media, closeMedia, syncViewport, fullscreen, fullscreenTarget, state, active, geometry, metadata, phase, error, notice, dragging, capacityText, toggle, toggleFullscreen, openFile, collapse, createTab, selectTab, closeTab, keyTab, navigate, selectViewMode, resetWidth, keyResize, startDrag, moveDrag, endDrag, reload } = useConversationDocumentPreview(props, emit);
+const { pathOpen, path, pathState, canLocate, saving, canSave, save } = useDocumentToolbar({
+  file: () => active.value?.file ?? null,
+  context: () => props.contextId,
+  enabled: () => props.enabled && opened.value && !media.value,
+  revision: () => metadata.value?.revision ?? null,
+  saveSupported: () => metadata.value?.saveSupported === true,
+  locationSupported: () => metadata.value?.locationSupported === true,
+});
 defineExpose({ toggle, openFile, opened });
 </script>
 
@@ -20,7 +31,7 @@ defineExpose({ toggle, openFile, opened });
       <div class="document-sidebar__tabs" data-tauri-drag-region>
         <div ref="tabStrip" class="document-sidebar__tablist" :style="{ '--preview-tab-count': state.tabs.length }" role="tablist" aria-label="预览标签页">
           <div v-for="tab in state.tabs" :key="tab.id" class="document-sidebar__tab-wrap" :data-preview-tab="tab.id" :class="{ 'is-active': tab.id === state.activeId }">
-            <button :id="`preview-tab-${tab.id}`" type="button" role="tab" :data-tab-id="tab.id" :aria-selected="tab.id === state.activeId" aria-controls="conversation-file-preview" :tabindex="tab.id === state.activeId ? 0 : -1"  @click="selectTab(tab.id)" @keydown="keyTab($event, tab.id)"><YjIcon name="file" size="sm" :stroke-width="1.5" /><span>{{ tab.file?.name ?? '新标签页' }}</span></button>
+            <button :id="`preview-tab-${tab.id}`" type="button" role="tab" :data-tab-id="tab.id" :aria-selected="tab.id === state.activeId" aria-controls="conversation-file-preview" :tabindex="tab.id === state.activeId ? 0 : -1"  @click="selectTab(tab.id)" @keydown="keyTab($event, tab.id)"><YjIcon :name="tab.file ? chatDocumentIcon(tab.file.mediaType, tab.file.name) : 'file'" size="sm" :stroke-width="1.5" /><span>{{ tab.file?.name ?? '新标签页' }}</span></button>
             <NTooltip arrow-point-to-center placement="left">
               <template #trigger><button class="document-sidebar__tab-close" type="button" :aria-label="`关闭 ${tab.file?.name ?? '新标签页'}`" @click="closeTab(tab.id)"><YjIcon name="dismiss" size="xs" :stroke-width="1.5" /></button></template>
               关闭
@@ -42,6 +53,8 @@ defineExpose({ toggle, openFile, opened });
           </NTooltip>
         </div>
       </div>
+      <ChatDocumentToolbar v-if="!media && active?.file" v-model:path-open="pathOpen"
+        :name="active.file.name" :enabled="canLocate" :path="path" :path-state="pathState" :saving="saving" :can-save="canSave" @save="save" />
       <div v-if="!media && phase === 'ready' && metadata && (metadata.availableModes?.length || metadata.sections.length > 1 || metadata.previousOffset !== null || metadata.nextOffset !== null)"
         class="document-sidebar__reading" aria-label="阅读选项">
         <select v-if="metadata.availableModes?.length" :value="metadata.viewMode" aria-label="阅读方式" @change="selectViewMode(($event.target as HTMLSelectElement).value as 'layout' | 'content')"><option v-for="mode in metadata.availableModes" :key="mode" :value="mode">{{ mode === 'layout' ? '版式' : metadata.kind === 'xlsx' ? '表格' : '正文' }}</option></select>

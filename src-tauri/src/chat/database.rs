@@ -1742,10 +1742,10 @@ impl ChatRepository {
         use super::artifact::ReadyFileReadError as ReadError;
         use sha2::Digest;
         let now = unix_seconds()?;
-        type Row = (String, String, i64, String, i64, Option<Vec<u8>>);
+        type Row = (String, String, i64, String, i64, Option<Vec<u8>>, String);
         let row: Option<Row> = self.connection.query_row(
             "SELECT a.media_type,a.state,a.byte_size,a.sha256,a.expires_at,
-             CASE WHEN a.state='bound' AND a.expires_at>?6 AND a.byte_size<=10485760 THEN a.content_blob ELSE NULL END
+             CASE WHEN a.state='bound' AND a.expires_at>?6 AND a.byte_size<=10485760 THEN a.content_blob ELSE NULL END,a.safe_name
              FROM chat_attachments a JOIN chat_messages m ON m.id=a.message_id
              JOIN chat_sessions s ON s.id=m.session_id
              JOIN chat_message_content_blocks b ON b.message_id=m.id AND b.attachment_id=a.id
@@ -1753,9 +1753,9 @@ impl ChatRepository {
              AND a.owner_user_id=?4 AND a.tenant_id=?5
              AND s.owner_user_id=a.owner_user_id AND s.tenant_id=a.tenant_id",
             params![attachment.to_string(),message.map(|id| id.to_string()),session.to_string(),self.scope.owner_user_id,self.scope.tenant_id,now],
-            |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?)),
+            |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?)),
         ).optional().map_err(map_sqlite_error)?;
-        let Some((mime, state, size, revision, expires, bytes)) = row else {
+        let Some((mime, state, size, revision, expires, bytes, name)) = row else {
             return Ok(Err(ReadError::NotFound));
         };
         if state == "expired" || expires <= now {
@@ -1775,6 +1775,7 @@ impl ChatRepository {
             return Ok(Err(ReadError::Integrity));
         }
         Ok(Ok(super::document_preview_native::StoredDocument {
+            name,
             mime,
             bytes,
             expires,
@@ -10424,6 +10425,7 @@ mod tests {
         bind_and_accept_first_turn(&mut repo, &pending, unix_seconds().unwrap());
         let context = repo.active_turn_context(pending.session_id).unwrap();
         let path = workspace.join("杭州旅行 (初稿).md");
+        assert_eq!(repo.document_workspace_root(pending.session_id).unwrap(), workspace);
         let text = "# 杭州旅行\n沿西湖步行。";
         fs::write(&path, text).unwrap();
         let url = url::Url::from_file_path(&path).unwrap().to_string();
@@ -10507,6 +10509,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(content.bytes, b"Normal preview body");
+        assert_eq!(content.name, "normal.txt");
         let resolved = repository
             .bound_document_preview(pending.session_id, None, attachment)
             .unwrap()

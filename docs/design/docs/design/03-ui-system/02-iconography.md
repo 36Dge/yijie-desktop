@@ -92,6 +92,12 @@ API / Agent Host、路由与权限语义、本地持久状态均无变化。
 
 2026-11-02 用户指定的回答评价选中态：点赞/点踩默认使用既有 Lucide 线性图标，选中使用同轮廓的实心变体，手掌与袖口保留透明间隙。变体位于 `src/icons/answer-feedback-icons.ts`，通过 registry 和 `YjIcon` 消费；16px、1.5px 线宽与原命中区保持，颜色使用 `--yj-color-text-secondary`，不添加选中底色。此为用户明确指定的状态表达例外，不更换全局图标风格或增加依赖。`contract-impact = none`：仅改变前端显示，不影响评价行为、模型、协议和持久状态。
 
+## 对话产物文档图标（2026-11-10 用户指定例外）
+
+普通对话产物卡片按用户要求参考 WorkBuddy 的实心折角文档风格：彩色纸张、浅色折角、白色格式标识。Markdown 为青色 M，Word 为蓝色 W，演示文稿为橙色 P，表格为绿色 X，PDF 为红色 PDF；文本、代码与其他文档使用同一轮廓的对应标识。图形为本仓绘制的 SVG 路径，位于 `src/icons/document-icons.ts`，经 registry／`YjIcon` 消费，使用专用颜色 token。
+
+产物卡片图标槽为 28×28px，不另加浅色方形底板。用户随后要求用户消息中的文档附件及右侧预览标签同步采用此实心折角样式；共享 `ChatAttachmentChip` 在已发送消息与输入草稿中复用相同格式映射，附件与预览标签均保持 16px。图片、视频、导航及操作图标继续采用原规范。预览路径浮层的电脑图标使用现有 Lucide Monitor，经 `computer` registry 使用。图标变更本身 `contract-impact = none`；预览新增保存动作的协议影响另见预览 pattern。
+
 ## 品牌图标
 
 Amazon、Temu、Shopee、TikTok Shop、LinkedIn、飞书、钉钉等品牌图标必须优先使用官方素材。官方素材进入：

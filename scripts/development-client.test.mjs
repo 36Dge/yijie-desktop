@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { developmentArguments } from "./run-workflow-dev.mjs";
+import { bundleArguments, runnerEnvironment, withoutDevelopmentRunner } from "./development-app-runner.mjs";
 
 const current = {
   YIJIE_DEVELOPMENT_CLIENT: "true", YIJIE_FEAT164_DAILY: "true", YIJIE_KIMI_K31_PRO_CANDIDATE: "true",
@@ -25,5 +26,19 @@ describe("fixed development launch selection", () => {
   it("retains the historical workflow development profile", () => {
     expect(developmentArguments({YIJIE_EXPERTS_ENABLED: "true"})).toContain("src-tauri/tauri.experts-daily.conf.json");
     expect(developmentArguments({})).not.toContain("kimi-k31-pro-candidate");
+  });
+  it("runs the macOS dev output with the same configuration in a standard unsigned app bundle", () => {
+    const args = developmentArguments(current);
+    const env = runnerEnvironment(current, args, "/project", "darwin", "arm64", "/usr/bin/node");
+    expect(env.CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER).toBe("/usr/bin/node /project/scripts/development-app-runner.mjs");
+    const bundle = bundleArguments(args);
+    expect(bundle.slice(0, 8)).toEqual(["exec", "tauri", "bundle", "--debug", "--bundles", "app", "--no-sign", "--config"]);
+    expect(bundle).toContain("src-tauri/tauri.feat164-experts.conf.json");
+    expect(bundle).toContain("kimi-k31-pro-candidate");
+    expect(withoutDevelopmentRunner(env)).toEqual(current);
+  });
+  it("does not install a Cargo runner outside the fixed macOS client", () => {
+    expect(runnerEnvironment(current, developmentArguments(current), "/project", "linux")).toEqual(current);
+    expect(runnerEnvironment({}, developmentArguments({}), "/project", "darwin")).toEqual({});
   });
 });

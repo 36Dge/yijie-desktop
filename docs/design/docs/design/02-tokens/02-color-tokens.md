@@ -43,7 +43,13 @@
 默认无下划线，hover/键盘焦点显示下划线并保留中性焦点环；完整地址放在统一 tooltip，支持 hover、focus 和 Esc。
 原始 Markdown、复制及目标地址保持，不将普通正文、搜索来源列表或导航整体改为绿色。
 
-产物文件名与图标使用 `--yj-color-chat-file-link`，亮色为 `#8538C6`，暗色为 `#D2A5FF`。悬停或键盘聚焦时，文件名显示点状下划线，完整路径显示在统一 tooltip 中。
+正文中的文件链接及图标使用 `--yj-color-chat-file-link`。2026-11-10 按用户要求复用输入框已选技能的 `--yj-color-connector-composer-mention`，亮色为 `#668000`，暗色为 `#D0F780`。悬停或键盘聚焦时，文件名显示点状下划线，完整路径显示在统一 tooltip 中。
+
+同日产物文档调整为独立卡片：中性标题、次级大小、按格式着色的文档图标。底纹 `--yj-color-chat-artifact-bg` 亮色为 `#F2F2F2`、暗色为 `#25282B`；悬停底纹 `--yj-color-chat-artifact-hover` 分别为 `#ECEEF0`、`#30363D`。卡片悬停或键盘焦点进入时显示右侧“另存为”图标，只有图标显示该 tooltip。正文中的文件链接仍使用上述青柠色。
+
+按用户随后要求对齐 WorkBuddy：产物标题使用专用 `--yj-color-chat-artifact-title`（亮色 `#000000`、暗色 `#FFFFFF`），大小使用 `--yj-color-chat-artifact-meta`（亮色 `#00000080`、暗色 `#FFFFFF80`）。实心折角图标通过 `--yj-color-document-*` 统一提供各文档格式的纸张颜色、白色标识和浅色折角，不沿用状态语义色。
+
+同日权限入口及菜单的“完全访问权限”缩短为“完全访问”。`contract-impact = none`：仅修改 Desktop 展示文案及文件链接颜色，权限审批行为、API/Agent Host、Native IPC、本地持久状态与重放语义不变。
 
 ## 文字与图标
 

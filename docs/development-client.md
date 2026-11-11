@@ -20,6 +20,21 @@ pnpm client:dev
 
 `pnpm tauri:dev`、`pnpm tauri:demo-fast` 使用同一入口。保持启动终端运行。
 
+2026-11-11：macOS 日常入口保持 `tauri dev --no-watch` 与 Vite HMR，但通过 Cargo 的
+target runner 在固定开发 `.app` 中运行刚编译的可执行文件。此前直接运行裸可执行文件，
+与 `start-ui` 使用不同构建配置和临时程序身份；实机出现系统 bookmark 解析错误 259，
+导致所有文档格式无法定位。仅把 dev 可执行文件放进 `.app` 不能恢复旧授权：本轮已通过
+应用原生目录选择器重新选择原 FEAT-171 工作区，更新该目录原有授权，没有绕过 bookmark
+校验。`start-ui` 也统一为相同 dev 配置，避免两个固定入口继续切换身份。新入口使用标准 `tauri bundle --debug --bundles app --no-sign`，核对
+开发二进制、配置、资源 pin 和完整 bundle 摘要；未变化时复用，不创建 generation、
+安装包或数据备份。原生更新仍须正常退出，项目构建锁覆盖完整运行期。
+
+权威源新增 `scripts/development-app-runner.mjs`，本地 deployment interface 为 v3，
+`contract-impact = semantic`。开发器、启动器和本机客户端共同消费；原 Homes、
+bookmark 权限检查、业务 IPC、Host/Runtime 和持久化格式不变。runner 配置不传给
+App 或后续任务子进程；标准 bundler 的输出限于 `.local/development/target`，不改
+已安装、签名或发布的客户端。回滚须先正常退出，再恢复原入口；无需数据迁移。
+
 - Vue、CSS、前端 TypeScript 修改由 Vite 热更新；部分模块更新会正常刷新页面，不重新构建原生包。
 - Rust/Go 逻辑、原生资源或编译配置修改后，先在易界菜单正常退出或按 ⌘Q，等待清理完成，再点击同一图标或执行同一命令。Cargo/Go 使用增量缓存。禁用 Tauri 原生 watcher，避免它自动终止正在使用数据库的 App。
 - Ctrl+C/SIGTERM 不转发强杀：提示用户通过 App 正常退出；退出后关闭 Vite 并释放构建锁。编译中也不向构建进程转发终止信号。
@@ -60,9 +75,10 @@ Runtime 摘要、Host/Worker 依赖来源、契约生成物、技能/专家资�
 
 用户确认 FEAT-167 验收可临时采用 `python3 -B scripts/development-client.py start-ui`。
 该入口复用原固定开发环境、Homes、完整功能和正常清理流程，以项目标准 Tauri debug
-构建生成 `.local/development/target/debug/bundle/macos/易界 AI.app`。它有原生 bundle
-identifier，便于桌面自动化定位；不是已发布应用，也不覆盖原安装包。`client:dev` 的默认
-HMR 模式保持不变。修改原生逻辑/重建前仍先通过 App 菜单或⌘Q正常退出。
+构建生成 `.local/development/target/debug/bundle/macos/易界 AI.app`。2026-11-11 起
+`start-ui` 与 `client:dev` 统一为同一 dev 二进制、配置及 HMR 运行链；验收参数仍只选择
+原有明确授权的计量入口。它有原生 bundle identifier，便于桌面自动化定位；不是已发布
+应用，也不覆盖原安装包。修改原生逻辑/重建前仍先通过 App 菜单或⌘Q正常退出。
 
 FEAT-167 用户同时明确撤销旧数据兼容要求。首次切换需显式执行
 `python3 -B scripts/reset-trace-v6-data.py --apply`（默认不带参数只列清单）；仅在所有易界
@@ -105,3 +121,28 @@ FEAT-167 用户同时明确撤销旧数据兼容要求。首次切换需显式�
 ### FEAT-171 已授权文档验收
 
 `YIJIE_FEAT171_DOCUMENT_RUNTIME=true python3 -B scripts/development-client.py start-ui --document-meter` 使用同一固定开发入口、原Homes及专用文档包。文档Runtime包含工具搜索基线，必须最后选定，不得被基线覆盖。仅显式验收选择固定18083计量路由；先启动独立FEAT-171计量器并核对30元/80次任务授权。该入口不授予额外费用，不继承FEAT-170额度，计量器不在线时不直连供应商。验收完正常退出；普通入口默认不开启计量和文档候选。
+
+### 2026-11-10 澄清界面实机启动的来源同步
+
+用户明确授权使用现有生成脚本同步过期来源锁及必要派生记录，再继续实机问答验证。
+本段修复的 `contract-impact = semantic`，范围为本地开发的来源锁和构建配对元数据；
+公共协议、Runtime二进制、权限及持久化格式不变。UI改动自身仍为 `none`。
+
+最初Docker未运行；正常启动Docker后，原服务身份、存储及就绪检查通过。后续启动分别被
+Runtime来源提交和worker库引用校验阻断，均沿原流程正常停止专用服务，没有强杀或任务重放。
+经核对，Runtime `fe3f5b1c768f2a1464314e2a350d419a3e63d9c6` 相对原记录
+`db3c7b56c390215803449b38fd7599ab4f5715f3` 没有改变这四组候选的源码、schema或制品。
+按现有Kimi／native-tools／interaction-tools／tool-search生成器同步来源提交，并同步user-input、
+context-window来源摘要及消费者记录；所有协议生成物和Runtime制品摘要保持一致。
+
+native／interaction构建记录通过原 `--freeze` 入口配对当前已提交Host
+`61bd306f607e1b8604b9e763f633cbc4f8db53d1`。其源码集合与既有document构建记录一致，
+仅本次两个API候选元数据摘要发生变化；同时同步tool-search依赖记录和document构建记录中的
+这两个摘要。没有修改Host实现或启用文档候选。Connectors沿现有兼容包装提交列表登记
+`fe3f5b1c768f2a1464314e2a350d419a3e63d9c6`；它与固定库的 `codex-rs` Git树均为
+`755f32c45a4c30e805e3c7fe1db89dcb4dcc6e41`，原库提交、依赖和worker源码保持不变，
+原 `check-worker-source.py` 完整通过。
+
+恢复后固定 `start-ui` 的全部启动检查和标准开发构建通过，使用原日常Homes打开客户端。
+真实Kimi问答验证已完成，详见Chat工作区pattern的2026-11-10记录。此轮未提交或发布这些改动，
+未运行全量回归；来源同步证据及启动日志位于 `.local/request-user-input-20261110/`。

@@ -3,10 +3,12 @@
 use super::artifact_file_native::project_file_preview;
 use super::artifact_native::ArtifactNativeCode as Code;
 use super::attachment;
+use super::document_preview_pdf_pages::{self, PdfPages};
 use quick_xml::{events::Event, Reader};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::io::Cursor;
+use std::sync::Arc;
 
 #[path = "document_preview_markdown.rs"]
 mod markdown;
@@ -28,6 +30,7 @@ pub(super) struct Presentation {
     pub kind: &'static str,
     pub html: String,
     pub assets: BTreeMap<String, Vec<u8>>,
+    pub pdf: Option<Arc<PdfPages>>,
     pub sections: Vec<Section>,
     pub section: usize,
     pub offset: usize,
@@ -505,6 +508,7 @@ pub(super) fn render(
         kind: "text",
         html: String::new(),
         assets: BTreeMap::new(),
+        pdf: None,
         sections: vec![],
         section: 0,
         offset: 0,
@@ -622,21 +626,15 @@ pub(super) fn render(
         return Ok(result);
     }
     if mime == "application/pdf" {
-        let (count, selected, png) = super::document_preview_pdf::render(bytes, section)?;
+        let pages = Arc::new(PdfPages::new(bytes)?);
         result.kind = "pdf";
-        result.section = selected;
-        result.sections = (0..count)
-            .map(|id| Section {
-                id,
-                label: format!("第 {} 页", id + 1),
-            })
-            .collect();
-        result.assets.insert("image/page.png".into(), png);
-        result.html = page(
-            "<img class=\"page\" src=\"yijie-document://preview/image/page.png\" alt=\"PDF页面\">",
+        result.html = styled_page(
+            &pages.body(),
             dark,
             zoom,
+            document_preview_pdf_pages::STYLES,
         );
+        result.pdf = Some(pages);
         return Ok(result);
     }
     let extension = match mime {
@@ -744,6 +742,41 @@ pub(super) fn render(
     result.partial |= renderer.partial;
     result.html = page(&body, dark, zoom);
     Ok(result)
+}
+
+// Office layout keeps its existing selected-slide/page controls. Actual PDFs
+// use the continuous renderer above; the CLI keeps the single-page CG adapter.
+pub(super) fn render_pdf_page(
+    bytes: &[u8],
+    section: usize,
+    dark: bool,
+    zoom: f64,
+) -> Result<Presentation, Code> {
+    if bytes.is_empty() || bytes.len() > SOURCE_BUDGET {
+        return Err(Code::LimitExceeded);
+    }
+    let (count, selected, png) = super::document_preview_pdf::render(bytes, section)?;
+    Ok(Presentation {
+        kind: "pdf",
+        html: page(
+            "<img class=\"page\" src=\"yijie-document://preview/image/page.png\" alt=\"文档页面\">",
+            dark,
+            zoom,
+        ),
+        assets: BTreeMap::from([("image/page.png".to_owned(), png)]),
+        pdf: None,
+        sections: (0..count)
+            .map(|id| Section {
+                id,
+                label: format!("第 {} 页", id + 1),
+            })
+            .collect(),
+        section: selected,
+        offset: 0,
+        next: None,
+        previous: None,
+        partial: false,
+    })
 }
 
 fn column(value: &str) -> Option<usize> {

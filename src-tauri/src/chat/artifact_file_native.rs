@@ -174,6 +174,10 @@ pub struct ArtifactFileNativeRuntime {
 }
 
 impl ArtifactFileNativeRuntime {
+    pub(super) fn process_epoch(&self) -> Uuid {
+        self.process_epoch
+    }
+
     pub fn new() -> Self {
         Self {
             process_epoch: Uuid::now_v7(),
@@ -952,7 +956,7 @@ pub(super) fn project_file_preview(
     }
 }
 
-fn canonical_file_extension(media_type: &str) -> Option<&'static str> {
+pub(super) fn canonical_file_extension(media_type: &str) -> Option<&'static str> {
     match media_type {
         "text/html" => Some("html"),
         "text/plain" => Some("txt"),
@@ -1005,7 +1009,7 @@ pub(super) fn validate_file_for_save(
     }
 }
 
-fn canonical_file_save_name(
+pub(super) fn canonical_file_save_name(
     display_name: Option<&str>,
     media_type: &str,
 ) -> Result<String, ArtifactNativeCode> {
@@ -1030,7 +1034,10 @@ fn canonical_file_save_name(
     }
 }
 
-fn normalized_file_target(target: &Path, media_type: &str) -> Result<PathBuf, ArtifactNativeCode> {
+pub(super) fn normalized_file_target(
+    target: &Path,
+    media_type: &str,
+) -> Result<PathBuf, ArtifactNativeCode> {
     if !target.is_absolute() || target.file_name().is_none() {
         return Err(ArtifactNativeCode::InvalidRequest);
     }
@@ -1043,7 +1050,7 @@ fn normalized_file_target(target: &Path, media_type: &str) -> Result<PathBuf, Ar
 }
 
 #[cfg(target_os = "macos")]
-async fn pick_native_file_save_target(
+pub(super) async fn pick_native_file_save_target(
     default_name: &str,
     media_type: &str,
 ) -> Result<Option<PathBuf>, ArtifactNativeCode> {
@@ -1057,7 +1064,7 @@ async fn pick_native_file_save_target(
 }
 
 #[cfg(not(target_os = "macos"))]
-async fn pick_native_file_save_target(
+pub(super) async fn pick_native_file_save_target(
     _default_name: &str,
     _media_type: &str,
 ) -> Result<Option<PathBuf>, ArtifactNativeCode> {
@@ -1111,8 +1118,26 @@ fn atomic_save_file_content(
     content: &ReadyFileContent,
     process_epoch: Uuid,
 ) -> Result<(), ArtifactNativeCode> {
-    validate_file_for_save(content.media_type, &content.bytes)?;
-    if content.bytes.len() != content.size_bytes {
+    atomic_save_file_bytes(
+        target,
+        content.media_type,
+        &content.bytes,
+        content.size_bytes,
+        content.sha256,
+        process_epoch,
+    )
+}
+
+pub(super) fn atomic_save_file_bytes(
+    target: &Path,
+    media_type: &str,
+    bytes: &[u8],
+    size_bytes: usize,
+    sha256: [u8; 32],
+    process_epoch: Uuid,
+) -> Result<(), ArtifactNativeCode> {
+    validate_file_for_save(media_type, bytes)?;
+    if bytes.len() != size_bytes {
         return Err(ArtifactNativeCode::IntegrityFailed);
     }
     let parent = target.parent().ok_or(ArtifactNativeCode::InvalidRequest)?;
@@ -1129,7 +1154,7 @@ fn atomic_save_file_content(
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(map_io_error(&error)),
     }
-    let marker = media_marker(content.media_type).ok_or(ArtifactNativeCode::Unsupported)?;
+    let marker = media_marker(media_type).ok_or(ArtifactNativeCode::Unsupported)?;
     let (temp_path, mut temp_file) = create_file_temp(parent, marker, process_epoch)?;
     let mut guard = TempFileGuard {
         path: temp_path.clone(),
@@ -1137,7 +1162,7 @@ fn atomic_save_file_content(
     };
     let mut digest = Sha256::new();
     let mut written = 0_usize;
-    for chunk in content.bytes.chunks(SAVE_CHUNK_BYTES) {
+    for chunk in bytes.chunks(SAVE_CHUNK_BYTES) {
         temp_file
             .write_all(chunk)
             .map_err(|error| map_io_error(&error))?;
@@ -1147,10 +1172,10 @@ fn atomic_save_file_content(
             .ok_or(ArtifactNativeCode::IntegrityFailed)?;
     }
     let actual_sha256: [u8; 32] = digest.finalize().into();
-    if written != content.size_bytes
+    if written != size_bytes
         || !bool::from(subtle::ConstantTimeEq::ct_eq(
             actual_sha256.as_slice(),
-            content.sha256.as_slice(),
+            sha256.as_slice(),
         ))
     {
         return Err(ArtifactNativeCode::IntegrityFailed);

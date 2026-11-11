@@ -36,6 +36,9 @@ fn required_optional_uuid<'de, D: serde::Deserializer<'de>>(
 ) -> Result<Option<Uuid>, D::Error> {
     Option::<Uuid>::deserialize(d)
 }
+fn present_revision<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    String::deserialize(d).map(Some)
+}
 impl DocumentSource {
     pub fn stored_ids(&self) -> Option<(Uuid, Option<Uuid>, Uuid)> {
         Some(match *self {
@@ -54,6 +57,7 @@ impl DocumentSource {
     }
 }
 pub(super) struct StoredDocument {
+    pub name: String,
     pub mime: String,
     pub bytes: Vec<u8>,
     pub expires: i64,
@@ -84,9 +88,21 @@ struct Location {
 #[serde(tag = "action", rename_all = "camelCase", deny_unknown_fields)]
 enum Action {
     #[serde(rename_all = "camelCase")]
+    Save {
+        view_id: Uuid,
+        source: DocumentSource,
+        revision: String,
+    },
+    #[serde(rename_all = "camelCase")]
     Locate {
         view_id: Uuid,
         source: DocumentSource,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "present_revision"
+        )]
+        revision: Option<String>,
     },
     #[serde(rename_all = "camelCase")]
     Open {
@@ -118,12 +134,19 @@ impl Action {
                 Self::Open {
                     source: DocumentSource::Attachment { .. },
                     ..
+                } | Self::Save {
+                    source: DocumentSource::Attachment { .. },
+                    ..
+                } | Self::Locate {
+                    source: DocumentSource::Attachment { .. },
+                    ..
                 }
             )
     }
     fn view_id(&self) -> Uuid {
         match *self {
             Self::Locate { view_id, .. }
+            | Self::Save { view_id, .. }
             | Self::Open { view_id, .. }
             | Self::Resize { view_id, .. }
             | Self::Position { view_id }
@@ -142,6 +165,8 @@ struct Request {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentMetadata {
+    save_supported: bool,
+    location_supported: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     view_mode: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -173,7 +198,7 @@ pub struct ResultData {
     document: Option<DocumentMetadata>,
     position: Option<Position>,
 }
-fn now() -> Result<i64, Code> {
+pub(super) fn now() -> Result<i64, Code> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -200,7 +225,7 @@ pub(super) fn authorize(runtime: &ChatRuntime, context: Uuid) -> Result<(), Code
         })
 }
 
-async fn read_source(
+pub(super) async fn read_source(
     runtime: &ChatRuntime,
     context: Uuid,
     source: &DocumentSource,
@@ -234,6 +259,7 @@ async fn read_source(
             )
             .await?;
             Ok(StoredDocument {
+                name: content.display_name.unwrap_or_else(|| "artifact".into()),
                 mime: content.media_type.into(),
                 bytes: content.bytes,
                 expires: content.expires_at.ok_or(Code::Expired)?,
@@ -271,6 +297,7 @@ pub async fn chat_document_preview_v1(
     webview: WebviewWindow,
     chat_runtime: State<'_, ChatRuntime>,
     image_runtime: State<'_, super::ArtifactNativeRuntime>,
+    file_runtime: State<'_, super::ArtifactFileNativeRuntime>,
 ) -> Result<ArtifactNativeResponse<ResultData>, ArtifactNativeError> {
     let request_id = request
         .get("requestId")
@@ -303,7 +330,7 @@ pub async fn chat_document_preview_v1(
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (request, image_runtime);
+        let _ = (request, image_runtime, file_runtime);
         Err(fail(Code::Unsupported))
     }
     #[cfg(target_os = "macos")]
@@ -311,18 +338,56 @@ pub async fn chat_document_preview_v1(
         let id = request.payload.view_id();
         let context = request.context_id;
         let data = match request.payload {
-            Action::Locate { source, .. } => {
-                let DocumentSource::MessageFile(target) = source else {
-                    return Err(fail(Code::InvalidRequest));
-                };
-                let (path, _) = super::message_file_preview::locate(
+            Action::Save {
+                source, revision, ..
+            } => {
+                let _read_lease = image_runtime.borrow_read(SOURCE_BUDGET).map_err(fail)?;
+                let status = super::document_preview_save::save(
                     &chat_runtime,
                     context,
-                    &target,
+                    &source,
+                    &revision,
                     webview.path().desktop_dir().ok(),
+                    file_runtime.process_epoch(),
                 )
                 .await
                 .map_err(fail)?;
+                ResultData {
+                    path: None,
+                    status,
+                    view_id: id,
+                    document: None,
+                    position: None,
+                }
+            }
+            Action::Locate {
+                source, revision, ..
+            } => {
+                let path = if let DocumentSource::MessageFile(target) = &source {
+                    if revision.is_some() {
+                        return Err(fail(Code::InvalidRequest));
+                    }
+                    super::message_file_preview::locate(
+                        &chat_runtime,
+                        context,
+                        target,
+                        webview.path().desktop_dir().ok(),
+                    )
+                    .await
+                    .map_err(fail)?
+                    .0
+                } else {
+                    let revision = revision.ok_or_else(|| fail(Code::InvalidRequest))?;
+                    let _read_lease = image_runtime.borrow_read(SOURCE_BUDGET).map_err(fail)?;
+                    super::document_preview_location::locate(
+                        &chat_runtime,
+                        context,
+                        &source,
+                        &revision,
+                    )
+                    .await
+                    .map_err(fail)?
+                };
                 ResultData {
                     path: Some(
                         path.to_str()
@@ -387,6 +452,8 @@ pub async fn chat_document_preview_v1(
                     location.scroll_y = 0.0;
                 }
                 let render_location = location.clone();
+                let save_supported =
+                    super::artifact_file_native::canonical_file_extension(&stored.mime).is_some();
                 let dark = theme == "dark";
                 let revision = stored.revision.clone();
                 let expires = stored.expires.min(now().map_err(fail)? + 1800);
@@ -413,11 +480,9 @@ pub async fn chat_document_preview_v1(
                             &stored.revision,
                         )
                         .and_then(|pdf| {
-                            content::render(
-                                "application/pdf",
+                            content::render_pdf_page(
                                 &pdf,
                                 render_location.section,
-                                0,
                                 dark,
                                 render_location.zoom,
                             )
@@ -435,12 +500,13 @@ pub async fn chat_document_preview_v1(
                         dark,
                         render_location.zoom,
                     )?;
-                    if mode == Some("content") && office_format == Some("xlsx") {
-                        if super::document_runtime::style_sheet(&mut presentation).is_err() {
-                            // Reading an already parsed workbook must not depend
-                            // on the optional generation/layout environment.
-                            return Ok((presentation, true));
-                        }
+                    if mode == Some("content")
+                        && office_format == Some("xlsx")
+                        && super::document_runtime::style_sheet(&mut presentation).is_err()
+                    {
+                        // Reading an already parsed workbook must not depend
+                        // on the optional generation/layout environment.
+                        return Ok((presentation, true));
                     }
                     Ok((presentation, mode == Some("layout")))
                 })
@@ -464,6 +530,8 @@ pub async fn chat_document_preview_v1(
                     return Err(fail(Code::Expired));
                 }
                 let metadata = DocumentMetadata {
+                    save_supported,
+                    location_supported: save_supported,
                     view_mode: if layout_unavailable {
                         Some("content")
                     } else {
@@ -771,6 +839,12 @@ mod platform {
         if CANCELLED.with(|s| s.borrow().contains(&(id, context))) {
             return Err(Code::NotFound);
         }
+        // Wry's macOS child construction activates NSApplication even with
+        // with_focused(false). Recheck on the main thread after asynchronous
+        // parsing, so switching to another application cannot be undone here.
+        if !parent.is_focused().map_err(|_| Code::Unavailable)? {
+            return Err(Code::Unavailable);
+        }
         let rect = bounds(&parent, &viewport)?;
         let app = parent.app_handle().clone();
         CLEANUP_INSTALLED.with(|flag| {
@@ -792,6 +866,7 @@ mod platform {
         let root = "yijie-document://preview/document";
         let html = p.html.into_bytes();
         let assets = p.assets;
+        let pdf = p.pdf;
         let video = p.kind == "video";
         let readonly = format!(
             r#"(() => {{
@@ -810,25 +885,95 @@ window.addEventListener('load',()=>window.scrollTo({},{}),{{once:true}});
             location.scroll_y.min(10_000_000.0)
         );
         let load_app = app.clone();
-        let view=wry::WebViewBuilder::new().with_incognito(true).with_devtools(false).with_focused(false).with_visible(false).with_bounds(rect)
+        let view = wry::WebViewBuilder::new()
+            .with_incognito(true)
+            .with_devtools(false)
+            .with_focused(false)
+            .with_visible(false)
+            .with_bounds(rect)
             .with_initialization_script(if video {
                 // Native-generated video page has only WebKit's own playback controls.
                 "window.addEventListener('contextmenu', e => e.preventDefault())".to_owned()
-            } else { readonly })
-            .with_navigation_handler(move|url|url==root)
-            .with_new_window_req_handler(|_,_|wry::NewWindowResponse::Deny)
-            .with_download_started_handler(|_,_|false)
-            .with_custom_protocol("yijie-document".into(),move|_,request|{
-                let uri=request.uri().to_string();
-                let (mime,body)=if resource_live.load(Ordering::Acquire)&&request.method()=="GET"&&uri==root{("text/html; charset=utf-8",html.clone())}
-                    else if resource_live.load(Ordering::Acquire)&&request.method()=="GET"{uri.strip_prefix("yijie-document://preview/").and_then(|k|assets.get(k).map(|b|(if k.starts_with("font/"){"font/ttf"}else{"image/png"},b.clone()))).unwrap_or(("text/plain",vec![]))}
-                    else{("text/plain",vec![])};
-                wry::http::Response::builder().status(if body.is_empty(){404}else{200}).header("Content-Type",mime).header("Cache-Control","no-store").header("X-Content-Type-Options","nosniff")
-                    .header("Content-Security-Policy",if video { "sandbox; default-src 'none'; style-src 'unsafe-inline'; media-src data:; base-uri 'none'; form-action 'none'" } else { "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: yijie-document:; font-src data: yijie-document:; connect-src 'none'; media-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" })
-                    .body(std::borrow::Cow::Owned(body)).expect("constant resource headers")
+            } else {
+                readonly
             })
-            .with_on_page_load_handler(move|event,_|{if matches!(event,wry::PageLoadEvent::Finished){let app=load_app.clone();let _=load_app.run_on_main_thread(move||{CURRENT.with(|s|{if let Some(v)=s.borrow_mut().as_mut().filter(|v|v.id==id){v.loaded=true;let _=v.webview.set_visible(v.visible);}});let _=app.emit_to("main","chat-document-preview-loaded",serde_json::json!({"viewId":id}));});}})
-            .with_url(root).build_as_child(&parent).map_err(|_|Code::Unavailable)?;
+            .with_navigation_handler(move |url| url == root)
+            .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
+            .with_download_started_handler(|_, _| false)
+            .with_asynchronous_custom_protocol(
+                "yijie-document".into(),
+                move |_, request, responder| {
+                    let uri = request.uri().to_string();
+                    if resource_live.load(Ordering::Acquire) && request.method() == "GET" {
+                        if let Some((pages, index)) = pdf.as_ref().and_then(|pages| {
+                            uri.strip_prefix("yijie-document://preview/pdf/page-")
+                                .and_then(|path| path.strip_suffix(".png"))
+                                .and_then(|index| index.parse::<usize>().ok())
+                                .map(|index| (pages.clone(), index))
+                        }) {
+                            let live = resource_live.clone();
+                            tauri::async_runtime::spawn_blocking(move || {
+                                let body = pages.image(index, &live).unwrap_or_default();
+                                responder.respond(resource_response(
+                                    "image/png",
+                                    if live.load(Ordering::Acquire) {
+                                        body
+                                    } else {
+                                        vec![]
+                                    },
+                                    false,
+                                ));
+                            });
+                            return;
+                        }
+                    }
+                    let (mime, body) = if resource_live.load(Ordering::Acquire)
+                        && request.method() == "GET"
+                        && uri == root
+                    {
+                        ("text/html; charset=utf-8", html.clone())
+                    } else if resource_live.load(Ordering::Acquire) && request.method() == "GET" {
+                        uri.strip_prefix("yijie-document://preview/")
+                            .and_then(|k| {
+                                assets.get(k).map(|b| {
+                                    (
+                                        if k.starts_with("font/") {
+                                            "font/ttf"
+                                        } else {
+                                            "image/png"
+                                        },
+                                        b.clone(),
+                                    )
+                                })
+                            })
+                            .unwrap_or(("text/plain", vec![]))
+                    } else {
+                        ("text/plain", vec![])
+                    };
+                    responder.respond(resource_response(mime, body, video));
+                },
+            )
+            .with_on_page_load_handler(move |event, _| {
+                if matches!(event, wry::PageLoadEvent::Finished) {
+                    let app = load_app.clone();
+                    let _ = load_app.run_on_main_thread(move || {
+                        CURRENT.with(|s| {
+                            if let Some(v) = s.borrow_mut().as_mut().filter(|v| v.id == id) {
+                                v.loaded = true;
+                                let _ = v.webview.set_visible(v.visible);
+                            }
+                        });
+                        let _ = app.emit_to(
+                            "main",
+                            "chat-document-preview-loaded",
+                            serde_json::json!({"viewId":id}),
+                        );
+                    });
+                }
+            })
+            .with_url(root)
+            .build_as_child(&parent)
+            .map_err(|_| Code::Unavailable)?;
         CURRENT.with(|s| {
             *s.borrow_mut() = Some(View {
                 id,
@@ -840,6 +985,12 @@ window.addEventListener('load',()=>window.scrollTo({},{}),{{once:true}});
             })
         });
         Ok(live)
+    }
+
+    fn resource_response(mime: &str, body: Vec<u8>, video: bool) -> wry::http::Response<Vec<u8>> {
+        wry::http::Response::builder().status(if body.is_empty(){404}else{200}).header("Content-Type",mime).header("Cache-Control","no-store").header("X-Content-Type-Options","nosniff")
+            .header("Content-Security-Policy",if video { "sandbox; default-src 'none'; style-src 'unsafe-inline'; media-src data:; base-uri 'none'; form-action 'none'" } else { "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: yijie-document:; font-src data: yijie-document:; connect-src 'none'; media-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" })
+            .body(body).expect("constant resource headers")
     }
 }
 

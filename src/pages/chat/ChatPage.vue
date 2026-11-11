@@ -534,6 +534,10 @@ const userInput = useUserInput(
   () => chatStore.hasAction("submit_turn") && permissionScope.hasCapability("task.create"),
   () => questionDraftScope.value,
 );
+const activeUserInput = computed(() => {
+  const request = userInput.current.value;
+  return request && ["pending", "submitting"].includes(request.state) ? request : null;
+});
 const permissionCanSend = computed(() => !runtimePermissionsEnabled || (permissions.ready.value && !permissions.saving.value && !permissions.deciding.value && !permissions.approvals.value.some((r) => r.status === "pending")));
 
 const modelBusy = computed(() => expertBusy.value || isStreaming.value || composerSubmissionState.value !== "idle" || draftExecutionPending.value || permissions.busy.value || draft.writing.value || Boolean(draft.pending.value));
@@ -1491,7 +1495,7 @@ onBeforeUnmount(() => {
     </div>
 
     <footer class="chat-workspace__composer">
-      <ChatUserInput v-if="userInput.current.value && ['pending', 'submitting'].includes(userInput.current.value.state)" :key="userInput.formKey.value" :request="userInput.current.value" :disabled="userInput.blocked.value" :submitting="userInput.submitting.value" :revalidating="userInput.revalidating.value" @interact="userInput.touch" @answer="userInput.answer" />
+      <ChatUserInput v-if="activeUserInput" :key="userInput.formKey.value" :request="activeUserInput" :disabled="userInput.blocked.value" :submitting="userInput.submitting.value" :revalidating="userInput.revalidating.value" @interact="userInput.touch" @answer="userInput.answer" />
       <p v-if="userInput.error.value" class="chat-workspace__composer-error" role="alert">{{ userInput.error.value }} <button type="button" :disabled="userInput.loading.value" @click="userInput.refresh">重新读取</button></p>
       <p v-else-if="userInput.notice.value" class="chat-workspace__composer-note" role="status">{{ userInput.notice.value }} <button type="button" @click="userInput.dismissNotice">知道了</button></p>
       <RuntimeApprovalList v-if="!isDraftMode && runtimePermissionsEnabled && chatStore.selectedAccessMode === 'live'" :requests="permissions.approvals.value" :deciding="permissions.deciding.value" :connected="permissions.approvalsConnected.value && chatStore.hasAction('submit_turn')" @decision="permissions.decide" />
@@ -1518,6 +1522,7 @@ onBeforeUnmount(() => {
         ref="composer"
         v-model="prompt"
         mode="reply"
+        :compact="!!activeUserInput"
         :text-locked="!!expertSubmission"
         :experts-available="expertsUiEnabled && !isDraftMode && permissionScope.hasCapability('plugin.read')"
         :projects="chatStore.projects"

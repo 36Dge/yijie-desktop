@@ -29,6 +29,7 @@ const props = withDefaults(defineProps<{
   readAttachmentPresentation?: AttachmentPresentationReader;
   presentationScope?: string;
   mode: "new" | "reply";
+  compact?: boolean;
   textOnly?: boolean;
   projects: readonly ChatProject[];
   selectedProjectId: string | null;
@@ -56,6 +57,7 @@ const props = withDefaults(defineProps<{
   attachmentErrorCode: null,
   dragActive: false,
   textOnly: false,
+  compact: false,
   connectors: () => Object.freeze([]),
   skills: () => Object.freeze([]),
 });
@@ -98,7 +100,8 @@ const textareaElement = ref<HTMLTextAreaElement | null>(null);
 const connectorPrefixElement = ref<HTMLElement | null>(null);
 const connectorPrefixWidth = ref(0);
 const inputScrollTop = ref(0);
-const hasSkillPrefix = computed(() => !props.textOnly && props.skills.length > 0);
+const compactLayout = computed(() => props.compact && props.mode === "reply" && !props.textOnly);
+const hasSkillPrefix = computed(() => !compactLayout.value && !props.textOnly && props.skills.length > 0);
 let resizeObserver: ResizeObserver | null = null;
 let observedComposerWidth: number | null = null;
 const selectedProject = computed(() => props.projects.find((project) =>
@@ -195,6 +198,11 @@ function updateInput(event: Event): void {
 
 function syncTextareaHeight(textarea = textareaElement.value): void {
   if (textarea === null) return;
+  if (compactLayout.value) {
+    textarea.style.removeProperty("height");
+    textarea.style.overflowY = "auto";
+    return;
+  }
   // Size from the user's text, not the selection prefix. Selecting skills must
   // not grow the composer; any extra wrapped text scrolls inside its viewport.
   const indent = textarea.style.textIndent;
@@ -288,6 +296,7 @@ watch(
     () => props.attachmentImportAttempt?.operationId ?? null,
     () => props.skills,
     () => props.textOnly,
+    compactLayout,
   ],
   syncInputLayout,
   { flush: "post" },
@@ -335,7 +344,7 @@ function requestActiveTurnInterrupt(): void {
 
 function handleKeydown(event: KeyboardEvent): void {
   const textarea = textareaElement.value;
-  if (event.key === "Backspace" && !event.isComposing && !composing.value && !props.textOnly &&
+  if (event.key === "Backspace" && !event.isComposing && !composing.value && !props.textOnly && !compactLayout.value &&
     !selectionRemovalDisabled.value && textarea?.selectionStart === 0 && textarea.selectionEnd === 0) {
     const skill = props.skills[props.skills.length - 1];
     if (skill) {
@@ -363,7 +372,7 @@ function handlePaste(event: ClipboardEvent): void {
   <section
     ref="composerElement"
     class="chat-composer"
-    :class="[`chat-composer--${mode}`, { 'chat-composer--expert': !!$slots['expert-control'] }]"
+    :class="[`chat-composer--${mode}`, { 'chat-composer--expert': !!$slots['expert-control'], 'chat-composer--compact': compactLayout }]"
     aria-label="任务输入区"
     :aria-busy="submissionBusy ? 'true' : undefined"
   >
@@ -384,6 +393,7 @@ function handlePaste(event: ClipboardEvent): void {
         <label class="chat-composer__label" for="chat-task-input">输入你的任务需求</label>
         <ul
           v-if="attachments.length > 0 || attachmentImportAttempt"
+          v-show="!compactLayout"
           class="chat-composer__attachments"
           aria-label="待发送附件"
         >
@@ -431,6 +441,7 @@ function handlePaste(event: ClipboardEvent): void {
           ref="textareaElement"
           id="chat-task-input"
           class="chat-composer__textarea"
+          :rows="compactLayout ? 1 : undefined"
           :value="modelValue"
           :readonly="submissionBusy || textLocked"
           :placeholder="hasSkillPrefix ? '' : textOnly ? '描述计划内容、时间、时区和运行方式…' : mode === 'new' ? '描述你想完成的事，或添加相关文件…' : '继续输入任务需求…'"
@@ -461,7 +472,7 @@ function handlePaste(event: ClipboardEvent): void {
               <template #connectors="{ close }"><slot name="connector-control" :close="close" /></template>
               <template #experts="{ close }"><slot name="expert-picker" :close="close" /></template>
             </ChatAddControl>
-            <slot v-if="!textOnly && mode === 'reply'" name="permission-control">
+            <slot v-if="!textOnly && mode === 'reply' && !compactLayout" name="permission-control">
               <button
                 class="chat-composer__permission yj-control yj-control--pill"
                 type="button"
@@ -476,14 +487,23 @@ function handlePaste(event: ClipboardEvent): void {
                 <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
               </button>
             </slot>
-            <ChatConnectorChips v-if="!textOnly && connectors.length" :entries="connectors" :disabled="selectionRemovalDisabled || !$slots['connector-control']">
+            <ChatConnectorChips v-if="!textOnly && !compactLayout && connectors.length" :entries="connectors" :disabled="selectionRemovalDisabled || !$slots['connector-control']">
               <template #default="{ close }"><slot name="connector-control" :close="close" /></template>
             </ChatConnectorChips>
-            <slot v-if="!textOnly" name="shop-control" />
-            <slot v-if="!textOnly" name="expert-control" />
+            <slot v-if="!textOnly && !compactLayout" name="shop-control" />
+            <slot v-if="!textOnly && !compactLayout" name="expert-control" />
           </div>
           <div class="chat-composer__trailing-actions">
           <slot name="model-control" />
+          <slot v-if="compactLayout" name="permission-control">
+            <YjTooltip text="查看权限审批"><button
+              class="chat-composer__permission yj-control yj-control--pill"
+              type="button"
+              aria-label="查看权限审批：只读访问，禁止写入"
+              aria-haspopup="dialog"
+              @click="emit('show-permission')"
+            ><YjIcon name="shield" size="sm" :stroke-width="1.5" /></button></YjTooltip>
+          </slot>
           <template v-if="streaming">
             <slot
               name="active-turn-action"
@@ -922,6 +942,32 @@ function handlePaste(event: ClipboardEvent): void {
 .chat-composer__permission-label,
 .chat-composer__permission-value,
 .chat-composer__permission > .yj-control__chevron { display: var(--chat-composer-control-label-display, inline-flex); }
+
+.chat-composer--compact {
+  --chat-composer-control-label-display: none;
+  --chat-composer-control-width: var(--yj-control-height-sm);
+  --chat-composer-control-padding: 0;
+}
+
+.chat-composer--compact .chat-composer__field {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--yj-space-1);
+  padding: var(--yj-space-2);
+}
+
+.chat-composer--compact .chat-composer__input { grid-area: 1 / 2; }
+.chat-composer--compact .chat-composer__actions { display: contents; }
+.chat-composer--compact .chat-composer__leading-actions { grid-area: 1 / 1; flex-wrap: nowrap; }
+.chat-composer--compact .chat-composer__trailing-actions { grid-area: 1 / 3; gap: var(--yj-space-1); }
+.chat-composer--compact .chat-composer__textarea {
+  height: var(--yj-line-height-body);
+  min-height: var(--yj-line-height-body);
+  max-height: var(--yj-line-height-body);
+  padding: 0 var(--yj-space-1);
+  border-radius: 0;
+}
 
 .chat-composer__drop-overlay {
   position: absolute;

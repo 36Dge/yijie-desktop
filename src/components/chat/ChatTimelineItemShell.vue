@@ -82,6 +82,7 @@ function toggle(): void {
       `chat-timeline-item-shell--${item.role}`,
       `chat-timeline-item-shell--${item.phase === 'active' && !busy ? 'incomplete' : item.phase}`,
       { 'chat-timeline-item-shell--answer': isAnswer, 'chat-timeline-item-shell--process-inline': processPresentation },
+      { 'chat-timeline-item-shell--artifact': item.presentation === 'artifact' && item.domainStatus === 'completed' && !busy && !collapsible },
     ]"
     :aria-label="item.role === 'user' || plainProcess || isAnswer ? label : undefined"
     :aria-labelledby="item.role === 'user' || plainProcess || isAnswer ? undefined : titleId"
@@ -318,6 +319,20 @@ function toggle(): void {
 .chat-timeline-item-shell--answer .chat-timeline-item-shell__body {
   padding: var(--yj-space-0);
 }
+
+/* Ready document cards carry their own identity. Retain the header's accessible
+   labels without repeating its title/status above the card. */
+.chat-timeline-item-shell--artifact:has(.chat-artifact-document-card) { border: 0; background: transparent; }
+.chat-timeline-item-shell--artifact:has(.chat-artifact-document-card) > .chat-timeline-item-shell__header > .chat-timeline-item-shell__static-header {
+  position: absolute;
+  width: var(--yj-border-width);
+  height: var(--yj-border-width);
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.chat-timeline-item-shell--artifact:has(.chat-artifact-document-card) > .chat-timeline-item-shell__body { padding: 0; }
 
 .chat-timeline-item-shell__answer-actions {
   margin-block-start: var(--yj-space-3);

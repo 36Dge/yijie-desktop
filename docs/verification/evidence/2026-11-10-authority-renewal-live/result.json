@@ -1,0 +1,70 @@
+{
+  "date": "2026-11-10",
+  "timezone": "Asia/Shanghai",
+  "result": "passed",
+  "contract_impact": "none",
+  "model": "Kimi K3.1 Pro",
+  "desktop_head": "5e8f9d2cb29ceeda8e9f28ff68d6c8923596e46c",
+  "desktop_session_id": "01a1c37b-faa1-7852-8887-641afda57973",
+  "runtime_session_id": "01a1c37b-faf0-7671-ac94-3eb86573ce1a",
+  "runtime_turn_id": "01a1c37b-fb58-7f51-b869-f3dece0acb83",
+  "normal_task_duration_seconds": 953.223,
+  "long_command_duration_seconds": 360.005,
+  "long_command_start_count": 1,
+  "long_command_progress_steps": 12,
+  "long_command_completion_count": 1,
+  "empty_stdin_polls": 6,
+  "same_command_session_id": 51826,
+  "question_call_count": 1,
+  "question_answer_output_count": 1,
+  "pending_draft_wait_lower_bound_seconds": 417.555,
+  "runtime_bytes_unchanged_during_pending_wait": true,
+  "exact_synthetic_answers_received": true,
+  "user_message_count": 1,
+  "task_started_count": 1,
+  "task_complete_count": 1,
+  "ui": {
+    "long_task_draft_and_caret_preserved": true,
+    "pending_question_draft_and_caret_preserved": true,
+    "selected_option_preserved": true,
+    "reading_anchor_preserved": true,
+    "question_page_preserved": true,
+    "unsent_composer_draft_preserved_until_cleanup": true,
+    "question_form_dismissed_after_single_submit": true,
+    "completed_reply_visible": true,
+    "theme": "light",
+    "window_logical_pixels": [
+      1339,
+      843
+    ]
+  },
+  "product_sources_unchanged_during_acceptance": true,
+  "source_sha256": {
+    "src/authorization/chat-permission-lifecycle.ts": "c9a7e4c9b5e383eb5c6d7813fbe8c5d0e32e285267a0fc3fdaa557655011f39d",
+    "src/stores/chat.store.ts": "a3b6e5816d83453ccff43699559d62dd2b8800c6fe971ea121ea849dc1141d3b",
+    "src/stores/permission.store.ts": "bb640d137d55ab875bbcfb683fc2d5914b93ba6477bef9d989d135a118da461f",
+    "src/composables/useUserInput.ts": "41eb293f7f91f9d20396721027c9932a30a6f0ebb0faaf49650529d4555d3405",
+    "src/components/chat/ChatUserInput.vue": "bfaf8b7f2dd2fb9a343f86f087f7d48362321809b28943744f9baf3548b542ce",
+    "src/components/chat/ChatComposer.vue": "3b5f43b9cda171fdf2e23fb54cc52387dc63885d4c79659349dcf3581bd3a58a",
+    "src/pages/chat/ChatPage.vue": "a2aad9b7bf29e2bacbac07cefe2e80b16316e6578b0abcdd146d97b4139f74da",
+    "src-tauri/src/chat/authorization.rs": "602fd537f1bdd31a13c66c351b23a59ce115ec0b8635d0967d31dba7489920f9",
+    "src-tauri/src/chat/ipc.rs": "982d825ad526232c0ff8ea659433c9a74a046366d3e6711b6160753458f55a65"
+  },
+  "desktop_binary_sha256": "2045f2dba8bfba0cd2b309bce7a79d31328eb470649d2ddb6bf1b9b46c23aaa8",
+  "local_evidence_directory": ".local/authority-renewal-20261110",
+  "evidence_sha256": {
+    "manifest.json": "5c5ba3b20d5e73db06966f9412f133cc0eebcd24921818469c58df8eb30abd1c",
+    "runtime-tool-evidence.json": "bb166fee6ed027b4eed7991acf684b87a28bcde98b000b027da756c6dabc1891",
+    "runtime-pending-baseline.json": "e12a297377b52172b29c610f6bc058891b8d58b6782bbe2e01965f7b602ad542",
+    "runtime-pending-before-submit.json": "a1e414d378fbeca4cbc416c5dd233fa18d02c590c2e4d6516f50a0297b89f403",
+    "runtime-final.json": "8b6e31495f971101e454806f672f440cdfd510bb68fc6b778fcc5ef71dca8373",
+    "ui-observations.json": "8f56b64bcfe0b5ed1ece6280c395deda5523d0c3ef83ac928db20da3f0038e72",
+    "progress.jsonl": "f33d118994ae0eb79c954406f31bd2d2d92785ef7710d7c8899972d08280b7bb"
+  },
+  "scope_limits": [
+    "Normal live renewal for one real Kimi task; not continuous model token generation for 360 seconds.",
+    "UI anchors, focus and caret observed through native AX/screenshots; no frame-by-frame video or packet-level stream capture.",
+    "No independent provider HTTP meter; tool/task counts are Runtime evidence, not an HTTP retry or billing assertion.",
+    "No full regression, sleep/network failure/attack injection or additional production-identity tests."
+  ]
+}

@@ -372,7 +372,7 @@ h3.chat-safe-content__heading {
   background: var(--yj-color-bg-subtle);
 }
 
-.chat-safe-content__reference:has(.artifact-list__link) { padding: 0; border: 0; background: transparent; }
+.chat-safe-content__reference:has(.chat-artifact-document-card) { display: block; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; }
 
 .chat-safe-content__unknown {
   color: var(--yj-color-text-body);

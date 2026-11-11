@@ -94,7 +94,7 @@ describe("permission menu interaction", () => {
     await trigger.trigger("click"); await flushPromises();
     const choices = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
     expect(choices).toHaveLength(3);
-    expect(choices.map((b) => b.textContent)).toEqual(expect.arrayContaining([expect.stringContaining("请求批准"), expect.stringContaining("帮我批准"), expect.stringContaining("完全访问权限")]));
+    expect(choices.map((b) => b.textContent)).toEqual(expect.arrayContaining([expect.stringContaining("请求批准"), expect.stringContaining("帮我批准"), expect.stringContaining("完全访问")]));
     expect(document.activeElement).toBe(choices[0]);
     choices[0]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
     expect(document.activeElement).toBe(choices[1]);

@@ -4,6 +4,14 @@ import { iconRegistry } from "./registry";
 describe("iconRegistry", () => {
   it("exposes only the semantic icons required by the app", () => {
     expect(Object.keys(iconRegistry).sort()).toEqual([
+      "document",
+      "documentCode",
+      "documentMarkdown",
+      "documentPdf",
+      "documentPresentation",
+      "documentSpreadsheet",
+      "documentText",
+      "documentWord",
       "fileCsv",
       "fileDocx",
       "fileHtml",
@@ -33,6 +41,8 @@ describe("iconRegistry", () => {
       "chevronRight",
       "collapseSidebar",
       "connector",
+      "computer",
+      "contextUpdate",
       "copy",
       "thumbsUp",
       "thumbsDown",

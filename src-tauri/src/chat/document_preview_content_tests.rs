@@ -195,12 +195,88 @@ fn normal_pdf_raster_has_correct_orientation_and_real_graphical_content() {
     pdf.save_to(&mut bytes).unwrap();
     attachment::validate_pdf_artifact_content(&bytes).unwrap();
     let p = render("application/pdf", &bytes, 0, 0, false, 1.0).unwrap();
-    assert_eq!(p.sections.len(), 1);
-    let image = image::load_from_memory(&p.assets["image/page.png"])
+    assert!(p.sections.is_empty());
+    let png = p
+        .pdf
         .unwrap()
-        .to_rgba8();
+        .image(0, &std::sync::atomic::AtomicBool::new(true))
+        .unwrap();
+    let image = image::load_from_memory(&png).unwrap().to_rgba8();
     assert_eq!(image.get_pixel(10, 10).0, [255, 0, 0, 255]);
     assert_eq!(image.get_pixel(190, 190).0, [0, 0, 255, 255]);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn continuous_pdf_has_all_pages_and_bounded_lazy_images() {
+    use pdf_extract::{Dictionary, Document, Object, Stream};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let mut pdf = Document::with_version("1.4");
+    pdf.reference_table.cross_reference_type = pdf_extract::xref::XrefType::CrossReferenceTable;
+    let pages_id = pdf.new_object_id();
+    let mut kids = vec![];
+    for index in 0..7 {
+        let content = pdf.add_object(Stream::new(
+            Dictionary::new(),
+            if index % 2 == 0 {
+                b"1 0 0 rg 0 0 100 150 re f".to_vec()
+            } else {
+                b"0 0 1 rg 0 0 100 150 re f".to_vec()
+            },
+        ));
+        let mut page = Dictionary::new();
+        page.set("Type", "Page");
+        page.set("Parent", pages_id);
+        page.set("Contents", content);
+        page.set("MediaBox", vec![0.into(), 0.into(), 100.into(), 150.into()]);
+        page.set("Resources", Dictionary::new());
+        kids.push(Object::Reference(pdf.add_object(page)));
+    }
+    let mut pages = Dictionary::new();
+    pages.set("Type", "Pages");
+    pages.set("Kids", kids);
+    pages.set("Count", 7);
+    pdf.objects.insert(pages_id, Object::Dictionary(pages));
+    let mut catalog = Dictionary::new();
+    catalog.set("Type", "Catalog");
+    catalog.set("Pages", pages_id);
+    let root = pdf.add_object(catalog);
+    pdf.trailer.set("Root", root);
+    let mut bytes = vec![];
+    pdf.save_to(&mut bytes).unwrap();
+    attachment::validate_pdf_artifact_content(&bytes).unwrap();
+    let presentation = render("application/pdf", &bytes, 4, 0, false, 1.0).unwrap();
+    assert!(presentation.sections.is_empty());
+    assert!(presentation.next.is_none() && presentation.previous.is_none());
+    assert_eq!(presentation.html.matches("class=\"pdf-page\"").count(), 7);
+    assert!(presentation.assets.is_empty());
+    let pages = presentation.pdf.unwrap();
+    assert_eq!(pages.cached_pages(), 0);
+    let live = AtomicBool::new(true);
+    for index in 0..7 {
+        let image = image::load_from_memory(&pages.image(index, &live).unwrap())
+            .unwrap()
+            .to_rgba8();
+        assert_eq!(image.dimensions(), (200, 300));
+        assert_eq!(
+            image.get_pixel(50, 50).0,
+            if index % 2 == 0 {
+                [255, 0, 0, 255]
+            } else {
+                [0, 0, 255, 255]
+            }
+        );
+        assert!(pages.cached_pages() <= 4);
+    }
+    assert!(pages.image(0, &live).is_ok());
+    assert!(pages.image(7, &live).is_err());
+    live.store(false, Ordering::Release);
+    assert!(pages.image(0, &live).is_err());
+    // Converting Office to PDF retains its existing page selection semantics.
+    let office = render_pdf_page(&bytes, 4, false, 1.0).unwrap();
+    assert_eq!(office.sections.len(), 7);
+    assert_eq!(office.section, 4);
+    assert!(office.pdf.is_none());
 }
 
 #[test]
@@ -309,7 +385,7 @@ fn normal_document_office_pdf_outline_is_accepted() {
     };
     let bytes = std::fs::read(path).unwrap();
     assert!(attachment::validate_pdf_artifact_content(&bytes).is_ok());
-    let pages = render("application/pdf", &bytes, 1, 0, false, 1.0).unwrap();
+    let pages = render_pdf_page(&bytes, 1, false, 1.0).unwrap();
     assert_eq!(pages.sections.len(), 2);
     assert_eq!(pages.section, 1);
 }

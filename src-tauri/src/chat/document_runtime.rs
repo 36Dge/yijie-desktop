@@ -238,8 +238,8 @@ pub(super) fn bundle() -> Result<(PathBuf, BundleManifest), Code> {
     // Verification cache includes each file's inode/ctime, so a changed source
     // invalidates the cached hash. Never caches only the untrusted manifest ID.
     use std::os::unix::fs::MetadataExt;
-    static CACHE: OnceLock<Mutex<std::collections::HashMap<PathBuf, (u64, i64, i64, String)>>> =
-        OnceLock::new();
+    type VerificationCache = std::collections::HashMap<PathBuf, (u64, i64, i64, String)>;
+    static CACHE: OnceLock<Mutex<VerificationCache>> = OnceLock::new();
     let mut cache = CACHE
         .get_or_init(Default::default)
         .lock()
@@ -369,12 +369,11 @@ pub(super) fn stage_input(
     let name = format!("{attachment}.{ext}");
     let path = folder.join(&name);
     let existing = path.exists();
-    if existing {
-        if path.is_symlink()
-            || digest(&fs::read(&path).map_err(|_| ChatError::DatabaseUnavailable)?) != hash
-        {
-            return Err(ChatError::DatabaseUnavailable);
-        }
+    if existing
+        && (path.is_symlink()
+            || digest(&fs::read(&path).map_err(|_| ChatError::DatabaseUnavailable)?) != hash)
+    {
+        return Err(ChatError::DatabaseUnavailable);
     }
     let receipt = InputReceipt {
         schema_version: 1,

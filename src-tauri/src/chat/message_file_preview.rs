@@ -578,6 +578,11 @@ pub(super) fn read(path: &Path, root: &Path, now: i64) -> Result<StoredDocument,
         _ => super::artifact_file_native::validate_file_for_save(mime, &bytes)?,
     }
     Ok(StoredDocument {
+        name: path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or(Code::InvalidRequest)?
+            .to_owned(),
         mime: mime.into(),
         revision: format!("{:x}", Sha256::digest(&bytes)),
         bytes,

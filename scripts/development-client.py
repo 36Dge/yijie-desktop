@@ -1,7 +1,7 @@
 """Fixed local development client: HMR, incremental builds, original daily data.
 
-Private deployment interface v2. Routine dependency startup and normal cleanup;
-no package generation, backup, migration, approval issuance or model dispatch.
+Private deployment interface v3. Routine dependency startup and normal cleanup;
+fixed macOS dev bundle/HMR, no installer, backup, migration or model dispatch.
 """
 import argparse
 import hashlib

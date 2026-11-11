@@ -18,6 +18,7 @@ import {
 } from "../../domain/chat-artifact-report-chart";
 import type { ArtifactProjection } from "../../domain/chat-artifact";
 import YjIcon from "../yijie/YjIcon.vue";
+import ChatArtifactDocumentCard from "./ChatArtifactDocumentCard.vue";
 import { loadChatArtifactReportChartRenderer } from "./chat-artifact-report-chart-renderer";
 
 type PreviewPhase = "idle" | "loading" | "previewed" | "error";
@@ -31,6 +32,8 @@ type ChartDisplay = Readonly<{
 const props = defineProps<{
   artifact: ArtifactProjection;
   previewOnly?: boolean;
+  openFile?: (artifact: ArtifactProjection) => void;
+  card?: boolean;
   contextId: string;
   client?: ChatArtifactReportNativeClient;
 }>();
@@ -297,7 +300,17 @@ onBeforeUnmount(() => {
     aria-label="结构化报告预览与保存"
     :aria-busy="busy ? 'true' : 'false'"
   >
-    <div v-if="available && !previewOnly" class="artifact-report__actions">
+    <ChatArtifactDocumentCard
+      v-if="card && openFile && !previewOnly"
+      :name="artifact.displayName ?? '未命名报告'"
+      :media-type="artifact.mediaType"
+      :size-bytes="artifact.sizeBytes"
+      :can-save="available"
+      :saving="saving"
+      @open="openFile(artifact)"
+      @save="saveReport"
+    />
+    <div v-else-if="available && !previewOnly" class="artifact-report__actions">
       <button class="yj-control"
         ref="previewTrigger"
         data-testid="artifact-report-open"
@@ -467,7 +480,7 @@ onBeforeUnmount(() => {
     </section>
 
     <p
-      v-if="saveFeedback"
+      v-if="saveFeedback && !card"
       class="artifact-report__save-feedback"
       :class="`artifact-report__save-feedback--${saveTone}`"
       :role="saveTone === 'error' ? 'alert' : 'status'"

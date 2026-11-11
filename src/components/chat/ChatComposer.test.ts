@@ -113,6 +113,40 @@ afterEach(() => {
 });
 
 describe("ChatComposer", () => {
+  it("retains the draft and selections across clarification layout changes", async () => {
+    const wrapper = mountComposer({ mode: "reply", modelValue: "保留原任务草稿", attachments: [READY_FILE], skills: [{ ...installedSkill, unavailableReason: null }] }, {
+      "permission-control": () => h("button", { "data-permission": "" }, "请求批准"),
+      "shop-control": () => h("button", { "data-shop": "" }, "关联店铺"),
+    });
+    const textarea = wrapper.get("textarea").element;
+    textarea.focus();
+    textarea.setSelectionRange(0, 0);
+
+    await wrapper.setProps({ compact: true });
+    expect(wrapper.get("textarea").element).toBe(textarea);
+    expect(textarea.value).toBe("保留原任务草稿");
+    expect(document.activeElement).toBe(textarea);
+    expect(wrapper.find('[aria-label="本轮使用的技能"]').exists()).toBe(false);
+    expect(wrapper.find('[data-shop]').exists()).toBe(false);
+    expect(wrapper.findAll('[data-permission]')).toHaveLength(1);
+    expect(wrapper.find('.chat-composer__trailing-actions [data-permission]').exists()).toBe(true);
+    await wrapper.get("textarea").trigger("keydown", { key: "Backspace" });
+    expect(wrapper.emitted("remove-skill")).toBeUndefined();
+    await wrapper.setProps({ streaming: true });
+    await wrapper.get('[aria-label="停止生成"]').trigger("click");
+    expect(wrapper.emitted("interrupt")).toEqual([[]]);
+
+    await wrapper.setProps({ compact: false, streaming: false });
+    expect(wrapper.get("textarea").element).toBe(textarea);
+    expect(textarea.value).toBe("保留原任务草稿");
+    expect(wrapper.get('[aria-label="本轮使用的技能"]').text()).toContain(installedSkill.displayName);
+    expect(wrapper.get('[aria-label="待发送附件"]').text()).toContain(READY_FILE.name);
+    expect(wrapper.find('[data-shop]').exists()).toBe(true);
+    expect(wrapper.find('.chat-composer__leading-actions [data-permission]').exists()).toBe(true);
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+    expect(wrapper.emitted("submit")).toBeUndefined();
+  });
+
   it("anchors the homepage decoration to the input surface and excludes it from reply and text-only composers", async () => {
     const wrapper = mountComposer({}, { "home-decoration": () => h("div", { "data-mascot": "" }) });
     expect(wrapper.find(".chat-composer__surface--decorated > [data-mascot]").exists()).toBe(true);

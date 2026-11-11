@@ -13,6 +13,7 @@ import type {
 import type { ArtifactProjection } from "../../domain/chat-artifact";
 import { openArtifactHTML, closeArtifactHTML } from "../../api/chat-artifact-html-native-client";
 import YjIcon from "../yijie/YjIcon.vue";
+import ChatArtifactDocumentCard from "./ChatArtifactDocumentCard.vue";
 
 type PreviewPhase = "idle" | "loading" | "previewed" | "error";
 type SafeError = Readonly<{ message: string; retryable: boolean }>;
@@ -28,6 +29,7 @@ const props = defineProps<{
   artifact: ArtifactProjection;
   contextId: string;
   openFile?: (artifact: ArtifactProjection) => void;
+  card?: boolean;
   client?: ChatArtifactFileNativeClient;
 }>();
 
@@ -321,7 +323,17 @@ onBeforeUnmount(() => {
     :aria-busy="busy ? 'true' : 'false'"
   >
     <p v-if="htmlPreview && !openFile" class="artifact-file__fallback">支持自包含 HTML；外链资源不会加载。</p>
-    <div class="artifact-file__actions">
+    <ChatArtifactDocumentCard
+      v-if="card && openFile"
+      :name="displayName"
+      :media-type="artifact.mediaType"
+      :size-bytes="artifact.sizeBytes"
+      :can-save="canSave"
+      :saving="saving"
+      @open="openFile(artifact)"
+      @save="saveFile"
+    />
+    <div v-else class="artifact-file__actions">
       <button v-if="openFile" class="yj-control" type="button" @click="openFile(artifact)"><YjIcon name="file" size="sm" />预览文件</button>
       <button v-if="htmlPreview && !openFile" class="yj-control" type="button" :disabled="busy" @click="openHTML">{{busy ? "正在打开…" : "预览 HTML"}}</button>
       <button class="yj-control"
@@ -452,7 +464,7 @@ onBeforeUnmount(() => {
     </section>
 
     <p
-      v-if="saveFeedback"
+      v-if="saveFeedback && !card"
       class="artifact-file__feedback"
       :class="`artifact-file__feedback--${saveTone}`"
       data-testid="artifact-file-feedback"

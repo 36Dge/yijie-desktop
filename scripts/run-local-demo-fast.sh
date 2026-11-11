@@ -678,16 +678,10 @@ if [[ "$workflow_requested" == "true" && "$prepare_only" != "true" && "$migrate_
 fi
 
 if [[ "$development_app" == "true" ]]; then
-  if [[ "$development_ui_bundle" == "true" ]]; then
-    # Explicitly requested local UI qualification. Standard Tauri build output;
-    # same daily Homes and full feature/permission bootstrap, no published bundle.
-    pnpm tauri:build:demo-fast --features kimi-k31-pro-candidate "${workflow_tauri_config[@]+"${workflow_tauri_config[@]}"}" "${experts_tauri_config[@]+"${experts_tauri_config[@]}"}"
-    bundle_binary="$CARGO_TARGET_DIR/debug/bundle/macos/易界 AI.app/Contents/MacOS/yijie-desktop"
-    [[ -x "$bundle_binary" && ! -L "$bundle_binary" ]] || fail "development UI bundle is missing"
-    launch_command=("$bundle_binary")
-  else
-    launch_command=(node scripts/run-workflow-dev.mjs)
-  fi
+  # UI qualification uses the exact daily executable/profile too. Switching
+  # between Cargo build and dev profiles changes the linker signing identity
+  # and can make existing app-scoped workspace bookmarks unusable.
+  launch_command=(node scripts/run-workflow-dev.mjs)
 elif [[ "$stable_api_only" == "true" ]]; then
   pnpm tauri:build:demo-fast:stable
   bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/易界 AI FEAT-131.app/Contents/MacOS/yijie-desktop"

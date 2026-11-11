@@ -20,6 +20,8 @@ export function summarizeActivity(group: ConversationActivityGroup, live: boolea
   }))];
   const sources = new Set(calls.flatMap(item => item.webSearch?.sources?.map(source => source.url) ?? []));
   const actions = calls.reduce((count, item) => count + (activityNativeItem(item)?.commandActions?.length ?? 0), 0);
+  const failures = calls.filter(item => item.execution?.status === "failed").length;
+  const unsupported = group.items.filter(item => item.presentation === "unknown").length;
   const categories = new Set(group.entries.map(entry => entry.category));
   const parts: string[] = [];
   if (toolSources.length) parts.push(`已使用 ${toolSources.join("、")}`);
@@ -38,6 +40,6 @@ export function summarizeActivity(group: ConversationActivityGroup, live: boolea
     key: state.kind === "active" ? `active:${state.entry.identity}` : state.kind,
     icon: categories.has("tool") ? "skillOperations" as const : categories.has("web_search") ? "globe" as const : "terminal" as const,
     callCount: calls.length, actionCount: actions, sourceCount: sources.size,
-    counts: [calls.length ? `${calls.length} 次调用` : "", actions ? `${actions} 个命令动作` : "", sources.size ? `${sources.size} 个来源` : ""].filter(Boolean).join(" · "),
+    counts: [calls.length ? `${calls.length} 次调用` : "", actions ? `${actions} 个命令动作` : "", sources.size ? `${sources.size} 个来源` : "", failures ? `${failures} 次失败` : "", unsupported ? `${unsupported} 项暂不支持展示` : ""].filter(Boolean).join(" · "),
   };
 }

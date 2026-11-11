@@ -1,6 +1,7 @@
 import type { Component } from "vue";
 import { ThumbsDownFilled, ThumbsUpFilled } from "./answer-feedback-icons";
 import { ModelDeepSeek, ModelGlm, ModelKimi, ModelMiniMax } from "./model-icons";
+import { DocumentCode, DocumentGeneric, DocumentMarkdown, DocumentPdf, DocumentPresentation, DocumentSpreadsheet, DocumentText, DocumentWord } from "./document-icons";
 import {
   SkillCategoryContent,
   SkillCategoryOperations,
@@ -77,6 +78,7 @@ import {
   Images,
   MousePointerClick,
   Mountain,
+  Monitor,
   NotebookPen,
   PackagePlus,
   PackageSearch,
@@ -162,6 +164,7 @@ export const iconRegistry = {
   download: Download,
   edit: Pencil,
   file: FileText,
+  computer: Monitor,
   fileCsv: FileSpreadsheet,
   fileDocx: FileText,
   filePptx: Presentation,
@@ -174,6 +177,14 @@ export const iconRegistry = {
   filePdf: FileType,
   fileVideo: FileVideo,
   fileImage: FileImage,
+  document: DocumentGeneric,
+  documentMarkdown: DocumentMarkdown,
+  documentWord: DocumentWord,
+  documentPresentation: DocumentPresentation,
+  documentSpreadsheet: DocumentSpreadsheet,
+  documentPdf: DocumentPdf,
+  documentText: DocumentText,
+  documentCode: DocumentCode,
   folder: Folder,
   terminal: SquareTerminal,
   globe: Globe,

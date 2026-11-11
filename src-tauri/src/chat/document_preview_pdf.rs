@@ -7,8 +7,17 @@ pub(super) fn render(_: &[u8], _: usize) -> Result<(usize, usize, Vec<u8>), Code
     Err(Code::Unsupported)
 }
 
+#[cfg(not(target_os = "macos"))]
+pub(super) fn page_sizes(_: &[u8]) -> Result<Vec<(f64, f64)>, Code> {
+    Err(Code::Unsupported)
+}
+
 #[cfg(target_os = "macos")]
-pub(super) fn render(bytes: &[u8], index: usize) -> Result<(usize, usize, Vec<u8>), Code> {
+pub(super) use quartz::{page_sizes, render};
+
+#[cfg(target_os = "macos")]
+mod quartz {
+    use super::Code;
     use std::ffi::c_void;
     use std::io::Cursor;
     #[repr(C)]
@@ -95,91 +104,116 @@ pub(super) fn render(bytes: &[u8], index: usize) -> Result<(usize, usize, Vec<u8
     // SAFETY: input stays alive until the document and provider are released;
     // each retained CoreGraphics object is released once via Owned. Pixel
     // dimensions and allocation are checked before passing a stable buffer.
-    unsafe {
-        let provider = owned(
-            CGDataProviderCreateWithData(
-                std::ptr::null_mut(),
-                bytes.as_ptr().cast(),
-                bytes.len(),
-                None,
-            ),
-            CGDataProviderRelease,
-        )?;
-        let document = owned(
-            CGPDFDocumentCreateWithProvider(provider.0),
-            CGPDFDocumentRelease,
-        )?;
-        let count = CGPDFDocumentGetNumberOfPages(document.0);
-        if !(1..=256).contains(&count) {
-            return Err(Code::LimitExceeded);
+    fn with_document<T>(
+        bytes: &[u8],
+        use_document: impl FnOnce(Ref, usize) -> Result<T, Code>,
+    ) -> Result<T, Code> {
+        unsafe {
+            let provider = owned(
+                CGDataProviderCreateWithData(
+                    std::ptr::null_mut(),
+                    bytes.as_ptr().cast(),
+                    bytes.len(),
+                    None,
+                ),
+                CGDataProviderRelease,
+            )?;
+            let document = owned(
+                CGPDFDocumentCreateWithProvider(provider.0),
+                CGPDFDocumentRelease,
+            )?;
+            let count = CGPDFDocumentGetNumberOfPages(document.0);
+            if !(1..=256).contains(&count) {
+                return Err(Code::LimitExceeded);
+            }
+            use_document(document.0, count)
         }
-        let index = index.min(count - 1);
-        let pdf_page = CGPDFDocumentGetPage(document.0, index + 1);
-        if pdf_page.is_null() {
+    }
+    fn dimensions(page: Ref) -> Result<(f64, f64), Code> {
+        if page.is_null() {
             return Err(Code::Unavailable);
         }
-        let rect = CGPDFPageGetBoxRect(pdf_page, 1);
-        let mut w = rect.size.width;
-        let mut h = rect.size.height;
-        if !w.is_finite() || !h.is_finite() || w <= 0.0 || h <= 0.0 {
-            return Err(Code::IntegrityFailed);
+        unsafe {
+            let rect = CGPDFPageGetBoxRect(page, 1);
+            let (mut w, mut h) = (rect.size.width, rect.size.height);
+            if !w.is_finite() || !h.is_finite() || w <= 0.0 || h <= 0.0 || !(w * h).is_finite() {
+                return Err(Code::IntegrityFailed);
+            }
+            if CGPDFPageGetRotationAngle(page).rem_euclid(180) == 90 {
+                std::mem::swap(&mut w, &mut h);
+            }
+            Ok((w, h))
         }
-        if CGPDFPageGetRotationAngle(pdf_page).rem_euclid(180) == 90 {
-            std::mem::swap(&mut w, &mut h);
-        }
-        let scale = (4_000_000.0 / (w * h)).sqrt().min(2.0);
-        let width = (w * scale).floor().max(1.0) as usize;
-        let height = (h * scale).floor().max(1.0) as usize;
-        let pixels = width
-            .checked_mul(height)
-            .filter(|n| *n <= 4_000_000)
-            .ok_or(Code::LimitExceeded)?;
-        let mut buffer = vec![255_u8; pixels * 4];
-        let colors = owned(CGColorSpaceCreateDeviceRGB(), CGColorSpaceRelease)?;
-        let bitmap = owned(
-            CGBitmapContextCreate(
-                buffer.as_mut_ptr().cast(),
-                width,
-                height,
-                8,
-                width * 4,
-                colors.0,
-                0x4001,
-            ),
-            CGContextRelease,
-        )?;
-        let target = Rect {
-            origin: Point { x: 0.0, y: 0.0 },
-            size: Size {
-                width: width as f64,
-                height: height as f64,
-            },
-        };
-        CGContextSetRGBFillColor(bitmap.0, 1.0, 1.0, 1.0, 1.0);
-        CGContextFillRect(bitmap.0, target);
-        // CGPDFPageGetDrawingTransform only scales down. Scale the bitmap
-        // context explicitly for Retina pixels and let Quartz keep its native
-        // PDF coordinate orientation (the bitmap rows are already top first).
-        CGContextScaleCTM(bitmap.0, width as f64 / w, height as f64 / h);
-        let logical = Rect {
-            origin: Point { x: 0.0, y: 0.0 },
-            size: Size {
-                width: w,
-                height: h,
-            },
-        };
-        CGContextConcatCTM(
-            bitmap.0,
-            CGPDFPageGetDrawingTransform(pdf_page, 1, logical, 0, true),
-        );
-        CGContextDrawPDFPage(bitmap.0, pdf_page);
-        drop(bitmap);
-        let image = image::RgbaImage::from_raw(width as u32, height as u32, buffer)
-            .ok_or(Code::Unavailable)?;
-        let mut out = Cursor::new(Vec::new());
-        image::DynamicImage::ImageRgba8(image)
-            .write_to(&mut out, image::ImageFormat::Png)
-            .map_err(|_| Code::Unavailable)?;
-        Ok((count, index, out.into_inner()))
+    }
+    pub(in super::super) fn page_sizes(bytes: &[u8]) -> Result<Vec<(f64, f64)>, Code> {
+        with_document(bytes, |document, count| {
+            (1..=count)
+                .map(|i| dimensions(unsafe { CGPDFDocumentGetPage(document, i) }))
+                .collect()
+        })
+    }
+    pub(in super::super) fn render(
+        bytes: &[u8],
+        index: usize,
+    ) -> Result<(usize, usize, Vec<u8>), Code> {
+        with_document(bytes, |document, count| unsafe {
+            let index = index.min(count - 1);
+            let pdf_page = CGPDFDocumentGetPage(document, index + 1);
+            let (w, h) = dimensions(pdf_page)?;
+            let scale = (4_000_000.0 / (w * h)).sqrt().min(2.0);
+            let width = (w * scale).floor().max(1.0) as usize;
+            let height = (h * scale).floor().max(1.0) as usize;
+            let pixels = width
+                .checked_mul(height)
+                .filter(|n| *n <= 4_000_000)
+                .ok_or(Code::LimitExceeded)?;
+            let mut buffer = vec![255_u8; pixels * 4];
+            let colors = owned(CGColorSpaceCreateDeviceRGB(), CGColorSpaceRelease)?;
+            let bitmap = owned(
+                CGBitmapContextCreate(
+                    buffer.as_mut_ptr().cast(),
+                    width,
+                    height,
+                    8,
+                    width * 4,
+                    colors.0,
+                    0x4001,
+                ),
+                CGContextRelease,
+            )?;
+            let target = Rect {
+                origin: Point { x: 0.0, y: 0.0 },
+                size: Size {
+                    width: width as f64,
+                    height: height as f64,
+                },
+            };
+            CGContextSetRGBFillColor(bitmap.0, 1.0, 1.0, 1.0, 1.0);
+            CGContextFillRect(bitmap.0, target);
+            // CGPDFPageGetDrawingTransform only scales down. Scale the bitmap
+            // context explicitly for Retina pixels and let Quartz keep its native
+            // PDF coordinate orientation (the bitmap rows are already top first).
+            CGContextScaleCTM(bitmap.0, width as f64 / w, height as f64 / h);
+            let logical = Rect {
+                origin: Point { x: 0.0, y: 0.0 },
+                size: Size {
+                    width: w,
+                    height: h,
+                },
+            };
+            CGContextConcatCTM(
+                bitmap.0,
+                CGPDFPageGetDrawingTransform(pdf_page, 1, logical, 0, true),
+            );
+            CGContextDrawPDFPage(bitmap.0, pdf_page);
+            drop(bitmap);
+            let image = image::RgbaImage::from_raw(width as u32, height as u32, buffer)
+                .ok_or(Code::Unavailable)?;
+            let mut out = Cursor::new(Vec::new());
+            image::DynamicImage::ImageRgba8(image)
+                .write_to(&mut out, image::ImageFormat::Png)
+                .map_err(|_| Code::Unavailable)?;
+            Ok((count, index, out.into_inner()))
+        })
     }
 }

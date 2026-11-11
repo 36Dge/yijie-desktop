@@ -1,5 +1,13 @@
 # Security Policy
 
+### 预览导航栏原文件另存为（2026-11-10）
+
+用户明确要求在文件预览导航栏显示路径并提供另存为。Desktop 私有预览 schema 增加 `save` 动作及可选 `saveSupported` 能力，属于 additive；不增加 Tauri command、capability、公共协议或持久化格式。
+
+`save` 仅接收原有 scoped source 与预览 revision。主 WebView、既有 profile、ReadSessions、owner／tenant／会话／消息绑定及来源限制继续执行。原文件名由 Native 已授权记录或引用路径提供；系统保存窗口独占目标路径选择，renderer 不接收 bytes 或传入 destination。Native 在窗口前后重新读取同一来源并核对 revision／格式，复用已有格式校验、扩展名、系统选择器、文件临时写入／原子落盘及 process epoch；操作期间用有界读取预算和单个保存对话框租约。取消不写入，授权失效或内容变化拒绝写入。
+
+路径浮层的 messageFile 请求保持原规则。用户进一步明确要查看已生成文档的实际磁盘位置后，私有 schema 为 artifact／attachment 增加带 revision 的 locate 变体和 `locationSupported`。Native 先读取已授权来源，确认 revision，再由同 scope/session 的项目书签解析工作区；有界查找最多 4096 条目、8 层、64MiB 候选读取，仅返回格式／大小／完整 SHA-256 与预览一致的普通文件。macOS 内容读取使用 `O_NOFOLLOW_ANY` 等现有文件边界，返回前复核上下文和持久来源版本；不创建副本、不全盘扫描、不返回库文件路径或未校验的同名文件。未找到时返回明确错误。路径只保留在当前 toolbar 内存，身份、版本或标签变化即清除，迟到结果不复用。旧 Native 没有相应能力字段时，新 renderer 不发送扩展动作；产物／报告仍复用既有保存入口。
+
 ### FEAT-164 原主目录部署
 
 Owner要求从原主checkout构建运行。新[primary部署v3](docs/feat164-primary-deployment.md)仅将已审源码和受控新输出generation绑定到原日常Home；legacy1/2的分离来源约束保持。实际主checkout、源码commit/完整输入、制品、显式环境与D4/D5批准均重验；不复制旧授权、不自动刷新摘要、不执行D3、不改变Native身份/权限或计划grant。原源码WIP先独立可恢复保全，Runtime r5不改。没有新的模型/工具授权或隐式workflow恢复。

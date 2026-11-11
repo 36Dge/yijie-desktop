@@ -2,6 +2,29 @@ import type { YjIconName as IconName } from "../icons/registry";
 
 export type AttachmentPresentation = Readonly<{ sourcePath: string | null; imageUrl: string | null; expiresAt: number }>;
 export type AttachmentPresentationReader = (id: string) => Promise<AttachmentPresentation>;
+export function chatDocumentIcon(mime: string, name = ""): IconName {
+  if (!mime && name) {
+    const extension = name.split(".").pop()?.toLowerCase() ?? "";
+    const byExtension: Record<string, IconName> = { md: "documentMarkdown", markdown: "documentMarkdown", docx: "documentWord", rtf: "documentWord", pptx: "documentPresentation", xlsx: "documentSpreadsheet", csv: "documentSpreadsheet", pdf: "documentPdf", txt: "documentText", html: "documentCode", htm: "documentCode", json: "documentCode", yaml: "documentCode", yml: "documentCode", xml: "documentCode" };
+    return byExtension[extension] ?? "document";
+  }
+  switch (mime) {
+    case "text/markdown": return "documentMarkdown";
+    case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+    case "application/rtf": return "documentWord";
+    case "application/vnd.openxmlformats-officedocument.presentationml.presentation": return "documentPresentation";
+    case "text/csv":
+    case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": return "documentSpreadsheet";
+    case "application/pdf": return "documentPdf";
+    case "text/plain": return "documentText";
+    case "text/html":
+    case "application/json":
+    case "application/vnd.yijie.report+json;version=1":
+    case "application/xml":
+    case "application/yaml": return "documentCode";
+    default: return "document";
+  }
+}
 export function chatFilePresentation(mime: string): { icon: IconName; label: string; tone: string; image: boolean } {
   const rows: Record<string, [IconName, string, string]> = {
     "text/csv": ["fileCsv", "CSV", "success"],

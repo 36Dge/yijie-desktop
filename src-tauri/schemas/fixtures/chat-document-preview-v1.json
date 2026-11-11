@@ -175,6 +175,87 @@
           "reference": "outputs/Trip Plan.md"
         }
       }
+    },
+    {
+      "schemaVersion": 1,
+      "requestId": "019c1a00-0000-7000-8000-000000000301",
+      "contextId": "019c1a00-0000-7000-8000-000000000302",
+      "payload": {
+        "action": "save",
+        "viewId": "019c1a00-0000-7000-8000-000000000303",
+        "source": {
+          "kind": "artifact",
+          "sessionId": "019c1a00-0000-7000-8000-000000000304",
+          "turnId": "019c1a00-0000-7000-8000-000000000305",
+          "artifactId": "019c1a00-0000-7000-8000-000000000306"
+        },
+        "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "requestId": "019c1a00-0000-7000-8000-000000000301",
+      "contextId": "019c1a00-0000-7000-8000-000000000302",
+      "payload": {
+        "action": "save",
+        "viewId": "019c1a00-0000-7000-8000-000000000303",
+        "source": {
+          "kind": "attachment",
+          "sessionId": "019c1a00-0000-7000-8000-000000000304",
+          "messageId": null,
+          "attachmentId": "019c1a00-0000-7000-8000-000000000306"
+        },
+        "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "requestId": "019c1a00-0000-7000-8000-000000000301",
+      "contextId": "019c1a00-0000-7000-8000-000000000302",
+      "payload": {
+        "action": "save",
+        "viewId": "019c1a00-0000-7000-8000-000000000303",
+        "source": {
+          "kind": "messageFile",
+          "sessionId": "019c1a00-0000-7000-8000-000000000304",
+          "turnId": "019c1a00-0000-7000-8000-000000000305",
+          "itemId": "answer",
+          "reference": "file:///Users/example/Desktop/guide.md"
+        },
+        "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "requestId": "019c1a00-0000-7000-8000-000000000301",
+      "contextId": "019c1a00-0000-7000-8000-000000000302",
+      "payload": {
+        "action": "locate",
+        "viewId": "019c1a00-0000-7000-8000-000000000303",
+        "source": {
+          "kind": "artifact",
+          "sessionId": "019c1a00-0000-7000-8000-000000000304",
+          "turnId": "019c1a00-0000-7000-8000-000000000305",
+          "artifactId": "019c1a00-0000-7000-8000-000000000306"
+        },
+        "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "requestId": "019c1a00-0000-7000-8000-000000000301",
+      "contextId": "019c1a00-0000-7000-8000-000000000302",
+      "payload": {
+        "action": "locate",
+        "viewId": "019c1a00-0000-7000-8000-000000000303",
+        "source": {
+          "kind": "attachment",
+          "sessionId": "019c1a00-0000-7000-8000-000000000304",
+          "messageId": null,
+          "attachmentId": "019c1a00-0000-7000-8000-000000000306"
+        },
+        "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
     }
   ]
 }

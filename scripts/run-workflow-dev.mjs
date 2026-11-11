@@ -6,6 +6,7 @@ import { lstat, mkdir, open, rename } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { stageDevelopmentResources } from "./development-resources.mjs";
+import { runnerEnvironment } from "./development-app-runner.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const stateRoot = path.join(root, process.env.YIJIE_DEVELOPMENT_CLIENT === "true" ? ".local/development" : ".local/demo-fast/workflow-dev");
@@ -72,7 +73,7 @@ export async function runWorkflowDev() {
     const { createServer } = await import("vite");
     server = await createServer({ root, configFile: path.join(root, "vite.config.ts"), server: { host: "localhost", port: 1420, strictPort: true, hmr: { host: "localhost", port: 1421 } } });
     await server.listen();
-    child = spawn("pnpm", arguments_, { cwd: root, env: nativeEnvironment, stdio: "inherit", detached: true, shell: false });
+    child = spawn("pnpm", arguments_, { cwd: root, env: runnerEnvironment(nativeEnvironment, arguments_), stdio: "inherit", detached: true, shell: false });
     const finished = new Promise((resolve, reject) => {
       child.once("error", error => { childFinished = true; reject(error); });
       child.once("exit", (code, signal) => { childFinished = true; resolve({ code, signal }); });

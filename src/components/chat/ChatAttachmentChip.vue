@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { NPopover } from "naive-ui";
 import YjIcon from "../yijie/YjIcon.vue";
-import { chatFilePresentation, fileNameParts, type AttachmentPresentation, type AttachmentPresentationReader } from "../../domain/chat-file-presentation";
+import { chatDocumentIcon, chatFilePresentation, fileNameParts, type AttachmentPresentation, type AttachmentPresentationReader } from "../../domain/chat-file-presentation";
 
 const props = withDefaults(defineProps<{
   attachmentId: string;
@@ -17,6 +17,9 @@ const props = withDefaults(defineProps<{
 }>(), { active: false, removable: false, disabled: false });
 const emit = defineEmits<{ activate: [id: string | null]; remove: [id: string] }>();
 const file = computed(() => chatFilePresentation(props.mediaType));
+const icon = computed(() => file.value.image || props.mediaType.startsWith("video/")
+  ? file.value.icon
+  : chatDocumentIcon(props.mediaType));
 const nameParts = computed(() => fileNameParts(props.name));
 const result = shallowRef<AttachmentPresentation | null>(null);
 const triggerElement = ref<HTMLElement | null>(null);
@@ -69,7 +72,7 @@ function closeOutside(event: FocusEvent) {
     <template #trigger>
       <span ref="triggerElement" class="chat-file-chip" :class="{ 'chat-file-chip--expired': statusLabel, 'chat-file-chip--removable': removable }" :role="openPreview ? 'button' : undefined" :tabindex="available || openPreview ? 0 : undefined" @click="openPreview?.()" @keydown.space.self.stop.prevent="openPreview?.()" :aria-label="`${name}，${file.label}${statusLabel ? `，${statusLabel}` : ''}`" @focus="show(true)" @focusout="closeOutside" @keydown.esc.stop="show(false)" @keydown.enter.self.stop.prevent="activateOrRead">
         <span class="chat-file-chip__icon" :class="`chat-file-chip__icon--${file.tone}`">
-          <YjIcon class="chat-file-chip__type-icon" :name="file.icon" size="sm" />
+          <YjIcon class="chat-file-chip__type-icon" :name="icon" size="sm" />
           <button v-if="removable" class="chat-file-chip__remove" type="button" :disabled="disabled" :aria-label="`移除 ${name}`" @click.stop="emit('remove', attachmentId)" @focus="show(false)"><YjIcon name="dismiss" size="sm" /></button>
         </span>
         <span class="chat-file-chip__name"><span class="chat-file-chip__stem">{{ nameParts.stem }}</span><span class="chat-file-chip__extension">{{ nameParts.extension }}</span></span>

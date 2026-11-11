@@ -16,3 +16,14 @@ it("sends only the versioned identity operation and preserves typed failure", as
   const failure = createDocumentPreviewClient(async () => { throw { code: "artifact_native_forbidden" }; });
   await expect(failure.run("scope",{ action: "close", viewId: "view" })).rejects.toMatchObject({ code: "artifact_native_forbidden" });
 });
+
+it("accepts save outcomes only for the correlated save action", async () => {
+  const source={kind:'messageFile' as const,sessionId:'s',turnId:'t',itemId:'answer',reference:'/ordinary/report.md'};
+  for (const status of ['saved','cancelled'] as const) {
+    const invoke=vi.fn(async (_command,args)=>({...response,requestId:args.request.requestId,data:{...response.data,status}}));
+    const result=await createDocumentPreviewClient(invoke).run('scope',{action:'save',viewId:'view',source,revision:'a'.repeat(64)});
+    expect(result.status).toBe(status);
+    expect(invoke.mock.calls[0]?.[1].request.payload).toEqual({action:'save',viewId:'view',source,revision:'a'.repeat(64)});
+  }
+  expect(()=>parseDocumentPreviewResponse({...response,data:{...response.data,status:'saved',path:'/ordinary/report.md'}},'request','view')).toThrow();
+});

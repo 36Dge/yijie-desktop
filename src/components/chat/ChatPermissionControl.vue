@@ -19,7 +19,7 @@ const cancelElement = ref<HTMLButtonElement | null>(null);
 const options: { mode: PermissionMode; label: string; description: string; icon: YjIconName }[] = [
   { mode: "ask", label: "请求批准", description: "编辑外部文件和使用互联网时始终询问", icon: "permissionHand" },
   { mode: "auto", label: "帮我批准", description: "仅对检测到的风险操作请求批准", icon: "shield" },
-  { mode: "full", label: "完全访问权限", description: "可不受限制地访问互联网和你电脑上的任何文件", icon: "permissionAlert" },
+  { mode: "full", label: "完全访问", description: "可不受限制地访问互联网和你电脑上的任何文件", icon: "permissionAlert" },
 ];
 const selected = computed(() => options.find((o) => o.mode === props.state?.mode) ?? options[0]!);
 const blocked = computed(() => props.disabled || props.saving || !props.state || props.state.busy);

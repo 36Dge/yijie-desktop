@@ -6,7 +6,7 @@ import Foundation
 final class DevelopmentEntry: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let config = Bundle.main.infoDictionary!
     var root: URL { URL(fileURLWithPath: config["YijieProjectRoot"] as! String) }
-    var nativeURL: URL { root.appendingPathComponent(".local/development/target/debug/yijie-desktop") }
+    var nativeURL: URL { root.appendingPathComponent(".local/development/target/debug/bundle/macos/易界 AI.app/Contents/MacOS/yijie-desktop") }
     var native: NSRunningApplication? {
         NSWorkspace.shared.runningApplications.first { $0.executableURL?.standardizedFileURL == nativeURL.standardizedFileURL }
     }
