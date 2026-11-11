@@ -4,10 +4,12 @@ import type { ConversationTimelineItemViewModel, ConversationTimelineTurnViewMod
 import type { SelectedChatSkill } from "../../domain/chat-skills";
 import type { YjIconName } from "../../icons/registry";
 import { conversationActivityPresentation, traceCurrentStatus, traceIsLive } from "../../domain/conversation-activity-presentation";
+import { groupConversationTurnOutput, type ConversationTurnReadingNode } from "../../domain/conversation-turn-output";
 import { chatTracePresentationKey, createChatTracePresentationStore } from "../../stores/chat-trace-presentation.store";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatActivityGroup from "./ChatActivityGroup.vue";
 import ChatActivityRow from "./ChatActivityRow.vue";
+import ChatTurnOutput from "./ChatTurnOutput.vue";
 import ChatTurnPlan from "./ChatTurnPlan.vue";
 import ChatTraceNotices from "./ChatTraceNotices.vue";
 import ChatThinkingIndicator from "./ChatThinkingIndicator.vue";
@@ -69,8 +71,8 @@ const currentStatus = computed(() => traceCurrentStatus(props.turn));
 const plan = computed(() => props.turn.plan ? {...props.turn.plan, defaultExpanded: false} : null);
 const processControls = computed(() => nodes.value.filter(isProcess).map(node => `${processId}-${encodeURIComponent(node.identity)}`).concat(plan.value ? [`${processId}-plan`] : []).join(" "));
 const entries = computed(() => {
-  const list: (typeof nodes.value[number] | {kind: "timing" | "plan" | "reasoning-summary"; identity: string})[] = [...nodes.value];
-  const first = nodes.value.findIndex(node => node.kind !== "message" || node.item.presentation !== "user_message");
+  const list: (ConversationTurnReadingNode | {kind: "timing" | "plan" | "reasoning-summary"; identity: string})[] = [...groupConversationTurnOutput(props.turn, nodes.value)];
+  const first = list.findIndex(node => node.kind !== "message" || node.item.presentation !== "user_message");
   const index = first < 0 ? list.length : first;
   list.splice(index, 0, {kind: "timing", identity: `${props.turn.identity}:timing`});
   if (plan.value) list.splice(index + 1, 0, {kind: "plan", identity: `${props.turn.identity}:plan`});
@@ -248,6 +250,15 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
         </li>
         <li v-else-if="node.kind === 'plan' && plan" v-show="processExpanded" :id="`${processId}-plan`" @focusin="preserveProcess" @pointerdown="preserveProcess">
           <ChatTurnPlan :plan="plan" :ended="['completed', 'failed', 'interrupted'].includes(turn.domainStatus)" />
+        </li>
+        <li v-else-if="node.kind === 'output'" class="chat-turn-group__item chat-turn-group__item--output">
+          <ChatTurnOutput :output="node" :turn="turn">
+            <template v-if="slots['structured-answer']" #structured-answer="scope"><slot name="structured-answer" v-bind="scope" /></template>
+            <template v-if="slots['artifact-reference']" #artifact-reference="scope"><slot name="artifact-reference" v-bind="scope" /></template>
+            <template v-if="slots['attachment-reference']" #attachment-reference="scope"><slot name="attachment-reference" v-bind="scope" /></template>
+            <template v-if="slots['item-actions']" #item-actions="scope"><slot name="item-actions" v-bind="scope" /></template>
+            <template v-if="slots['code-actions']" #code-actions="scope"><slot name="code-actions" v-bind="scope" /></template>
+          </ChatTurnOutput>
         </li>
         <li v-else-if="node.kind === 'activity' || node.kind === 'message' || node.kind === 'attention'" v-show="node.kind === 'attention' || node.kind === 'message' && node.item.presentation === 'user_message' || !preloading && (!isProcess(node) || processExpanded)" :id="`${processId}-${encodeURIComponent(node.identity)}`" :class="`chat-turn-group__item--${node.kind === 'activity' ? 'activity' : node.item.presentation}`" class="chat-turn-group__item" :data-process-item="isProcess(node) ? '' : undefined" @focusin="isProcess(node) && preserveProcess()" @pointerdown="isProcess(node) && preserveProcess()">
           <ChatActivityGroup v-if="node.kind === 'activity'" :group="node.group" :live="nativeLiveProgress" :visible="processExpanded" @disclosure-change="forwardDisclosure">

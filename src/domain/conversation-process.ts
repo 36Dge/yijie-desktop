@@ -42,7 +42,9 @@ export function isCollapsibleProcessItem(item: ConversationTimelineItemViewModel
 
 /** Reading layout only: never rewrite a phase, lifecycle, Item, or saved view. */
 export function tailCommentaryCandidate(items: readonly ConversationTimelineItemViewModel[]): string | null {
-  const last = items[items.length - 1];
+  // Product artifacts follow native Items in a separate ordinal range. They do
+  // not turn an otherwise visible last public message into folded commentary.
+  const last = [...items].reverse().find(item => item.presentation !== "artifact");
   return last?.presentation === "commentary" && last.contentBlocks.some(block =>
     (block.type === "text" || block.type === "code") && block.text.trim()) ? last.identity : null;
 }
@@ -83,6 +85,15 @@ export function hasUnclassifiedToolContinuation(item: ConversationTimelineItemVi
     if (["command", "tool", "web_search"].includes(following.presentation)) return true;
   }
   return false;
+}
+
+/** Shared by standalone messages and the footer of a response with artifacts. */
+export function showConversationItemActions(item: ConversationTimelineItemViewModel, turn: ConversationTimelineTurnViewModel, processPresentation = false, structuredAnswer = false): boolean {
+  return !processPresentation && item.presentation !== "commentary" &&
+    !hasUnclassifiedToolContinuation(item, turn.items) &&
+    !(["final_answer", "assistant_unclassified"].includes(item.presentation) && structuredAnswer) &&
+    item.presentation !== "command" && item.presentation !== "tool" &&
+    item.copyPolicy === "text_and_code" && (item.kind !== "assistant_message" || item.domainStatus === "completed");
 }
 
 export function processDetailItems(items: readonly ConversationTimelineItemViewModel[]): ReadonlySet<string> {

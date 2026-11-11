@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { ConversationActivityEntry } from "../../domain/conversation-activity-entry";
-import { hasReadableProcessContent, hasUnclassifiedToolContinuation } from "../../domain/conversation-process";
+import { hasReadableProcessContent, showConversationItemActions } from "../../domain/conversation-process";
 import type {
   ConversationTimelineArtifactReferenceContentBlock,
   ConversationTimelineAttachmentReferenceContentBlock,
@@ -312,7 +312,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange) { emit("app
             </ChatSafeContent>
 
             <template
-              v-if="!processPresentation && item.presentation !== 'commentary' && !hasUnclassifiedToolContinuation(item, turn.items) && !((item.presentation === 'final_answer' || item.presentation === 'assistant_unclassified') && slots['structured-answer']) && item.presentation !== 'command' && item.presentation !== 'tool' && item.copyPolicy === 'text_and_code' && (item.kind !== 'assistant_message' || item.domainStatus === 'completed') && slots['item-actions']"
+              v-if="showConversationItemActions(item, turn, processPresentation, Boolean(slots['structured-answer'])) && slots['item-actions']"
               #actions
             >
               <slot name="item-actions" :item="item" />
