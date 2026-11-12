@@ -129,3 +129,7 @@ The Owner-authorized D4 repair adds a read-only format-5 display decoder and a t
 Owner-authorized D5 adds a distinct schema2 activation policy bound to the exact local artifact receipt, D4 evidence and original Homes. It permits normal user-authorized K3.1 Pro use without daily expiry; it is not a model test allowance, plan grant, remote credential or security token. Existing Native scope, user intent, plan approval, old-model retirement and uncertain-operation protections remain mandatory. Schema1 D3/D4 expiry/zero-dispatch checks remain intact; schema2 cannot authorize migration or first-start qualification.
 
 The canonical installer creates only a new owner-executable Desktop command entry, never overwriting an App or existing entry. It contains only fixed paths, approved environment values and record digests; no credentials. Every launch still verifies the complete source/artifact receipt, original Homes and authenticated workflow readiness. It does not start or migrate workflow, create data Homes, restore data, grant plan execution or call a model. An exact compatible paused entry is the Kimi rollback; normal exit precedes it. See [D5 interface and scope](docs/feat164-daily-activation.md).
+
+### FEAT-173 内置视频接线
+
+视频仍由 Host 访问固定 Seedance API，Renderer 只消费原 Artifact 引用。Native command、CSP、capability、SQL schema、视频 scheme、Range 和保存授权不变。唯一 sidecar 接线为精确 boolean 的开发回退选择 `YIJIE_FEAT173_VIDEO_MCP`；Host 继续检查完整本地媒体 profile 与当前专家/root authority。provider/video 交付失败不再建议重建生成任务；本地 ready 可播放保存，Host ACK 确认另行保持既有语义。

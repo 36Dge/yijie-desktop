@@ -11,6 +11,18 @@ development = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(development)
 
 class DevelopmentClientTest(unittest.TestCase):
+    def test_video_is_builtin_with_an_explicit_rollback_selector_only(self):
+        root = Path("/workspace/yijie-desktop")
+        source = {"PATH": "/usr/bin", "HOME": str(Path.home())}
+        with patch.object(development, "supported_go", return_value="/existing/toolchain/bin"):
+            ordinary = development.environment(root, source)
+            self.assertEqual(ordinary["YIJIE_FEAT173_VIDEO_MCP"], "true")
+            paused = development.environment(root, {**source, "YIJIE_FEAT173_VIDEO_MCP": "false"})
+            self.assertEqual(paused["YIJIE_FEAT173_VIDEO_MCP"], "false")
+            self.assertEqual(paused["CARGO_TARGET_DIR"], ordinary["CARGO_TARGET_DIR"])
+            with self.assertRaises(ValueError):
+                development.environment(root, {**source, "YIJIE_FEAT173_VIDEO_MCP": "enabled"})
+
     def test_tool_search_meter_is_explicit_and_keeps_fixed_origin(self):
         root = Path("/workspace/yijie-desktop")
         source = {"PATH": "/usr/bin", "HOME": str(Path.home()),

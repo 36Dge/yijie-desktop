@@ -88,6 +88,7 @@ export function verifyKimiK31BuildCandidate(desktopRoot,contractsRoot,hostRoot,e
  const fixedDaily = env.YIJIE_DEVELOPMENT_CLIENT === "true" && env.YIJIE_FEAT164_DAILY === "true";
  if(fixedDaily && env.YIJIE_FEAT169_NATIVE_TOOLS === "true") {
   execFileSync(process.execPath,["scripts/generate-media-generation.mjs","--consumer=host","--check"],{cwd:contractsRoot,stdio:"pipe"});
+  execFileSync(process.execPath,["scripts/generate-video-generation.mjs","--consumer=host","--check"],{cwd:contractsRoot,stdio:"pipe"});
   for(const consumer of ["host","desktop"])execFileSync(process.execPath,["scripts/generate-document-runtime.mjs","--consumer="+consumer,"--check"],{cwd:contractsRoot,stdio:"pipe"});
  }
  if(env.YIJIE_FEAT171_DOCUMENT_RUNTIME === "true") return verifyDocumentBuildCandidate(desktopRoot,contractsRoot,hostRoot,env);

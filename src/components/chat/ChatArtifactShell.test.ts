@@ -72,6 +72,21 @@ function artifact(
 }
 
 describe("ChatArtifactShell", () => {
+  it("keeps provider video delivery failures on the original task without offering regeneration", () => {
+    for (const retryable of [true, false]) {
+      const wrapper = mount(ChatArtifactShell, { props: {
+        artifact: artifact(0, {kind: "video", provenance: "provider", status: "failed", errorCode: "resource_unavailable", retryable}),
+        contextId: CONTEXT_ID,
+      }});
+      try {
+        expect(wrapper.get("[data-testid='artifact-failure-guidance']").text()).toContain("查询原视频任务");
+        expect(wrapper.text()).toContain("重新生成会创建新任务");
+        expect(wrapper.text()).not.toContain("重新提交需求");
+        expect(wrapper.find("video").exists()).toBe(false);
+        expect(wrapper.findAll("button")).toHaveLength(0);
+      } finally { wrapper.unmount(); }
+    }
+  });
   it("routes document and media previews through their respective artifact bindings", async () => {
     const openFile = vi.fn();
     const value = artifact(0, {kind:"file",status:"ready",mediaType:"application/pdf",displayName:"normal.pdf"});

@@ -62,6 +62,9 @@ const provenanceLabel = computed(() => ({
 const displayName = computed(() => props.artifact.displayName ?? `未命名${kindPresentation.value.label}`);
 const failureGuidance = computed(() => {
   if (props.artifact.status !== "failed") return null;
+  if (props.artifact.kind === "video" && props.artifact.provenance === "provider") {
+    return "视频暂未完成交付。请先查看原产物或查询原视频任务；重新生成会创建新任务，不会恢复本次交付。";
+  }
   if (props.artifact.kind === "image" && props.artifact.provenance === "provider") {
     switch (props.artifact.errorCode) {
       case "limit_exceeded": return "图片生成或暂存额度受限。请检查方舟模型的用量上限，稍后可重新提交。";

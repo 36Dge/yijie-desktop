@@ -103,6 +103,9 @@ def environment(root, environ, tool_search_meter=False, document_meter=False, me
     primary.require(tool_search == "false" or interaction == "true", "Tool search requires interaction tools.")
     result = {**env, "YIJIE_FEAT170_TOOL_SEARCH": tool_search, "YIJIE_FEAT169_INTERACTION_TOOLS": interaction, "YIJIE_DEVELOPMENT_CLIENT": "true",
               "CARGO_TARGET_DIR": str(selected["target"]), "YIJIE_WORKER_TARGET_DIR": str(selected["worker_target"])}
+    video = environ.get("YIJIE_FEAT173_VIDEO_MCP", "true")
+    primary.require(video in ("true", "false"), "Invalid builtin video selector.")
+    result["YIJIE_FEAT173_VIDEO_MCP"] = video
     documents = environ.get("YIJIE_FEAT171_DOCUMENT_RUNTIME", "false")
     primary.require(documents in ("true", "false"), "Invalid document runtime selector.")
     if documents == "true":

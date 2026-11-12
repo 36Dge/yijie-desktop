@@ -989,6 +989,13 @@ impl SidecarSupervisor {
                 );
             }
         }
+        // Only an exact developer rollback selector crosses the existing child
+        // boundary. Host still admits video solely in its complete media profile.
+        let video_selector = read_optional_environment("YIJIE_FEAT173_VIDEO_MCP")?;
+        if !video_selector.is_empty() {
+            parse_exact_boolean_value(&video_selector)?;
+            command.env("YIJIE_FEAT173_VIDEO_MCP", video_selector);
+        }
         if self.market_authority.is_some() {
             let manifest = std::env::var("YIJIE_MARKET_WORKER_MANIFEST")
                 .ok()
