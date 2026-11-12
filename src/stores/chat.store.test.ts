@@ -49,7 +49,6 @@ selectConversationTurn,
 } from "../domain/conversation-view";
 import { createArtifactStoreDefinition } from "./artifact.store";
 import {
-CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS,
 CHAT_DRAFT_ATTACHMENT_LIMIT,
 createChatStoreDefinition,
 type ChatSubmissionResult,
@@ -764,10 +763,6 @@ function createV6Store(client: ChatClient) {
     true,
     true,
   )();
-}
-
-async function finishAttachmentImportPresentation(): Promise<void> {
-  await vi.advanceTimersByTimeAsync(CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS * 5);
 }
 
 describe("chat view-model store", () => {
@@ -2304,17 +2299,14 @@ describe("chat view-model store", () => {
     harness.emitAttachmentImport(attachmentImportEvent("queued", "1"));
     harness.emitAttachmentImport(attachmentImportEvent("importing", "2"));
     harness.emitAttachmentImport(attachmentImportEvent("indexing", "3"));
-    await vi.advanceTimersByTimeAsync(CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS);
     expect(store.attachmentImportAttempt?.stage).toBe("importing");
 
     harness.emitAttachmentImport(attachmentImportEvent("parsing", "3"));
     harness.emitAttachmentImport(attachmentImportEvent("indexing", "4", { itemCount: 3 }));
-    await vi.advanceTimersByTimeAsync(CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS);
     expect(store.attachmentImportAttempt).toMatchObject({ stage: "parsing", itemCount: 2 });
     harness.emitAttachmentImport(attachmentImportEvent("indexing", "4"));
     harness.emitAttachmentImport(attachmentImportEvent("error_terminal", "5"));
     harness.emitAttachmentImport(attachmentImportEvent("ready", "6"));
-    await vi.advanceTimersByTimeAsync(CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS * 2);
     expect(store.attachmentImportAttempt).toMatchObject({
       stage: "error_terminal",
       issue: "parse_failed",
@@ -2366,13 +2358,8 @@ describe("chat view-model store", () => {
       shape: { attachmentIssue: "parse_failed", attachmentItemCount: 2 },
     });
 
-    expect(store.attachmentImportAttempt).toMatchObject({ stage: "queued", itemCount: 2 });
+    expect(store.attachmentImportAttempt).toMatchObject({ stage: "error_terminal", itemCount: 2 });
     expect(store.canAttach).toBe(false);
-    await vi.advanceTimersByTimeAsync(CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS);
-    expect(store.attachmentImportAttempt?.stage).toBe("importing");
-    await vi.advanceTimersByTimeAsync(CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS);
-    expect(store.attachmentImportAttempt?.stage).toBe("parsing");
-    await vi.advanceTimersByTimeAsync(CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS);
     expect(store.attachmentImportAttempt).toMatchObject({
       stage: "error_terminal",
       issue: "parse_failed",
@@ -2385,7 +2372,7 @@ describe("chat view-model store", () => {
     expect(store.canAttach).toBe(true);
   });
 
-  it("keeps every successful native import stage observable for a minimum interval", async () => {
+  it("makes ready attachments available immediately without an artificial progress delay", async () => {
     const store = createStore(fakeClient({
       pickAttachments: async () => [attachment()],
     }).client);
@@ -2393,14 +2380,6 @@ describe("chat view-model store", () => {
 
     await store.pickAttachments();
 
-    expect(store.attachmentImportAttempt?.stage).toBe("queued");
-    for (const stage of ["importing", "parsing", "indexing", "ready"] as const) {
-      await vi.advanceTimersByTimeAsync(CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS);
-      expect(store.attachmentImportAttempt?.stage).toBe(stage);
-    }
-    await vi.advanceTimersByTimeAsync(CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS - 1);
-    expect(store.attachmentImportAttempt?.stage).toBe("ready");
-    await vi.advanceTimersByTimeAsync(1);
     expect(store.attachmentImportAttempt).toBeNull();
     expect(store.draftAttachments).toEqual([attachment()]);
     expect(store.canAttach).toBe(true);
@@ -2568,7 +2547,6 @@ describe("chat view-model store", () => {
     }).client);
     await store.bind(TENANT);
     await store.pickAttachments();
-    await finishAttachmentImportPresentation();
     const retainedDraft = store.draftAttachments;
 
     await expect(store.createSession(invalidProjectId, "keep this input"))
@@ -2769,7 +2747,6 @@ describe("chat view-model store", () => {
     await store.bind(TENANT);
     await store.selectSession(SESSION_A);
     await store.pickAttachments();
-    await finishAttachmentImportPresentation();
     expect(store.draftAttachments).toEqual([attachment()]);
 
     const acceptedSubmit = store.submitTurn("session A task");
@@ -3050,7 +3027,6 @@ describe("chat view-model store", () => {
     }).client);
     await store.bind(TENANT);
     await store.pickAttachments();
-    await finishAttachmentImportPresentation();
 
     await expect(store.createSessionWithResult(projectId, "new task"))
       .rejects.toMatchObject({ shape: { code: "chat_protocol_error" } });
@@ -3072,7 +3048,6 @@ describe("chat view-model store", () => {
     await store.bind(TENANT);
     await store.selectSession(SESSION_A);
     await store.pickAttachments();
-    await finishAttachmentImportPresentation();
 
     await expect(store.submitTurnWithResult("reply task"))
       .rejects.toMatchObject({ shape: { code: "chat_protocol_error" } });
@@ -3268,7 +3243,6 @@ describe("chat view-model store", () => {
     await store.bind(TENANT);
     await store.selectSession(SESSION_A);
     await store.pickAttachments();
-    await finishAttachmentImportPresentation();
 
     let settled: ChatSubmissionResult | null = null;
     const pending = store.submitTurnWithResult("reply task");
@@ -3362,7 +3336,6 @@ describe("chat view-model store", () => {
       expect.any(String),
     );
     expect(store.draftAttachmentsReady).toBe(true);
-    await finishAttachmentImportPresentation();
 
     await expect(store.createSession("019c1a00-0000-7000-8000-000000000009", "")).resolves.toBe(SESSION_A);
     expect(createSessionV2).toHaveBeenCalledWith(
@@ -3402,7 +3375,6 @@ describe("chat view-model store", () => {
     await store.bind(TENANT);
     await store.clearSelectedSession();
     await store.pickAttachments();
-    await finishAttachmentImportPresentation();
 
     await expect(store.createSession("019c1a00-0000-7000-8000-000000000009", "new task"))
       .resolves.toBe(SESSION_CREATED);
@@ -3432,7 +3404,6 @@ describe("chat view-model store", () => {
     await store.bind(TENANT);
     await store.selectSession(SESSION_A);
     await store.pickAttachments();
-    await finishAttachmentImportPresentation();
 
     await expect(store.submitTurn("")).rejects.toMatchObject({ shape: { code: "chat_host_not_ready" } });
     expect(submitTurnV2).toHaveBeenCalledOnce();
@@ -3467,7 +3438,6 @@ describe("chat view-model store", () => {
     await store.bind(TENANT);
     await store.selectSession(SESSION_A);
     await store.pickAttachments();
-    await finishAttachmentImportPresentation();
 
     await expect(store.submitTurn("same input")).rejects.toMatchObject({ shape: { code: "chat_host_not_ready" } });
     await expect(store.submitTurn("same input")).rejects.toMatchObject({ shape: { code: "chat_host_not_ready" } });
@@ -3479,7 +3449,6 @@ describe("chat view-model store", () => {
     expect(changedInputOperation).not.toBe(firstOperation);
 
     await store.pickAttachments();
-    await finishAttachmentImportPresentation();
     await expect(store.submitTurn("changed input")).rejects.toMatchObject({ shape: { code: "chat_host_not_ready" } });
     expect(submitTurnV2.mock.calls[3]?.[3]).not.toBe(changedInputOperation);
   });

@@ -64,6 +64,6 @@ apple-native-keyring-store = { version = "=1.0.1", default-features = false, fea
 keyring-core = "=1.0.0"
 objc2 = "=0.6.4"
 block2 = "=0.6.2"
-objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSWorkspace"] }
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSWorkspace", "NSImage", "NSPasteboard"] }
 objc2-foundation = { version = "=0.3.2", default-features = false, features = ["NSArray", "NSAppleEventManager", "NSAppleEventDescriptor", "NSData", "NSError", "NSObject", "NSString", "NSURL", "NSValue", "NSNotification", "NSOperation", "block2", "std"] }
 rfd = { version = "=0.16.0", default-features = false }

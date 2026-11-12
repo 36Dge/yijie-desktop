@@ -56,8 +56,6 @@
     "check:market-provider": "node ../yijie-contracts/scripts/sync-market-provider.mjs --consumer=desktop --check",
     "generate:market-host": "node ../yijie-contracts/scripts/sync-market-host.mjs --consumer=desktop",
     "check:market-host": "node ../yijie-contracts/scripts/sync-market-host.mjs --consumer=desktop --check",
-    "client:images:prepare": "bash scripts/run-local-demo-fast.sh --packaged --host-images --prepare-only",
-    "client:images:open": "bash scripts/run-local-demo-fast.sh --packaged --host-images --reopen",
     "client:dev": "python3 -B scripts/development-client.py start",
     "client:install-entry": "python3 -B scripts/install-development-entry.py"
   },

@@ -3,6 +3,7 @@ export const ARTIFACT_NATIVE_COMMAND_NAMES = [
   "chat_open_artifact_image_preview_v1",
   "chat_release_artifact_image_preview_v1",
   "chat_save_artifact_image_v1",
+  "chat_copy_artifact_image_v1",
 ] as const;
 export const ARTIFACT_NATIVE_ERROR_CODES = [
   "artifact_native_invalid_request",
@@ -40,6 +41,7 @@ export interface ArtifactPreviewOpenResult {
   readonly previewUrl: string;
 }
 export interface ArtifactPreviewReleaseResult { readonly status: "released" }
+export interface ArtifactCopyResult { readonly status: "copied" }
 export type ArtifactSaveResult =
   | Readonly<{ status: "saved" | "cancelled"; code: null }>
   | Readonly<{ status: "failed"; code: ArtifactNativeErrorCode }>;
@@ -126,6 +128,13 @@ export function parseArtifactSaveResponse(value: unknown): ArtifactSaveResult {
     return { status: "failed", code: data.code as ArtifactNativeErrorCode };
   }
   throw new ArtifactNativeContractError();
+}
+
+export function parseArtifactCopyResponse(value: unknown): ArtifactCopyResult {
+  const { data } = envelope(value);
+  exact(data, ["status"]);
+  if (data.status !== "copied") throw new ArtifactNativeContractError();
+  return { status: "copied" };
 }
 
 export function parseArtifactNativeError(value: unknown): ArtifactNativeErrorShape {

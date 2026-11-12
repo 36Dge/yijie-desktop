@@ -2,13 +2,14 @@
 import { mount, flushPromises, enableAutoUnmount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defineComponent } from "vue";
+import { NTooltip } from "naive-ui";
 import ChatAttachmentChip from "./ChatAttachmentChip.vue";
 import type { AttachmentPresentation } from "../../domain/chat-file-presentation";
 
 enableAutoUnmount(afterEach);
 const popover = defineComponent({ props: ["show"], template: '<div><slot name="trigger"/><div v-if="show"><slot/></div></div>' });
 const base = { attachmentId: "file-1", name: "普通文件.jpeg", mediaType: "image/jpeg", status: "ready", removable: true };
-function chip(props = {}) { return mount(ChatAttachmentChip, { props: {...base, ...props}, global: {stubs: {NPopover: popover, Popover: popover}} }); }
+function chip(props = {}) { return mount(ChatAttachmentChip, { props: {...base, ...props}, global: {stubs: {NPopover: popover, Popover: popover, NTooltip: popover, Tooltip: popover}} }); }
 describe("FEAT165 local attachment chip", () => {
   it("FEAT166 opens only explicitly bound non-media references on click or keyboard", async () => {
     const openPreview=vi.fn();
@@ -44,11 +45,30 @@ describe("FEAT165 local attachment chip", () => {
     const view = chip({name: "很长的普通文件.docx", mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", active: true, readPresentation: async () => ({sourcePath: "/ordinary/很长的普通文件.docx", imageUrl: null, expiresAt: Date.now()/1000 + 30})});
     await flushPromises();
     expect(view.get(".chat-file-chip__extension").text()).toBe(".docx");
+    expect(view.findComponent(NTooltip).exists()).toBe(true);
+    expect(view.get('[role="tooltip"]').attributes("id")).toBe(view.get(".chat-file-chip").attributes("aria-describedby"));
     expect(view.text()).toContain("/ordinary/很长的普通文件.docx");
     await view.get(".chat-file-chip").trigger("keydown", {key: "Escape"});
     expect(view.emitted("activate")).toContainEqual([null]);
     await view.setProps({active: false});
     expect(view.text()).not.toContain("/ordinary/");
+  });
+  it("can read a draft document path again after the temporary tooltip projection expires", async () => {
+    vi.useFakeTimers();
+    try {
+      const read = vi.fn(async () => ({ sourcePath: "/ordinary/notes.md", imageUrl: null, expiresAt: Date.now() / 1000 + 30 }));
+      const view = chip({ name: "notes.md", mediaType: "text/markdown", active: true, readPresentation: read });
+      await flushPromises();
+      expect(view.text()).toContain("/ordinary/notes.md");
+      await vi.advanceTimersByTimeAsync(30001);
+      expect(view.emitted("activate")).toContainEqual([null]);
+      await view.setProps({ active: false });
+      await view.setProps({ active: true });
+      await flushPromises();
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(view.text()).toContain("/ordinary/notes.md");
+      view.unmount();
+    } finally { vi.useRealTimers(); }
   });
   it("renders sent metadata with no reader, path or removable action", () => {
     const view = chip({status: "bound", removable: false});

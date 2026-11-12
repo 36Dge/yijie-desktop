@@ -627,14 +627,15 @@ describe("ChatComposer", () => {
     expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeUndefined();
   });
 
-  it("renders native per-item import stages and exposes removal only for a terminal item", async () => {
+  it("omits import progress while retaining the send guard and terminal recovery", async () => {
     const wrapper = mountComposer({
       attachmentImporting: true,
       attachmentImportAttempt: importEvent("parsing"),
     });
 
-    expect(wrapper.text()).toContain("2 个附件");
-    expect(wrapper.text()).toContain("2 个附件 · 正在解析");
+    expect(wrapper.text()).not.toContain("2 个附件");
+    expect(wrapper.text()).not.toContain("正在解析");
+    expect(wrapper.find(".chat-composer__attachments").exists()).toBe(false);
     expect(wrapper.find('[aria-label="移除失败的附件选择"]').exists()).toBe(false);
     expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
 
@@ -643,7 +644,8 @@ describe("ChatComposer", () => {
       attachmentImportAttempt: importEvent("error_terminal", { sequence: "2" }),
       modelValue: "即使仍有文本也不能发送",
     });
-    expect(wrapper.text()).toContain("无法读取，请移除后重新选择");
+    expect(wrapper.text()).toContain("附件添加失败");
+    expect(wrapper.text()).toContain("请移除后重新选择");
     expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
     await wrapper.get('[aria-label="移除失败的附件选择"]').trigger("click");
     expect(wrapper.emitted("dismiss-attachment-import")).toEqual([

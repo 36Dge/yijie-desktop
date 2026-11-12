@@ -38,7 +38,7 @@ fn normal_docx_preserves_headings_lists_tables_pictures_and_entities() {
         ("word/_rels/document.xml.rels", br#"<Relationships><Relationship Id="image1" Target="media/picture.png"/></Relationships>"#),
         ("word/media/picture.png", &image),
     ]);
-    let p = render(
+    let p = render_chunk(
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         &bytes,
         0,
@@ -66,11 +66,11 @@ fn normal_pptx_uses_relationship_order_instead_of_filename_sort() {
         ("ppt/slides/slide2.xml", br#"<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>Second displayed slide</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"#),
     ]);
     let mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-    let p = render(mime, &bytes, 0, 0, false, 1.0).unwrap();
+    let p = render_chunk(mime, &bytes, 0, 0, false, 1.0).unwrap();
     assert!(p.html.contains("First displayed slide"));
     assert_eq!(p.assets.len(), 1);
     assert_eq!(p.sections.len(), 2);
-    let p = render(mime, &bytes, 1, 0, true, 1.5).unwrap();
+    let p = render_chunk(mime, &bytes, 1, 0, true, 1.5).unwrap();
     assert!(p.html.contains("Second displayed slide"));
     assert!(!p.html.contains("First displayed"));
 }
@@ -84,7 +84,7 @@ fn normal_xlsx_renders_cells_merges_shared_strings_and_cached_formulas() {
         ("xl/styles.xml", b"<styleSheet><cellXfs><xf numFmtId='0'/><xf numFmtId='14'/><xf numFmtId='10'/></cellXfs></styleSheet>"),
         ("xl/worksheets/sheet1.xml", b"<worksheet><sheetData><row r='1'><c r='A1' t='s'><v>0</v></c><c r='C1' s='2'><v>0.25</v></c></row><row r='3'><c r='A3' s='1'><v>1</v></c><c r='B3'><f>1+2</f><v>3</v></c><c r='C3'><f>2+2</f></c></row></sheetData><mergeCells><mergeCell ref='A1:B2'/></mergeCells></worksheet>"),
     ]);
-    let p = render(
+    let p = render_chunk(
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         &bytes,
         0,
@@ -144,10 +144,10 @@ fn normal_docx_long_body_has_bounded_continuation_and_blank_page_is_readable() {
     let doc = format!("<w:document xmlns:w='urn:w'><w:body>{paragraphs}</w:body></w:document>");
     let bytes = office("docx", &[("word/document.xml", doc.as_bytes())]);
     let mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-    let p = render(mime, &bytes, 0, 0, false, 1.0).unwrap();
+    let p = render_chunk(mime, &bytes, 0, 0, false, 1.0).unwrap();
     assert!(p.next.is_some());
     assert!(p.html.len() < TEXT_BUDGET + 4096);
-    let next = render(mime, &bytes, 0, p.next.unwrap(), false, 1.0).unwrap();
+    let next = render_chunk(mime, &bytes, 0, p.next.unwrap(), false, 1.0).unwrap();
     assert!(next.offset > 0);
     assert!(next.previous.is_some());
     let bytes = office(
@@ -157,7 +157,7 @@ fn normal_docx_long_body_has_bounded_continuation_and_blank_page_is_readable() {
             b"<w:document xmlns:w='urn:w'><w:body/></w:document>",
         )],
     );
-    assert!(render(mime, &bytes, 0, 0, false, 1.0)
+    assert!(render_chunk(mime, &bytes, 0, 0, false, 1.0)
         .unwrap()
         .html
         .contains("没有可显示的正文"));
@@ -194,7 +194,7 @@ fn normal_pdf_raster_has_correct_orientation_and_real_graphical_content() {
     let mut bytes = vec![];
     pdf.save_to(&mut bytes).unwrap();
     attachment::validate_pdf_artifact_content(&bytes).unwrap();
-    let p = render("application/pdf", &bytes, 0, 0, false, 1.0).unwrap();
+    let p = render_chunk("application/pdf", &bytes, 0, 0, false, 1.0).unwrap();
     assert!(p.sections.is_empty());
     let png = p
         .pdf
@@ -245,7 +245,7 @@ fn continuous_pdf_has_all_pages_and_bounded_lazy_images() {
     let mut bytes = vec![];
     pdf.save_to(&mut bytes).unwrap();
     attachment::validate_pdf_artifact_content(&bytes).unwrap();
-    let presentation = render("application/pdf", &bytes, 4, 0, false, 1.0).unwrap();
+    let presentation = render_chunk("application/pdf", &bytes, 4, 0, false, 1.0).unwrap();
     assert!(presentation.sections.is_empty());
     assert!(presentation.next.is_none() && presentation.previous.is_none());
     assert_eq!(presentation.html.matches("class=\"pdf-page\"").count(), 7);
@@ -272,20 +272,21 @@ fn continuous_pdf_has_all_pages_and_bounded_lazy_images() {
     assert!(pages.image(7, &live).is_err());
     live.store(false, Ordering::Release);
     assert!(pages.image(0, &live).is_err());
-    // Converting Office to PDF retains its existing page selection semantics.
+    // Office layout uses the same continuous PDF reader.
     let office = render_pdf_page(&bytes, 4, false, 1.0).unwrap();
-    assert_eq!(office.sections.len(), 7);
-    assert_eq!(office.section, 4);
-    assert!(office.pdf.is_none());
+    assert!(office.sections.is_empty());
+    assert_eq!(office.section, 0);
+    assert_eq!(office.html.matches("class=\"pdf-page\"").count(), 7);
+    assert!(office.pdf.is_some());
 }
 
 #[test]
 fn html_keeps_rendering_script_source_and_text_reuses_existing_projection() {
     let html=b"<!doctype html><p id='value'></p><script>document.getElementById('value').textContent='Normal rendered content';</script>";
-    let p = render("text/html", html, 0, 0, false, 1.0).unwrap();
+    let p = render_chunk("text/html", html, 0, 0, false, 1.0).unwrap();
     assert_eq!(p.html.as_bytes(), html);
     assert_eq!(p.kind, "html");
-    let p = render("text/plain", b"normal & readable", 0, 0, true, 1.0).unwrap();
+    let p = render_chunk("text/plain", b"normal & readable", 0, 0, true, 1.0).unwrap();
     assert!(p.html.contains("normal &amp; readable"));
     assert!(!p.partial);
 }
@@ -293,7 +294,7 @@ fn html_keeps_rendering_script_source_and_text_reuses_existing_projection() {
 #[test]
 fn markdown_sidebar_renders_document_structure_and_read_only_reference_labels() {
     let source = "# 旅行指南\n\n> 湖光山色\n\n## 城市概览\n\n**旅行关键词：** 西湖与[路线](https://example.org/guide)。\n\n| 季节 | 景点 |\n| --- | --- |\n| 春季 | 苏堤 |\n\n1. 茶园\n2. 老街\n\n- [ ] 带伞\n\n```txt\n# 原样保留\n```\n\n示例标记 <abbr>KM</abbr>。";
-    let view = render("text/markdown", source.as_bytes(), 0, 0, false, 1.0).unwrap();
+    let view = render_chunk("text/markdown", source.as_bytes(), 0, 0, false, 1.0).unwrap();
     assert_eq!(view.kind, "text");
     assert!(!view.partial);
     let html = &view.html;
@@ -314,18 +315,18 @@ fn markdown_sidebar_renders_document_structure_and_read_only_reference_labels() 
         assert!(html.contains(markup), "missing {markup}");
     }
     assert!(!html.contains("https://example.org/guide"));
-    let plain = render("text/plain", source.as_bytes(), 0, 0, false, 1.0).unwrap();
+    let plain = render_chunk("text/plain", source.as_bytes(), 0, 0, false, 1.0).unwrap();
     assert!(plain.html.contains("<pre># 旅行指南"));
 }
 
 #[test]
 fn normal_document_markdown_continuation_reaches_the_remaining_text() {
     let source = "# 阅读清单\n\n".to_owned() + &"- 待办\n".repeat(4_001) + "\n结尾标记\n";
-    let view = render("text/markdown", source.as_bytes(), 0, 0, true, 1.0).unwrap();
+    let view = render_chunk("text/markdown", source.as_bytes(), 0, 0, true, 1.0).unwrap();
     assert!(!view.partial);
     assert!(view.html.contains("<h1>阅读清单</h1>"));
     assert!(view.html.contains("<li>待办</li>"));
-    let next = render(
+    let next = render_chunk(
         "text/markdown",
         source.as_bytes(),
         0,
@@ -348,7 +349,7 @@ fn normal_document_csv_continuation_preserves_quoted_text_and_later_rows() {
     let mut offset = 0;
     let mut count = 0;
     loop {
-        let p = render("text/csv", text.as_bytes(), 0, offset, false, 1.0).unwrap();
+        let p = render_chunk("text/csv", text.as_bytes(), 0, offset, false, 1.0).unwrap();
         if count == 0 {
             assert!(p.html.contains("00000"));
             assert!(p.html.contains("city,0"));
@@ -366,7 +367,7 @@ fn normal_document_csv_continuation_preserves_quoted_text_and_later_rows() {
     let long = format!("id,note\n00017,\"{} END\"\n", "杭州".repeat(20000));
     let mut offset = 0;
     loop {
-        let p = render("text/csv", long.as_bytes(), 0, offset, false, 1.0).unwrap();
+        let p = render_chunk("text/csv", long.as_bytes(), 0, offset, false, 1.0).unwrap();
         assert!(p.html.contains("按原始 CSV 分段展示"));
         match p.next {
             Some(next) => offset = next,
@@ -386,6 +387,141 @@ fn normal_document_office_pdf_outline_is_accepted() {
     let bytes = std::fs::read(path).unwrap();
     assert!(attachment::validate_pdf_artifact_content(&bytes).is_ok());
     let pages = render_pdf_page(&bytes, 1, false, 1.0).unwrap();
-    assert_eq!(pages.sections.len(), 2);
-    assert_eq!(pages.section, 1);
+    assert!(pages.sections.is_empty());
+    assert_eq!(pages.html.matches("class=\"pdf-page\"").count(), 2);
+}
+
+fn read_continuously(p: &Presentation) -> Vec<String> {
+    use std::sync::atomic::AtomicBool;
+    assert!(p.sections.is_empty());
+    assert!(p.next.is_none() && p.previous.is_none());
+    assert_eq!((p.section, p.offset), (0, 0));
+    let pages = p.continuous.as_ref().unwrap();
+    let live = AtomicBool::new(true);
+    let mut chunks = Vec::new();
+    for index in 0..100 {
+        let page = pages.page(index, &live).unwrap();
+        assert_eq!(page.index, index);
+        chunks.push(page.html);
+        let (count, bytes) = pages.cache_usage();
+        assert!(count <= 4 && bytes <= 16 * 1024 * 1024);
+        if !page.more {
+            // Returning to an evicted first chunk restores the same content.
+            assert_eq!(pages.page(0, &live).unwrap().html, chunks[0]);
+            return chunks;
+        }
+    }
+    panic!("ordinary fixture did not reach its final chunk");
+}
+
+#[test]
+fn continuous_pptx_reaches_every_slide_in_relationship_order_and_its_images() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let image = attachment::test_image_bytes("png");
+    let bytes = office("pptx", &[
+        ("ppt/presentation.xml", br#"<p:presentation xmlns:p="urn:p" xmlns:r="urn:r"><p:sldIdLst><p:sldId r:id="first"/><p:sldId r:id="second"/></p:sldIdLst></p:presentation>"#),
+        ("ppt/_rels/presentation.xml.rels", br#"<Relationships><Relationship Id="first" Target="slides/slide10.xml"/><Relationship Id="second" Target="slides/slide2.xml"/></Relationships>"#),
+        ("ppt/slides/slide10.xml", br#"<p:sld xmlns:p="urn:p" xmlns:a="urn:a"><p:cSld><p:spTree><p:sp><a:p><a:t>First slide</a:t></a:p></p:sp></p:spTree></p:cSld></p:sld>"#),
+        ("ppt/slides/slide2.xml", br#"<p:sld xmlns:p="urn:p" xmlns:a="urn:a" xmlns:r="urn:r"><p:cSld><p:spTree><p:sp><a:p><a:t>Last slide</a:t></a:p></p:sp><p:pic><a:blip r:embed="picture"/></p:pic></p:spTree></p:cSld></p:sld>"#),
+        ("ppt/slides/_rels/slide2.xml.rels", br#"<Relationships><Relationship Id="picture" Target="../media/picture.png"/></Relationships>"#),
+        ("ppt/media/picture.png", &image),
+    ]);
+    // A saved selection from the old reader must not omit the first slide.
+    let p = render(
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        &bytes,
+        1,
+        0,
+        false,
+        1.0,
+    )
+    .unwrap();
+    let chunks = read_continuously(&p);
+    assert_eq!(chunks.len(), 2);
+    assert!(chunks[0].contains("<h2>第 1 页</h2>") && chunks[0].contains("First slide"));
+    assert!(chunks[1].contains("<h2>第 2 页</h2>") && chunks[1].contains("Last slide"));
+    assert!(chunks[1].contains("yijie-document://preview/chunk/1/image/0.png"));
+    let pages = p.continuous.unwrap();
+    let live = AtomicBool::new(true);
+    assert!(image::load_from_memory(&pages.image(1, "image/0.png", &live).unwrap()).is_ok());
+    live.store(false, Ordering::Release);
+    assert!(pages.page(0, &live).is_err());
+    assert!(pages.image(1, "image/0.png", &live).is_err());
+}
+
+#[test]
+fn continuous_text_markdown_csv_and_docx_reach_the_tail_without_manual_navigation() {
+    for mime in [
+        "text/plain",
+        "text/markdown",
+        "application/json",
+        "text/csv",
+    ] {
+        let source = match mime {
+            "application/json" => format!("[\"{}TAIL\"]", "ordinary text ".repeat(9000)),
+            "text/csv" => {
+                "id,name\n".to_owned()
+                    + &(0..520)
+                        .map(|i| format!("{i},city{i}\n"))
+                        .collect::<String>()
+                    + "999,TAIL\n"
+            }
+            _ => "# Heading\n\n".to_owned() + &"ordinary paragraph\n\n".repeat(9000) + "TAIL",
+        };
+        let p = render(mime, source.as_bytes(), 0, 16000, true, 1.2).unwrap();
+        let chunks = read_continuously(&p);
+        assert!(
+            chunks.len() > 4,
+            "fixture must exercise cache eviction: {mime}"
+        );
+        assert!(chunks.last().unwrap().contains("TAIL"));
+    }
+    let body = (0..2000)
+        .map(|i| {
+            format!(
+                "<w:p><w:r><w:t>Paragraph {i} {}</w:t></w:r></w:p>",
+                "ordinary text ".repeat(20)
+            )
+        })
+        .collect::<String>();
+    let xml = format!("<w:document xmlns:w='urn:w'><w:body>{body}</w:body></w:document>");
+    let bytes = office("docx", &[("word/document.xml", xml.as_bytes())]);
+    let p = render(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        &bytes,
+        0,
+        100,
+        false,
+        1.0,
+    )
+    .unwrap();
+    let chunks = read_continuously(&p);
+    assert!(chunks.len() > 1);
+    assert!(chunks[0].contains("Paragraph 0 "));
+    assert!(chunks.last().unwrap().contains("Paragraph 1999 "));
+    assert!(chunks.iter().all(|body| body.len() <= TEXT_BUDGET + 512));
+}
+
+#[test]
+fn continuous_xlsx_reaches_later_rows_columns_and_sheets() {
+    let bytes = office("xlsx", &[
+        ("xl/workbook.xml", br#"<workbook xmlns:r="urn:r"><sheets><sheet name="First" r:id="one"/><sheet name="Last" r:id="two"/></sheets></workbook>"#),
+        ("xl/_rels/workbook.xml.rels", br#"<Relationships><Relationship Id="one" Target="worksheets/sheet1.xml"/><Relationship Id="two" Target="worksheets/sheet2.xml"/></Relationships>"#),
+        ("xl/worksheets/sheet1.xml", br#"<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>First cell</t></is></c></row><row r="151"><c r="AZ151" t="inlineStr"><is><t>Later column and row</t></is></c></row></sheetData></worksheet>"#),
+        ("xl/worksheets/sheet2.xml", br#"<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Last sheet</t></is></c></row></sheetData></worksheet>"#),
+    ]);
+    let p = render(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        &bytes,
+        1,
+        1,
+        false,
+        1.0,
+    )
+    .unwrap();
+    let chunks = read_continuously(&p);
+    assert_eq!(chunks.len(), 5);
+    assert!(chunks[0].contains("<h2>First</h2>") && chunks[0].contains("First cell"));
+    assert!(chunks[3].contains("Later column and row"));
+    assert!(chunks[4].contains("<h2>Last</h2>") && chunks[4].contains("Last sheet"));
 }

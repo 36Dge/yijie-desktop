@@ -1432,6 +1432,31 @@ impl ConversationApplication {
             .await
     }
 
+    pub(super) async fn bound_image_presentation(
+        &self,
+        session: Uuid,
+        attachment: Uuid,
+    ) -> Result<Result<super::document_preview_native::StoredDocument, ReadyFileReadError>, ChatError>
+    {
+        self.database
+            .call(move |repo| repo.bound_image_presentation(session, attachment))
+            .await
+    }
+
+    pub(super) async fn bound_image_presentation_current(
+        &self,
+        session: Uuid,
+        attachment: Uuid,
+        revision: String,
+        now: i64,
+    ) -> Result<bool, ChatError> {
+        self.database
+            .call(move |repo| {
+                repo.bound_image_presentation_current(session, attachment, revision, now)
+            })
+            .await
+    }
+
     pub(super) async fn document_preview_current(
         &self,
         source: super::document_preview_native::DocumentSource,

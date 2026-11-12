@@ -9,6 +9,7 @@ import {
   parseArtifactPreviewOpenResponse,
   parseArtifactPreviewReleaseResponse,
   parseArtifactSaveResponse,
+  parseArtifactCopyResponse,
 } from "./chat-artifact-native";
 
 const REQUEST_ID = "019c1a00-0000-7000-8000-000000000061";
@@ -41,7 +42,7 @@ function validator(definition: string): ValidateFunction {
 }
 
 describe("private Artifact native boundary", () => {
-  it("keeps the three commands and stable errors closed", () => {
+  it("keeps the image commands and stable errors closed", () => {
     expect(schema["x-yijie-command-names"]).toEqual(ARTIFACT_NATIVE_COMMAND_NAMES);
     expect(schema["x-yijie-error-codes"]).toEqual(ARTIFACT_NATIVE_ERROR_CODES);
     expect(schema["x-yijie-preview-scheme"]).toBe("yijie-artifact-preview");
@@ -49,7 +50,7 @@ describe("private Artifact native boundary", () => {
 
   it("accepts only identity fields in every request payload", () => {
     const request = artifactNativeRequest(CONTEXT_ID, IDENTITY, REQUEST_ID);
-    for (const definition of ["openRequest", "releaseRequest", "saveRequest"]) {
+    for (const definition of ["openRequest", "releaseRequest", "saveRequest", "copyRequest"]) {
       const validate = validator(definition);
       expect(validate(request), JSON.stringify(validate.errors)).toBe(true);
       for (const [field, value] of [
@@ -65,6 +66,13 @@ describe("private Artifact native boundary", () => {
         expect(validate(leaked), field).toBe(false);
       }
     }
+  });
+
+  it("validates the additive content-free copy response", () => {
+    const response = { schemaVersion: 1, requestId: REQUEST_ID, data: { status: "copied" } };
+    expect(validator("copyResponse")(response)).toBe(true);
+    expect(parseArtifactCopyResponse(response)).toEqual({ status: "copied" });
+    expect(() => parseArtifactCopyResponse({ ...response, data: { status: "cancelled" } })).toThrow();
   });
 
   it("parses only opaque preview and content-free release/save results", () => {

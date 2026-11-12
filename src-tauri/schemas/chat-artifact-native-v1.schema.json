@@ -2,14 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "com.yijie.desktop/chat-artifact-native-v1.schema.json",
   "title": "Yijie Desktop Private Artifact Native Boundary v1",
-  "description": "Identity-only image preview/save intent and content-free results. Content authority remains native SQLCipher storage.",
+  "description": "Identity-only image preview/save/copy intent and content-free results. Content authority remains native SQLCipher storage. Copy writes an authorized ready image to the macOS pasteboard; no paths or bytes cross IPC.",
   "x-yijie-schema-version": 1,
   "x-yijie-save-extension-aliases": {"image/jpeg": ["jpg", "jpeg"]},
   "x-yijie-preview-scheme": "yijie-artifact-preview",
   "x-yijie-command-names": [
     "chat_open_artifact_image_preview_v1",
     "chat_release_artifact_image_preview_v1",
-    "chat_save_artifact_image_v1"
+    "chat_save_artifact_image_v1",
+    "chat_copy_artifact_image_v1"
   ],
   "x-yijie-error-codes": [
     "artifact_native_invalid_request",
@@ -41,6 +42,10 @@
     "chat_save_artifact_image_v1": {
       "request": "#/$defs/saveRequest",
       "response": "#/$defs/saveResponse"
+    },
+    "chat_copy_artifact_image_v1": {
+      "request": "#/$defs/copyRequest",
+      "response": "#/$defs/copyResponse"
     }
   },
   "$defs": {
@@ -72,6 +77,23 @@
     "openRequest": { "$ref": "#/$defs/identityRequest" },
     "releaseRequest": { "$ref": "#/$defs/identityRequest" },
     "saveRequest": { "$ref": "#/$defs/identityRequest" },
+    "copyRequest": { "$ref": "#/$defs/identityRequest" },
+    "copyResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": { "status": { "const": "copied" } }
+    },
+    "copyResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "data"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "data": { "$ref": "#/$defs/copyResult" }
+      }
+    },
     "previewUrl": {
       "type": "string",
       "pattern": "^yijie-artifact-preview://localhost/v1/[A-Za-z0-9_-]{43}$"

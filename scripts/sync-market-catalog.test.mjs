@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { syncMarketCatalog } from "./market-catalog-source.mjs";
+import { developmentCatalogSource } from "./development-catalog-source.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const catalogBytes = readFileSync(path.join(root, "../yijie-connectors/catalog/market-catalog.v1.json"));
@@ -26,6 +27,15 @@ function fixture() {
 const receipt = fixture => path.join(fixture.desktopRoot, "contracts/market-catalog.candidate.json");
 
 describe("catalog generation provenance", () => {
+  it("retains the exact qualified catalog for development after the sibling advances", () => {
+    const f = fixture();
+    syncMarketCatalog({ ...f, immutableCommit: f.first });
+    const advanced = f.advance();
+    const retained = developmentCatalogSource(f.desktopRoot, f.connectorsRoot, f.first);
+    expect(syncMarketCatalog({ ...f, connectorsRoot: retained, immutableCommit: f.first, check: true }).baseCommit).toBe(f.first);
+    expect(execFileSync("git", ["-C", f.connectorsRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim()).toBe(advanced);
+    expect(developmentCatalogSource(f.desktopRoot, f.connectorsRoot, f.first)).toBe(retained);
+  });
   it("keeps both checks and no-op sync reproducible after an unrelated commit", () => {
     const f = fixture(); syncMarketCatalog(f);
     const original = readFileSync(receipt(f)); const modifiedAt = statSync(receipt(f)).mtimeMs;
@@ -66,8 +76,13 @@ describe("catalog generation provenance", () => {
   it("checks real receipts without changing catalog, pins or source hashes", () => {
     const names = ["market-catalog.json", "market-catalog.candidate.json", "market-catalog-feat164.candidate.json"];
     const before = names.map(name => readFileSync(path.join(root, "contracts", name)));
-    syncMarketCatalog({desktopRoot:root, connectorsRoot:path.join(root, "../yijie-connectors"), check:true});
-    syncMarketCatalog({desktopRoot:root, connectorsRoot:path.join(root, "../yijie-connectors"), check:true, immutableCommit:"de1fcdf8dabd9b08983bbf907f079db41da437fe"});
+    const sibling = path.join(root, "../yijie-connectors");
+    const head = execFileSync("git", ["-C", sibling, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    const qualified = JSON.parse(before[2]).source_commit;
+    syncMarketCatalog({desktopRoot:root, connectorsRoot:sibling, check:true});
+    const retained = developmentCatalogSource(root, sibling, qualified);
+    syncMarketCatalog({desktopRoot:root, connectorsRoot:retained, check:true, immutableCommit:qualified});
+    expect(execFileSync("git", ["-C", sibling, "rev-parse", "HEAD"], { encoding: "utf8" }).trim()).toBe(head);
     expect(names.map(name => readFileSync(path.join(root, "contracts", name)))).toEqual(before);
   });
 });

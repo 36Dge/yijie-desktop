@@ -56,6 +56,17 @@ App 或后续任务子进程；标准 bundler 的输出限于 `.local/developmen
 
 ## 检查与兼容
 
+2026-11-11 图片输入展示验收期间，固定启动被 FEAT-164 catalog 的 sibling HEAD 校验阻断。
+连接器 `37552bec1c31bca95457af7145e0dad206df1f8a` 相对固定
+`2d2351b49bc7ca7bfe53e6dfe090c2bc0d949d65` 仅更新 worker 来源锁，catalog 字节相同。
+开发入口现按既有 retained expert source 方式，必要时在
+`.local/development/catalog-source/<固定提交>` 保留精确 detached worktree。
+原 `syncMarketCatalog` 的 qualified HEAD、已提交字节、输出与来源记录校验全部保持；
+不改 catalog pin/receipt，不回退活动 sibling，不改变 worker 构建来源。非开发入口保持原规则。
+本地 deployment interface 的分类为 `semantic`（兼容地改变开发源码位置选择）；
+图片预览 IPC 扩展自身为 `additive`，本任务整体取最高 `semantic`。
+旧界面与 Native 配对回滚无需数据迁移，若 sibling 已前进，旧开发入口仍会报告原来源不匹配。
+
 2026-11-03 执行循环修复：固定入口改用 canonical `execution-progress-v1` Runtime，旧产物保留。普通聊天直接配置 Runtime 已有的 `features.rollout_budget`（25 万加权 token，未缓存输入加输出），作用域是一次加载的根会话树，不是每轮额度或人民币封顶；专家长任务和受限草案不强加此默认。上下文压缩、上下文提醒、显式 Goal 预算保持各自原生语义。连续相同计划由 Runtime 转入已有最多两次无工具补答，客户端只显示原生终态及会话预算原因，不新增执行、计数或自动续问逻辑。Runtime/Contracts/Host 来源经本地不可变提交固定后才可正常重启激活；真实 Kimi 效果不由本机协议测试冒充。
 
 启动环境从白名单重建，不继承旧 generation、观察代理、模型 URL、Home、凭据正文或 TAURI_CONFIG 覆盖。只选择已安装且满足 go.mod 的工具链，离线构建。原始数据目录和数据库必须已存在，不能因配置遗漏创建空历史。启动前使用 Infra 日常会话入口复用/启动原服务，再执行原 authenticated workflow ready-only 检查。
@@ -146,3 +157,11 @@ native／interaction构建记录通过原 `--freeze` 入口配对当前已提交
 恢复后固定 `start-ui` 的全部启动检查和标准开发构建通过，使用原日常Homes打开客户端。
 真实Kimi问答验证已完成，详见Chat工作区pattern的2026-11-10记录。此轮未提交或发布这些改动，
 未运行全量回归；来源同步证据及启动日志位于 `.local/request-user-input-20261110/`。
+
+## FEAT-172 内置图片 MCP
+
+固定日常入口自动装配 `yijie_media.generate_image`，不再读取 `host-images.json`，不使用 `images-enable` / `images-pause` 或 `--host-images`。原生图片开关固定关闭，Runtime 仍为已固定的原生工具/搜索版本。
+
+未选择专家时可直接请求生图；选定专家后仅使用该专家能力。专家、授权或工具不可用，输入不支持，以及执行失败或结果未知，都不自动切换易界内置生图；保留专家选择并展示原状态。用户可自行更改/移除专家后发起新请求。
+
+当前非公开本机部署由运营方在受管 macOS Keychain 预置 Seedream 凭据。Host 仅非交互读取，缺凭据或读取需要授权时返回内置服务不可用，不向用户索取供应商 Key。没有新增凭据数据库或公网代理服务；公开分发另行设计。媒体调用不依赖文档功能开关，图片沿现有 Artifact 提交、预览、保存流程交付。

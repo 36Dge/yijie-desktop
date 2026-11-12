@@ -132,16 +132,36 @@ it("releases content in the background and reauthorizes on return", async () => 
   } finally {w.unmount();}
 });
 
-it("shows a continuous PDF without page selection or pagination controls", async () => {
-  native.run.mockImplementation(async (_context, action) => ({status:"ready", document:action.action==="open" ? {...document, kind:"pdf", sections:[]} : null}));
+it.each(["pdf", "pptx", "docx", "xlsx", "text", "html"])("keeps %s previews free of page, sheet and segment navigation", async kind => {
+  // Even stale metadata must not reintroduce the old pagination controls.
+  native.run.mockImplementation(async (_context, action) => ({status:"ready", document:action.action==="open" ? {...document, kind, sections:[{id:0,label:"第 1 页"},{id:1,label:"第 2 页"}], nextOffset:1, previousOffset:0} : null}));
   const w=create(); try {
     await flushPromises(); w.vm.openFile({...file("book"), name:"book.pdf", mediaType:"application/pdf"}); await flushPromises();
     const open=native.run.mock.calls.find(c=>c[1].action==="open")![1];
     native.events.get("chat-document-preview-loaded")!({payload:{viewId:open.viewId}}); await flushPromises();
     expect(w.text()).toContain("只读内容已加载");
     expect(w.find('select').exists()).toBe(false);
-    expect(w.text()).not.toContain("下一页");
+    for (const text of ["下一页", "第 1 页", "上一段", "下一段"]) expect(w.text()).not.toContain(text);
     expect(w.find('[aria-label="文件路径"]').exists()).toBe(true);
+  } finally { w.unmount(); }
+});
+
+it("retains Office reading modes without adding pagination in sidebar or fullscreen", async () => {
+  native.run.mockImplementation(async (_context, action) => ({status:"ready", document:action.action==="open" ? {...document, kind:"pptx", viewMode:action.location.viewMode ?? "content", availableModes:["layout","content"], sections:[], saveSupported:true} : null}));
+  const w=create(); try {
+    await flushPromises(); w.vm.openFile({...file("slides"),name:"slides.pptx",mediaType:"application/vnd.openxmlformats-officedocument.presentationml.presentation"}); await flushPromises();
+    let open=native.run.mock.calls.filter(call=>call[1].action==="open").pop()![1];
+    native.events.get("chat-document-preview-loaded")!({payload:{viewId:open.viewId}}); await flushPromises();
+    expect(w.findAll("select")).toHaveLength(1);
+    await w.get('[aria-label="阅读方式"]').setValue("layout"); await flushPromises();
+    open=native.run.mock.calls.filter(call=>call[1].action==="open").pop()![1];
+    expect(open.location).toMatchObject({viewMode:"layout",section:0,offset:0});
+    native.events.get("chat-document-preview-loaded")!({payload:{viewId:open.viewId}}); await flushPromises();
+    await w.get('[aria-label="进入全屏"]').trigger("click"); await flushPromises();
+    expect(w.find('[aria-label="页码"]').exists()).toBe(false);
+    expect(w.find('[aria-label="工作表"]').exists()).toBe(false);
+    expect(w.find('[aria-label="文件路径"]').exists()).toBe(true);
+    expect(w.find('[aria-label="另存为"]').exists()).toBe(true);
   } finally { w.unmount(); }
 });
 
@@ -210,16 +230,13 @@ it("keeps the same scope's tabs through expiring Native context and reauthorizes
 it("hides the Native child for an overlapping modal and restores it after close", async () => {
   const w=create(); const overlay=globalThis.document.createElement("section");
   overlay.setAttribute("role","dialog"); overlay.setAttribute("aria-modal","true");
-  const settle=()=>new Promise(resolve=>setTimeout(resolve,35));
+  const visible=(value: boolean)=>vi.waitFor(()=>expect(native.run.mock.calls.filter(c=>c[1].action==="resize").slice(-1)[0]?.[1].visible).toBe(value));
   try {
     await flushPromises();w.vm.openFile(file("one"));await flushPromises();
     const open=native.run.mock.calls.find(c=>c[1].action==="open")![1];
-    native.events.get("chat-document-preview-loaded")!({payload:{viewId:open.viewId}});await flushPromises();await settle();
-    expect(native.run.mock.calls.filter(c=>c[1].action==="resize").slice(-1)[0]![1].visible).toBe(true);
-    globalThis.document.body.appendChild(overlay);await settle();
-    expect(native.run.mock.calls.filter(c=>c[1].action==="resize").slice(-1)[0]![1].visible).toBe(false);
-    overlay.remove();await settle();
-    expect(native.run.mock.calls.filter(c=>c[1].action==="resize").slice(-1)[0]![1].visible).toBe(true);
+    native.events.get("chat-document-preview-loaded")!({payload:{viewId:open.viewId}});await flushPromises();await visible(true);
+    globalThis.document.body.appendChild(overlay);await visible(false);
+    overlay.remove();await visible(true);
     expect(w.findAll('[role="tab"]')).toHaveLength(1);
   } finally {overlay.remove();w.unmount();}
 });
@@ -361,25 +378,6 @@ it("keeps the loaded document visible and in position through splitter hover, dr
     await frame();
     expect(calls().every(action => action.action === "resize" && action.visible && action.viewId === open.viewId)).toBe(true);
   } finally { tooltip.remove(); w.unmount(); }
-});
-
-it("keeps the worksheet and segment controls when there is more content to read", async () => {
-  const sheets = [{ id: 0, label: "春季" }, { id: 1, label: "夏季" }];
-  native.run.mockImplementation(async (_context, action) => ({
-    document: action.action === "open" ? { ...document, kind: "xlsx", sections: sheets, section: action.location.section, nextOffset: 10 } : null,
-    position: null,
-  }));
-  const w = create();
-  try {
-    w.vm.openFile(file("sheets")); await flushPromises();
-    const open = native.run.mock.calls.find(call => call[1].action === "open")![1];
-    native.events.get("chat-document-preview-loaded")!({ payload: { viewId: open.viewId } }); await flushPromises();
-    expect(w.find('[aria-label="阅读缩放"]').exists()).toBe(false);
-    expect(w.get('[aria-label="阅读选项"]').text()).toContain("下一段");
-    await w.get('[aria-label="工作表"]').setValue("1"); await flushPromises();
-    const latestOpen = native.run.mock.calls.filter(call => call[1].action === "open").pop();
-    expect(latestOpen?.[1].location.section).toBe(1);
-  } finally { w.unmount(); }
 });
 
 it("switches an advertised document layout to content using the same authorized source", async () => {
@@ -559,7 +557,7 @@ it("shows the authorized full path only when the path control is opened", async 
   } finally {w.unmount();}
 });
 
-it("keeps the Native document visible while the path popup stays in the header area", async () => {
+it("keeps the Native document visible while the path tooltip stays in the header area", async () => {
   const rootBounds={x:0,y:0,width:1180,height:760,top:0,left:0,right:1180,bottom:760,toJSON:()=>({})};
   vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(function(this:HTMLElement) {
     if (this.classList.contains('document-sidebar__viewport')) return {...rootBounds,x:844,y:112,width:336,height:648,left:844,top:112,right:1180,bottom:760};
@@ -576,6 +574,7 @@ it("keeps the Native document visible while the path popup stays in the header a
     await vi.waitFor(()=>expect(native.run.mock.calls.some(call=>call[1].action==='resize'&&call[1].visible)).toBe(true));
     const start=native.run.mock.calls.length;
     await w.get('[aria-label="文件路径"]').trigger('focus'); await flushPromises();
+    expect(w.getComponent({name:'ChatDocumentToolbar'}).findComponent({name:'Tooltip'}).exists()).toBe(true);
     const popover=w.getComponent({name:'ChatDocumentToolbar'}).findComponent({name:'Popover'});
     expect(popover.props('placement')).toBe('top-end');
     expect(popover.props('flip')).toBe(false);

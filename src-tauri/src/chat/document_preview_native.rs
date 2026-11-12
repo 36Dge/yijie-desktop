@@ -124,25 +124,6 @@ enum Action {
     Close { view_id: Uuid },
 }
 impl Action {
-    fn available_in_media_profile(&self, file_candidate: bool) -> bool {
-        // The fixed daily client can read conversation outputs. Admission of
-        // candidate attachments and the associated storage migration stay separate.
-        file_candidate
-            || super::document_runtime::enabled()
-            || !matches!(
-                self,
-                Self::Open {
-                    source: DocumentSource::Attachment { .. },
-                    ..
-                } | Self::Save {
-                    source: DocumentSource::Attachment { .. },
-                    ..
-                } | Self::Locate {
-                    source: DocumentSource::Attachment { .. },
-                    ..
-                }
-            )
-    }
     fn view_id(&self) -> Uuid {
         match *self {
             Self::Locate { view_id, .. }
@@ -315,12 +296,10 @@ pub async fn chat_document_preview_v1(
     }
     let request: Request =
         serde_json::from_value(request).map_err(|_| fail(Code::InvalidRequest))?;
-    if !request
-        .payload
-        .available_in_media_profile(super::artifact_media::files_enabled())
-    {
-        return Err(fail(Code::Forbidden));
-    }
+    // The media profile may read already-bound conversation attachments through
+    // read_source's ReadSessions, owner/tenant/message binding, TTL and digest
+    // checks. New-file admission/migration and optional Office layout tooling
+    // have independent gates; neither is authority for reading saved history.
     if request.schema_version != 1
         || request.request_id.is_nil()
         || request.context_id.is_nil()
@@ -867,6 +846,8 @@ mod platform {
         let html = p.html.into_bytes();
         let assets = p.assets;
         let pdf = p.pdf;
+        let continuous = p.continuous;
+        let resource_continuous = continuous.clone();
         let video = p.kind == "video";
         let readonly = format!(
             r#"(() => {{
@@ -885,7 +866,7 @@ window.addEventListener('load',()=>window.scrollTo({},{}),{{once:true}});
             location.scroll_y.min(10_000_000.0)
         );
         let load_app = app.clone();
-        let view = wry::WebViewBuilder::new()
+        let mut builder = wry::WebViewBuilder::new()
             .with_incognito(true)
             .with_devtools(false)
             .with_focused(false)
@@ -905,6 +886,29 @@ window.addEventListener('load',()=>window.scrollTo({},{}),{{once:true}});
                 move |_, request, responder| {
                     let uri = request.uri().to_string();
                     if resource_live.load(Ordering::Acquire) && request.method() == "GET" {
+                        if let Some((pages, index, key)) =
+                            resource_continuous.as_ref().and_then(|pages| {
+                                let (index, key) = uri
+                                    .strip_prefix("yijie-document://preview/chunk/")?
+                                    .split_once('/')?;
+                                Some((pages.clone(), index.parse::<usize>().ok()?, key.to_owned()))
+                            })
+                        {
+                            let live = resource_live.clone();
+                            tauri::async_runtime::spawn_blocking(move || {
+                                let body = pages.image(index, &key, &live).unwrap_or_default();
+                                responder.respond(resource_response(
+                                    "image/png",
+                                    if live.load(Ordering::Acquire) {
+                                        body
+                                    } else {
+                                        vec![]
+                                    },
+                                    false,
+                                ));
+                            });
+                            return;
+                        }
                         if let Some((pages, index)) = pdf.as_ref().and_then(|pages| {
                             uri.strip_prefix("yijie-document://preview/pdf/page-")
                                 .and_then(|path| path.strip_suffix(".png"))
@@ -971,7 +975,72 @@ window.addEventListener('load',()=>window.scrollTo({},{}),{{once:true}});
                     });
                 }
             })
-            .with_url(root)
+            .with_url(root);
+        if let Some(pages) = continuous {
+            // This closed bridge exists only on our generated content reader.
+            // It can read a discovered chunk of this view's admitted source;
+            // supplied HTML/media/PDF never receives an IPC handler.
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct ReadPage {
+                page: usize,
+            }
+            let page_app = app.clone();
+            let page_live = live.clone();
+            let busy = Arc::new(AtomicBool::new(false));
+            builder = builder
+                .with_initialization_script(format!(
+                    "window.__yijieDocumentRestore={{x:{},y:{}}};",
+                    location.scroll_x, location.scroll_y
+                ))
+                .with_ipc_handler(move |request| {
+                    if request.uri().to_string() != root
+                        || request.body().len() > 64
+                        || !page_live.load(Ordering::Acquire)
+                    {
+                        return;
+                    }
+                    let Ok(ReadPage { page: index }) = serde_json::from_str(request.body()) else {
+                        return;
+                    };
+                    if busy
+                        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                        .is_err()
+                    {
+                        return;
+                    }
+                    let (pages, live, busy, app) = (
+                        pages.clone(),
+                        page_live.clone(),
+                        busy.clone(),
+                        page_app.clone(),
+                    );
+                    tauri::async_runtime::spawn_blocking(move || {
+                        let payload = pages
+                            .page(index, &live)
+                            .ok()
+                            .and_then(|page| serde_json::to_string(&page).ok())
+                            .unwrap_or_else(|| format!("{{\"index\":{index},\"error\":true}}"));
+                        if live.load(Ordering::Acquire) {
+                            let _ = app.run_on_main_thread(move || {
+                                CURRENT.with(|state| {
+                                    if let Some(view) = state.borrow().as_ref().filter(|view| {
+                                        view.id == id
+                                            && view.context == context
+                                            && view.live.load(Ordering::Acquire)
+                                    }) {
+                                        let _ = view.webview.evaluate_script(&format!(
+                                            "window.__yijieDocumentPage({payload})"
+                                        ));
+                                    }
+                                });
+                            });
+                        }
+                        busy.store(false, Ordering::Release);
+                    });
+                });
+        }
+        let view = builder
             .build_as_child(&parent)
             .map_err(|_| Code::Unavailable)?;
         CURRENT.with(|s| {
@@ -1005,11 +1074,6 @@ mod tests {
         .unwrap();
         for value in fixtures["requests"].as_array().unwrap() {
             let request: Request = serde_json::from_value(value.clone()).unwrap();
-            assert!(request.payload.available_in_media_profile(true));
-            assert_eq!(
-                request.payload.available_in_media_profile(false),
-                value["payload"]["source"]["kind"] != "attachment"
-            );
             assert_eq!(serde_json::to_value(request).unwrap(), *value);
         }
     }

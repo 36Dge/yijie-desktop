@@ -254,11 +254,6 @@ function keyTab(event: KeyboardEvent, id: string) {
   if (target) { event.preventDefault(); focusTab(target); }
   if (event.key === "Delete") { event.preventDefault(); closeTab(id); }
 }
-function navigate(section: number, offset: number) {
-  if (!active.value) return;
-  active.value.location = { ...active.value.location, section, offset, scrollX: 0, scrollY: 0 };
-  reload(false);
-}
 function selectViewMode(mode: "layout" | "content") {
   if (!active.value || !metadata.value?.availableModes?.includes(mode)) return;
   active.value.location = { ...active.value.location, viewMode: mode, section: 0, offset: 0, scrollX: 0, scrollY: 0 };
@@ -348,5 +343,5 @@ onMounted(async () => {
 });
 watch(activeViewport, (value, previous) => { if (previous) resizeObserver?.unobserve(previous); if (value) resizeObserver?.observe(value); });
 onBeforeUnmount(() => { disposed = true; epoch++; queued = null; void detach(false); resizeObserver?.disconnect(); mutationObserver?.disconnect(); themeObserver?.disconnect(); unlisteners.forEach(stop => stop()); document.removeEventListener("visibilitychange", visibility); window.removeEventListener("blur", cancelDrag); window.removeEventListener("keydown", fullscreenKey); if (frame !== null) cancelAnimationFrame(frame); });
-return { root, panel, viewport, media, mediaViewport, closeMedia, syncViewport, tabStrip, addButton, separator, opened, fullscreen, fullscreenTarget, state, active, geometry, metadata, phase, error, notice, dragging, capacityText, toggle, toggleFullscreen, openFile, collapse, createTab, selectTab, closeTab, keyTab, navigate, selectViewMode, resetWidth, keyResize, startDrag, moveDrag, endDrag, reload };
+return { root, panel, viewport, media, mediaViewport, closeMedia, syncViewport, tabStrip, addButton, separator, opened, fullscreen, fullscreenTarget, state, active, geometry, metadata, phase, error, notice, dragging, capacityText, toggle, toggleFullscreen, openFile, collapse, createTab, selectTab, closeTab, keyTab, selectViewMode, resetWidth, keyResize, startDrag, moveDrag, endDrag, reload };
 }

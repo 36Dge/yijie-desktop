@@ -162,6 +162,11 @@ pub struct ReleasePreviewResult {
 }
 
 #[derive(Debug, Serialize)]
+pub struct CopyImageResult {
+    status: &'static str,
+}
+
+#[derive(Debug, Serialize)]
 pub struct SaveImageResult {
     status: &'static str,
     code: Option<&'static str>,
@@ -767,6 +772,90 @@ pub async fn chat_release_artifact_image_preview_v1(
 }
 
 #[tauri::command]
+pub async fn chat_copy_artifact_image_v1(
+    request: Value,
+    webview: WebviewWindow,
+    chat_runtime: State<'_, ChatRuntime>,
+    artifact_runtime: State<'_, ArtifactNativeRuntime>,
+) -> Result<ArtifactNativeResponse<CopyImageResult>, ArtifactNativeError> {
+    let request = decode_request(request)?;
+    require_main(&webview, request.request_id)?;
+    let failure = |code| ArtifactNativeError::new(Some(request.request_id), code);
+    let content = authorized_image(
+        &chat_runtime,
+        request.context_id,
+        request.payload,
+        unix_seconds().map_err(failure)?,
+    )
+    .await
+    .map_err(failure)?;
+    let _lease = artifact_runtime
+        .begin_save(content.identity)
+        .map_err(failure)?;
+    let manager = chat_runtime
+        .authorization_manager()
+        .map_err(|e| failure(map_chat_error(e)))?;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    webview
+        .run_on_main_thread(move || {
+            // Recheck the context immediately before the user-requested pasteboard write.
+            let result = unix_seconds().and_then(|now| {
+                manager
+                    .authorize_detailed(request.context_id, ChatAction::ReadSessions, now)
+                    .map_err(|e| match e {
+                        AuthorizationFailure::ContextInvalid => ArtifactNativeCode::Unauthenticated,
+                        AuthorizationFailure::CapabilityDenied => ArtifactNativeCode::Forbidden,
+                    })?;
+                copy_image_to_pasteboard(&content.bytes)
+            });
+            let _ = tx.send(result);
+        })
+        .map_err(|_| failure(ArtifactNativeCode::Unavailable))?;
+    rx.await
+        .map_err(|_| failure(ArtifactNativeCode::Unavailable))?
+        .map_err(failure)?;
+    Ok(ArtifactNativeResponse::new(
+        request.request_id,
+        CopyImageResult { status: "copied" },
+    ))
+}
+
+#[cfg(target_os = "macos")]
+fn write_image_to_pasteboard(
+    bytes: &[u8],
+    pasteboard: &objc2_app_kit::NSPasteboard,
+) -> Result<(), ArtifactNativeCode> {
+    use objc2::{runtime::ProtocolObject, AnyThread};
+    use objc2_app_kit::{NSImage, NSPasteboardWriting};
+    use objc2_foundation::{NSArray, NSData};
+    let data = NSData::with_bytes(bytes);
+    let image =
+        NSImage::initWithData(NSImage::alloc(), &data).ok_or(ArtifactNativeCode::Unsupported)?;
+    // Decode before clearing, so an unavailable representation leaves the clipboard alone.
+    if !image.isValid() {
+        return Err(ArtifactNativeCode::Unsupported);
+    }
+    let object: &ProtocolObject<dyn NSPasteboardWriting> = ProtocolObject::from_ref(&*image);
+    let objects = NSArray::from_slice(&[object]);
+    pasteboard.clearContents();
+    if pasteboard.writeObjects(&objects) {
+        Ok(())
+    } else {
+        Err(ArtifactNativeCode::Unavailable)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn copy_image_to_pasteboard(bytes: &[u8]) -> Result<(), ArtifactNativeCode> {
+    write_image_to_pasteboard(bytes, &objc2_app_kit::NSPasteboard::generalPasteboard())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn copy_image_to_pasteboard(_bytes: &[u8]) -> Result<(), ArtifactNativeCode> {
+    Err(ArtifactNativeCode::Unsupported)
+}
+
+#[tauri::command]
 pub async fn chat_save_artifact_image_v1(
     request: Value,
     webview: WebviewWindow,
@@ -1331,6 +1420,23 @@ mod tests {
             sha256,
             bytes,
         }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn image_clipboard_roundtrips_normal_png_jpeg_webp_on_private_pasteboard() {
+        use objc2_app_kit::{NSPasteboard, NSPasteboardTypeTIFF};
+        // An isolated named pasteboard exercises AppKit without changing the user's clipboard.
+        let board = NSPasteboard::pasteboardWithUniqueName();
+        for format in ["png", "jpeg", "webp"] {
+            let bytes = crate::chat::attachment::test_image_bytes(format);
+            assert_eq!(write_image_to_pasteboard(&bytes, &board), Ok(()));
+            let data = board
+                .dataForType(unsafe { NSPasteboardTypeTIFF })
+                .expect("native image representation");
+            assert!(data.length() > 0);
+        }
+        board.clearContents();
     }
 
     #[test]

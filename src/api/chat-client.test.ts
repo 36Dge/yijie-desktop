@@ -23,6 +23,19 @@ function transport(invoke: ChatClientTransport["invoke"]): ChatClientTransport {
 }
 
 describe("chat client", () => {
+  it("reads a bound input image through the existing private attachment presentation command", async () => {
+    const invoke = vi.fn<ChatClientTransport["invoke"]>(async (_command, args) => ({
+      schemaVersion: 2, requestId: (args?.request as { requestId: string }).requestId,
+      data: { sourcePath: null, imageUrl: "data:image/png;base64,AA==", expiresAt: 2_000_000_000 },
+    }));
+    const client = createChatClient(transport(invoke));
+    const result = await client.attachmentPresentation(CONTEXT_ID, { type: "session", sessionId: SESSION_ID }, TURN_ID, "read_bound");
+    expect(invoke).toHaveBeenCalledWith("chat_attachment_presentation_v2", { request: expect.objectContaining({
+      schemaVersion: 2, contextId: CONTEXT_ID, payload: { draftTarget: { type: "session", sessionId: SESSION_ID }, attachmentId: TURN_ID, action: "read_bound" },
+    }) });
+    expect(result.sourcePath).toBeNull();
+    expect(result.imageUrl).toBe("data:image/png;base64,AA==");
+  });
   it("reads native timing using local identities and keeps missing and zero distinct", async () => {
     const timing = {schema_version: 1, source: "runtime_read", agent_session_id: HOST_STREAM_ID, thread_id: SUBSCRIPTION_ID,
       turn_id: APPROVAL_ID, started_at: {state: "unknown"}, completed_at: {state: "unknown"}, duration_ms: {state: "known", value: 0}};

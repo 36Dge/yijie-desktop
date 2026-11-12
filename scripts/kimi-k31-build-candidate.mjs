@@ -78,6 +78,7 @@ function checkSurfaces(desktopRoot,contractsRoot,selection,env){
 }
 export function verifyKimiK31BuildCandidate(desktopRoot,contractsRoot,hostRoot,env=process.env){
  assert(env.YIJIE_ENV==="local"&&env.YIJIE_LOCAL_PROFILE==="demo_fast"&&env.YIJIE_CHAT_MODELS_ENABLED==="true"&&env.YIJIE_KIMI_K31_PRO_CANDIDATE==="true","Explicit local candidate required");
+ assert.notEqual(env.YIJIE_FEAT168_HOST_IMAGES,"true","Native image entry is retired; use the fixed development MCP profile");
  const selection=kimiCallSurfaces(env);
  checkSurfaces(desktopRoot,contractsRoot,selection,env);
  const planLock=JSON.parse(readFileSync(path.join(desktopRoot,"contracts/scheduled-plan-v2.candidate.json")));
@@ -85,30 +86,17 @@ export function verifyKimiK31BuildCandidate(desktopRoot,contractsRoot,hostRoot,e
  execFileSync(process.execPath,["scripts/sync-scheduled-plan-v2.mjs","--check"],{cwd:contractsRoot,stdio:"pipe"});
  execFileSync(process.execPath,["scripts/generate-scheduled-ipc-v2.mjs","--check"],{cwd:desktopRoot,stdio:"pipe"});
  const fixedDaily = env.YIJIE_DEVELOPMENT_CLIENT === "true" && env.YIJIE_FEAT164_DAILY === "true";
+ if(fixedDaily && env.YIJIE_FEAT169_NATIVE_TOOLS === "true") {
+  execFileSync(process.execPath,["scripts/generate-media-generation.mjs","--consumer=host","--check"],{cwd:contractsRoot,stdio:"pipe"});
+  for(const consumer of ["host","desktop"])execFileSync(process.execPath,["scripts/generate-document-runtime.mjs","--consumer="+consumer,"--check"],{cwd:contractsRoot,stdio:"pipe"});
+ }
  if(env.YIJIE_FEAT171_DOCUMENT_RUNTIME === "true") return verifyDocumentBuildCandidate(desktopRoot,contractsRoot,hostRoot,env);
  if(env.YIJIE_FEAT169_NATIVE_TOOLS === "true") {
   checkPins(desktopRoot,hostRoot);
   if (env.YIJIE_FEAT170_TOOL_SEARCH_RUNTIME === "true") return verifyToolSearchBuildCandidate(desktopRoot,contractsRoot,hostRoot,env);
   return env.YIJIE_FEAT169_INTERACTION_TOOLS === "true" ? verifyInteractionToolsBuildCandidate(desktopRoot,contractsRoot,hostRoot,env) : verifyNativeToolsBuildCandidate(desktopRoot,contractsRoot,hostRoot,env);
  }
- if(fixedDaily || env.YIJIE_FEAT168_HOST_IMAGES==="true"){
-  assert.equal(env.YIJIE_KIMI_K31_CALL_SURFACES,"media");
-  if(fixedDaily) {
-   assert(["true","false"].includes(env.YIJIE_FEAT168_DAILY_IMAGES));
-   assert.equal(env.YIJIE_FEAT168_HOST_IMAGES,env.YIJIE_FEAT168_DAILY_IMAGES);
-  } else assert.notEqual(env.YIJIE_FEAT164_DAILY,"true");
-  checkPins(desktopRoot,hostRoot);
-  const frozen=JSON.parse(readFileSync(path.join(desktopRoot,imageLock)));
-  assert.deepEqual(frozen,imageHostSnapshot(hostRoot,contractsRoot,frozen.host_commit));
-  const hostPin=readFileSync(path.join(hostRoot,"api/runtime-host-images.candidate.json"));
-  assert.deepEqual(readFileSync(path.join(desktopRoot,"contracts/host-images-contracts.pin.json")),hostPin);
-  if(env.YIJIE_FEAT168_HOST_IMAGES==="true") {
-   execFileSync(process.execPath,["scripts/generate-runtime-host-images.mjs","--check","--pin="+frozen.contracts_commit],{cwd:contractsRoot});
-  }
-  const {sources}=inputs(hostRoot);
-  assert.equal(hash(JSON.stringify(sources)),frozen.host_sources_sha256,"Host build inputs differ from their committed source");
-  return sources;
- }
+ assert(!fixedDaily,"Fixed development requires the current native tools profile");
  const actual=JSON.parse(readFileSync(path.join(desktopRoot,lockFile)));
  assert.equal(actual.feature,"FEAT-164");assert(["local_worktree_candidate","immutable_local_candidate"].includes(actual.mode));assert.equal(actual.release,false);
  assert.equal(actual.contracts_commit,commit);

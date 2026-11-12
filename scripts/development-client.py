@@ -14,7 +14,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import feat164_primary as primary
@@ -91,19 +90,18 @@ def supported_go(root, env):
     raise ValueError("缺少项目要求的已安装 Go 工具链；未下载或替换任何程序。")
 
 
-def environment(root, environ, tool_search_meter=False, document_meter=False):
+def environment(root, environ, tool_search_meter=False, document_meter=False, media_meter=False):
     # Never inherit model URLs, credentials, Homes, TAURI_CONFIG or old generation
     # selectors. Public feature flags come from the canonical shell profile.
     env = primary.build_environment(environ)
     env["PATH"] = supported_go(root, env) + os.pathsep + env["PATH"]
     selected = paths(root, Path(env["HOME"]))
-    images = daily_images_setting(selected["output"])
     interaction = environ.get("YIJIE_FEAT169_INTERACTION_TOOLS", "true")
     primary.require(interaction in ("true", "false"), "Invalid interaction tool selector.")
     tool_search = environ.get("YIJIE_FEAT170_TOOL_SEARCH", "true" if interaction == "true" else "false")
     primary.require(tool_search in ("true", "false"), "Invalid tool search selector.")
     primary.require(tool_search == "false" or interaction == "true", "Tool search requires interaction tools.")
-    result = {**env, "YIJIE_FEAT170_TOOL_SEARCH": tool_search, "YIJIE_FEAT169_INTERACTION_TOOLS": interaction, "YIJIE_DEVELOPMENT_CLIENT": "true", "YIJIE_FEAT168_DAILY_IMAGES": "true" if images else "false",
+    result = {**env, "YIJIE_FEAT170_TOOL_SEARCH": tool_search, "YIJIE_FEAT169_INTERACTION_TOOLS": interaction, "YIJIE_DEVELOPMENT_CLIENT": "true",
               "CARGO_TARGET_DIR": str(selected["target"]), "YIJIE_WORKER_TARGET_DIR": str(selected["worker_target"])}
     documents = environ.get("YIJIE_FEAT171_DOCUMENT_RUNTIME", "false")
     primary.require(documents in ("true", "false"), "Invalid document runtime selector.")
@@ -118,47 +116,20 @@ def environment(root, environ, tool_search_meter=False, document_meter=False):
         primary.directory(state)
         result.update(YIJIE_FEAT171_DOCUMENT_RUNTIME="true", YIJIE_DOCUMENT_BUNDLE_DIR=str(bundle),
                       YIJIE_DOCUMENT_BUNDLE_SHA256=receipt["manifest_sha256"], YIJIE_DOCUMENT_STATE_ROOT=str(state))
-    if tool_search_meter or document_meter:
-        primary.require(not (tool_search_meter and document_meter), "Choose one acceptance scope.")
+    if tool_search_meter or document_meter or media_meter:
+        primary.require(sum((tool_search_meter, document_meter, media_meter)) == 1, "Choose one acceptance scope.")
         primary.require(documents == "true" if document_meter else tool_search == "true", "Verification requires its enabled profile.")
         # Explicit UI acceptance only. Reuse the existing fixed, bounded meter;
         # no ambient URL or provider credential is admitted by this selector.
-        result["YIJIE_FEAT171_DOCUMENT_METER" if document_meter else "YIJIE_FEAT170_TOOL_SEARCH_METER"] = "true"
+        result["YIJIE_FEAT172_MEDIA_METER" if media_meter else "YIJIE_FEAT171_DOCUMENT_METER" if document_meter else "YIJIE_FEAT170_TOOL_SEARCH_METER"] = "true"
         result["YIJIE_PERMISSION_VERIFICATION_BASE_URL"] = "http://127.0.0.1:18083/v1"
     return result
 
 
-def daily_images_setting(output):
-    record = output / "host-images.json"
-    if not os.path.lexists(record):
-        return False
-    value, _ = primary.read_json(record)
-    primary.require(isinstance(value, dict) and set(value) == {"schemaVersion", "enabled"}
-                    and type(value["schemaVersion"]) is int and value["schemaVersion"] == 1
-                    and type(value["enabled"]) is bool, "日常生图配置格式无效。")
-    return value["enabled"]
-
-
-def set_daily_images(selected, enabled):
-    database = selected["native"] / "chat/conversations.db"
-    primary.require(database.is_file() and database.resolve(strict=True) == database, "缺少原日常会话库。")
-    output = selected["output"]
-    primary.directory(output)
-    if daily_images_setting(output) == enabled:
-        return
-    # Publish a complete preference atomically, outside all three data Homes.
-    with tempfile.TemporaryDirectory(dir=output) as temporary:
-        stage = Path(temporary) / "host-images.json"
-        primary.write_new(stage, {"schemaVersion": 1, "enabled": enabled})
-        os.replace(stage, output / "host-images.json")
-
-
-def start(bundle_for_ui=False, tool_search_meter=False, document_meter=False):
-    primary.require(not (tool_search_meter or document_meter) or bundle_for_ui, "Acceptance meter requires start-ui.")
+def start(bundle_for_ui=False, tool_search_meter=False, document_meter=False, media_meter=False):
+    primary.require(not (tool_search_meter or document_meter or media_meter) or bundle_for_ui, "Acceptance meter requires start-ui.")
     selected = check()
-    env = environment(ROOT, os.environ, tool_search_meter=tool_search_meter, document_meter=document_meter)
-    if env["YIJIE_FEAT168_DAILY_IMAGES"] == "true":
-        primary.require((selected["native"] / "chat/conversations.db").is_file(), "缺少原日常会话库，已停止启动。")
+    env = environment(ROOT, os.environ, tool_search_meter=tool_search_meter, document_meter=document_meter, media_meter=media_meter)
     if bundle_for_ui:
         env["YIJIE_DEVELOPMENT_UI_BUNDLE"] = "true"
     cache = build_cache.discover(ROOT, env)
@@ -189,17 +160,14 @@ def start(bundle_for_ui=False, tool_search_meter=False, document_meter=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["start", "start-ui", "check", "ready", "images-enable", "images-pause"], default="start", nargs="?")
+    parser.add_argument("action", choices=["start", "start-ui", "check", "ready"], default="start", nargs="?")
     parser.add_argument("--tool-search-meter", action="store_true",
                         help="Explicit FEAT-170 UI acceptance through the existing fixed loopback meter.")
     parser.add_argument("--document-meter", action="store_true",
                         help="Approved FEAT-171 UI acceptance through the fixed budget meter.")
+    parser.add_argument("--media-meter", action="store_true", help="Approved FEAT-172 media acceptance through the fixed request-count meter.")
     args = parser.parse_args()
-    primary.require(not (args.tool_search_meter or args.document_meter) or args.action == "start-ui", "Acceptance meter requires start-ui.")
-    if args.action in ("images-enable", "images-pause"):
-        set_daily_images(check(), args.action == "images-enable")
-        print("已保存日常生图设置，下次从原入口打开时生效。")
-        return 0
+    primary.require(not (args.tool_search_meter or args.document_meter or args.media_meter) or args.action == "start-ui", "Acceptance meter requires start-ui.")
     if args.action == "check":
         check()
         print("Fixed development data roots verified; no database opened.")
@@ -208,7 +176,7 @@ def main():
         workflow_ready()
         print("Existing authenticated workflow is ready.")
         return 0
-    return start(bundle_for_ui=args.action == "start-ui", tool_search_meter=args.tool_search_meter, document_meter=args.document_meter)
+    return start(bundle_for_ui=args.action == "start-ui", tool_search_meter=args.tool_search_meter, document_meter=args.document_meter, media_meter=args.media_meter)
 
 
 if __name__ == "__main__":

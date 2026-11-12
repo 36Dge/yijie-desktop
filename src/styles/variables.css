@@ -4,6 +4,12 @@
   --yj-brand-logo-dark-display: none;
   /* Shared neutral focus: geometry is independent of surface shadows. */
   --yj-focus-ring-width: 2px;
+  /* Generated image dimensions, measured against the reference desktop UI. */
+  --yj-image-inline-size: 440px;
+  --yj-image-placeholder-size: 210px;
+  --yj-image-menu-width: 240px;
+  --yj-image-viewer-width: 900px;
+  --yj-image-viewer-height: 700px;
   --yj-shadow-control-focus: 0 0 0 var(--yj-focus-ring-width) var(--yj-color-focus-ring);
 
   --yj-color-brand-primary: #c3f35b;
@@ -118,6 +124,7 @@
   --yj-color-agent-paused: #64748b;
   --yj-color-icon-default: #25282b;
   --yj-color-icon-muted: #6f757d;
+  --yj-color-icon-subtle: color-mix(in srgb, var(--yj-color-icon-muted) 85%, var(--yj-color-bg-page));
 
   --yj-color-chart-series-1: #4b651d;
   --yj-color-chart-series-2: #356bea;
@@ -196,6 +203,10 @@
   --yj-radius-xl: 16px;
   --yj-radius-chat-composer: 24px;
   --yj-radius-full: 999px;
+  --yj-chat-attachment-draft-size: var(--yj-space-16);
+  --yj-chat-attachment-message-size: 128px;
+  --yj-chat-attachment-preview-size: 288px;
+  --yj-chat-attachment-stack-angle: -8deg;
   --yj-border-width: 1px;
 
   --yj-shadow-xs: none;

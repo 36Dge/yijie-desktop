@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
-import { NPopover } from "naive-ui";
+import { computed, onBeforeUnmount, ref, shallowRef, useId, watch } from "vue";
+import { NPopover, NTooltip } from "naive-ui";
 import YjIcon from "../yijie/YjIcon.vue";
 import { chatDocumentIcon, chatFilePresentation, fileNameParts, type AttachmentPresentation, type AttachmentPresentationReader } from "../../domain/chat-file-presentation";
 
@@ -17,6 +17,8 @@ const props = withDefaults(defineProps<{
 }>(), { active: false, removable: false, disabled: false });
 const emit = defineEmits<{ activate: [id: string | null]; remove: [id: string] }>();
 const file = computed(() => chatFilePresentation(props.mediaType));
+const documentFile = computed(() => !file.value.image && !props.mediaType.startsWith("video/"));
+const tooltipId = `${useId()}-attachment-path`;
 const icon = computed(() => file.value.image || props.mediaType.startsWith("video/")
   ? file.value.icon
   : chatDocumentIcon(props.mediaType));
@@ -68,31 +70,34 @@ function closeOutside(event: FocusEvent) {
 </script>
 
 <template>
-  <NPopover :show="active && available" trigger="hover" placement="top" :show-arrow="false" @update:show="show">
+  <component :is="file.image ? NPopover : NTooltip" :show="active && available" trigger="hover" placement="top" :show-arrow="!file.image" arrow-point-to-center @update:show="show">
     <template #trigger>
-      <span ref="triggerElement" class="chat-file-chip" :class="{ 'chat-file-chip--expired': statusLabel, 'chat-file-chip--removable': removable }" :role="openPreview ? 'button' : undefined" :tabindex="available || openPreview ? 0 : undefined" @click="openPreview?.()" @keydown.space.self.stop.prevent="openPreview?.()" :aria-label="`${name}，${file.label}${statusLabel ? `，${statusLabel}` : ''}`" @focus="show(true)" @focusout="closeOutside" @keydown.esc.stop="show(false)" @keydown.enter.self.stop.prevent="activateOrRead">
+      <span ref="triggerElement" class="chat-file-chip" :class="{ 'chat-file-chip--expired': statusLabel, 'chat-file-chip--removable': removable, 'chat-file-chip--document': documentFile }" :role="openPreview ? 'button' : undefined" :tabindex="available || openPreview ? 0 : undefined" @click="openPreview?.()" @keydown.space.self.stop.prevent="openPreview?.()" :aria-label="`${name}，${file.label}${statusLabel ? `，${statusLabel}` : ''}`" :aria-describedby="active && available && !file.image ? tooltipId : undefined" @focus="show(true)" @focusout="closeOutside" @keydown.esc.stop="show(false)" @keydown.enter.self.stop.prevent="activateOrRead">
         <span class="chat-file-chip__icon" :class="`chat-file-chip__icon--${file.tone}`">
-          <YjIcon class="chat-file-chip__type-icon" :name="icon" size="sm" />
-          <button v-if="removable" class="chat-file-chip__remove" type="button" :disabled="disabled" :aria-label="`移除 ${name}`" @click.stop="emit('remove', attachmentId)" @focus="show(false)"><YjIcon name="dismiss" size="sm" /></button>
+          <YjIcon class="chat-file-chip__type-icon" :name="icon" :size="documentFile && removable ? 'md' : 'sm'" />
         </span>
         <span class="chat-file-chip__name"><span class="chat-file-chip__stem">{{ nameParts.stem }}</span><span class="chat-file-chip__extension">{{ nameParts.extension }}</span></span>
         <span v-if="statusLabel" class="chat-file-chip__status">{{ statusLabel }}</span>
+        <button v-if="removable" class="chat-file-chip__remove" type="button" :disabled="disabled" :aria-label="`移除 ${name}`" @click.stop="emit('remove', attachmentId)" @focus="show(false)"><YjIcon name="dismiss" :size="documentFile ? 'xs' : 'sm'" :stroke-width="documentFile ? 1.5 : 2" /></button>
       </span>
     </template>
-    <div ref="popoverElement" class="chat-file-chip__popover" :class="{ 'chat-file-chip__popover--image': file.image }" @focusout="closeOutside" @keydown.esc.stop="show(false)">
+    <div ref="popoverElement" :id="!file.image ? tooltipId : undefined" :role="!file.image ? 'tooltip' : undefined" class="chat-file-chip__popover" :class="{ 'chat-file-chip__popover--image': file.image }" @focusout="closeOutside" @keydown.esc.stop="show(false)">
       <template v-if="file.image">
         <img v-if="state === 'ready' && result?.imageUrl" :src="result.imageUrl" :alt="name" @error="result = null; state = 'error'">
         <span v-else-if="state === 'loading'" role="status">正在加载图片…</span>
         <template v-else><span role="status">暂时无法预览，仍可发送此附件。</span><button type="button" class="chat-file-chip__retry" @click="read">重试预览</button></template>
       </template>
-      <template v-else><span v-if="state === 'loading'" role="status">正在读取路径…</span><span v-else>{{ result?.sourcePath ?? '当前草稿来源路径不可用' }}</span></template>
+      <template v-else><span v-if="state === 'loading'" role="status">正在读取路径…</span><span v-else>{{ result?.sourcePath ?? (state === 'error' ? '暂时无法读取路径，请重新移入重试' : '重新添加此文件可查看来源路径') }}</span></template>
     </div>
-  </NPopover>
+  </component>
 </template>
 
 <style scoped>
-.chat-file-chip { display: inline-flex; align-items: center; gap: var(--yj-space-2); max-width: 100%; min-width: 0; padding: var(--yj-space-1) var(--yj-space-3); border-radius: var(--yj-radius-full); background: var(--yj-color-skill-pill-bg); color: var(--yj-color-text-primary); font-size: var(--yj-font-size-body); line-height: var(--yj-line-height-body); vertical-align: middle; }
+.chat-file-chip { position: relative; display: inline-flex; align-items: center; gap: var(--yj-space-2); max-width: 100%; min-width: 0; box-sizing: border-box; padding: var(--yj-space-1) var(--yj-space-3); border-radius: var(--yj-radius-full); background: var(--yj-color-skill-pill-bg); color: var(--yj-color-text-primary); font-size: var(--yj-font-size-body); line-height: var(--yj-line-height-body); vertical-align: middle; }
 .chat-file-chip:not(.chat-file-chip--removable) { background: var(--yj-color-skill-pill-message-bg); }
+.chat-file-chip--document.chat-file-chip--removable { min-height: calc(var(--yj-space-8) + var(--yj-space-1)); padding: var(--yj-space-1) var(--yj-space-3); border-radius: var(--yj-radius-lg); background: var(--yj-color-skill-pill-bg); }
+.chat-file-chip--document .chat-file-chip__name { font-weight: var(--yj-font-weight-semibold); }
+.chat-file-chip--document:not(.chat-file-chip--removable) { min-height: var(--yj-space-8); padding: var(--yj-space-1) var(--yj-space-2); border: var(--yj-border-width) solid color-mix(in srgb, var(--yj-color-border-subtle) 55%, transparent); border-radius: var(--yj-radius-lg); background: var(--yj-color-bg-card); }
 .chat-file-chip[role="button"] { cursor:pointer; }
 .chat-file-chip:focus-visible, .chat-file-chip__remove:focus-visible, .chat-file-chip__retry:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-space-1); }
 .chat-file-chip__icon { position: relative; display: inline-flex; flex-shrink: 0; color: var(--yj-color-text-secondary); }
@@ -104,12 +109,14 @@ function closeOutside(event: FocusEvent) {
 .chat-file-chip__name { display: inline-flex; min-width: 0; }
 .chat-file-chip__stem { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-file-chip__extension { flex-shrink: 0; }
-.chat-file-chip__remove { position: absolute; inset: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; padding: 0; color: var(--yj-color-text-primary); background: var(--yj-color-skill-pill-bg); opacity: 0; cursor: pointer; }
+.chat-file-chip__remove { position: absolute; top: 50%; left: var(--yj-space-3); transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; width: var(--yj-space-4); height: var(--yj-space-4); border: 0; padding: 0; color: var(--yj-color-text-primary); background: var(--yj-color-skill-pill-bg); opacity: 0; cursor: pointer; }
+.chat-file-chip--document .chat-file-chip__remove { top: calc(-1 * var(--yj-space-1)); right: calc(-1 * var(--yj-space-1)); left: auto; transform: none; width: var(--yj-space-5); height: var(--yj-space-5); border: var(--yj-border-width) solid var(--yj-color-border-subtle); border-radius: var(--yj-radius-full); color: var(--yj-color-text-secondary); background: var(--yj-color-bg-card); }
 .chat-file-chip:hover .chat-file-chip__remove, .chat-file-chip:focus-within .chat-file-chip__remove { opacity: 1; }
 .chat-file-chip__remove:disabled { cursor: default; }
 .chat-file-chip__status { color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
-.chat-file-chip__popover { max-width: min(32rem, 85vw); overflow-wrap: anywhere; color: var(--yj-color-text-primary); }
+.chat-file-chip__popover { max-width: 100%; overflow-wrap: anywhere; color: inherit; }
 .chat-file-chip__popover--image { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: var(--yj-space-2); width: min(20rem, 75vw); min-height: var(--yj-space-12); }
 .chat-file-chip__popover img { display: block; width: auto; height: auto; max-width: 100%; max-height: 15rem; object-fit: contain; }
 .chat-file-chip__retry { color: var(--yj-color-text-primary); border: var(--yj-border-width) solid var(--yj-color-border-subtle); border-radius: var(--yj-radius-sm); padding: var(--yj-space-1) var(--yj-space-2); background: var(--yj-color-bg-card); cursor: pointer; }
+@media (hover: none) { .chat-file-chip__remove { opacity: 1; } }
 </style>

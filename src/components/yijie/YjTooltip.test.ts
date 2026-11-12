@@ -50,3 +50,18 @@ it("shows only the closest hint for nested controls and restores its parent on l
   await wrapper.get("button > span").trigger("mouseleave");
   expect(wrapper.findAllComponents(NTooltip).map(tooltip => tooltip.props("show"))).toEqual([true, false]);
 });
+
+it("supports arrowless viewer hints without changing the default tooltip", async () => {
+  const wrapper = mount(YjTooltip, { props: { text: "刷新预览", placement: "bottom", showArrow: false, to: "body" }, slots: { default: () => h("button", { "aria-label": "刷新预览" }) } });
+  wrappers.push(wrapper);
+  const tooltip = wrapper.getComponent(NTooltip);
+  expect(tooltip.props("placement")).toBe("bottom");
+  expect(tooltip.props("showArrow")).toBe(false);
+  expect(tooltip.props("to")).toBe("body");
+  expect(wrapper.get("button").attributes("to")).toBeUndefined();
+  expect(wrapper.get("button").attributes("showarrow")).toBeUndefined();
+  const standard = mount(YjTooltip, { props: { text: "图片操作" }, slots: { default: () => h("button") } });
+  wrappers.push(standard);
+  expect(standard.getComponent(NTooltip).props("showArrow")).toBe(true);
+  expect(standard.props("to")).toBeUndefined();
+});

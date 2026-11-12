@@ -10,7 +10,7 @@ import { MAX_PREVIEW_TABS } from "../../domain/conversation-file-preview";
 import { useConversationDocumentPreview } from "../../composables/useConversationDocumentPreview";
 const props = defineProps<{ contextId: string | null; scopeKey: string; enabled: boolean }>();
 const emit = defineEmits<{ expanded: [value: boolean]; restoreTrigger: [] }>();
-const { opened, media, closeMedia, syncViewport, fullscreen, fullscreenTarget, state, active, geometry, metadata, phase, error, notice, dragging, capacityText, toggle, toggleFullscreen, openFile, collapse, createTab, selectTab, closeTab, keyTab, navigate, selectViewMode, resetWidth, keyResize, startDrag, moveDrag, endDrag, reload } = useConversationDocumentPreview(props, emit);
+const { opened, media, closeMedia, syncViewport, fullscreen, fullscreenTarget, state, active, geometry, metadata, phase, error, notice, dragging, capacityText, toggle, toggleFullscreen, openFile, collapse, createTab, selectTab, closeTab, keyTab, selectViewMode, resetWidth, keyResize, startDrag, moveDrag, endDrag, reload } = useConversationDocumentPreview(props, emit);
 const { pathOpen, path, pathState, canLocate, saving, canSave, save } = useDocumentToolbar({
   file: () => active.value?.file ?? null,
   context: () => props.contextId,
@@ -55,12 +55,9 @@ defineExpose({ toggle, openFile, opened });
       </div>
       <ChatDocumentToolbar v-if="!media && active?.file" v-model:path-open="pathOpen"
         :name="active.file.name" :enabled="canLocate" :path="path" :path-state="pathState" :saving="saving" :can-save="canSave" @save="save" />
-      <div v-if="!media && phase === 'ready' && metadata && (metadata.availableModes?.length || metadata.sections.length > 1 || metadata.previousOffset !== null || metadata.nextOffset !== null)"
+      <div v-if="!media && phase === 'ready' && metadata?.availableModes?.length"
         class="document-sidebar__reading" aria-label="阅读选项">
         <select v-if="metadata.availableModes?.length" :value="metadata.viewMode" aria-label="阅读方式" @change="selectViewMode(($event.target as HTMLSelectElement).value as 'layout' | 'content')"><option v-for="mode in metadata.availableModes" :key="mode" :value="mode">{{ mode === 'layout' ? '版式' : metadata.kind === 'xlsx' ? '表格' : '正文' }}</option></select>
-        <select v-if="metadata.sections.length > 1" :value="metadata.section" :aria-label="metadata.kind === 'xlsx' && metadata.viewMode !== 'layout' ? '工作表' : '页码'" @change="navigate(Number(($event.target as HTMLSelectElement).value), 0)"><option v-for="section in metadata.sections" :key="section.id" :value="section.id">{{ section.label }}</option></select>
-        <button v-if="metadata.previousOffset !== null" type="button" @click="navigate(metadata!.section, metadata!.previousOffset!)">上一段</button>
-        <button v-if="metadata.nextOffset !== null" type="button" @click="navigate(metadata!.section, metadata!.nextOffset!)">下一段</button>
       </div>
       <p v-if="!media && metadata?.notice" class="document-sidebar__notice" role="status">{{ metadata.notice }}</p>
       <p v-if="notice && fullscreen" class="document-sidebar__notice" role="status">{{ notice }}</p>
@@ -125,7 +122,7 @@ defineExpose({ toggle, openFile, opened });
 .document-sidebar__tabs .yj-control :deep(.yj-icon),.document-sidebar__tab-wrap button :deep(.yj-icon) { color:inherit; }
 .document-sidebar button:focus-visible,.document-sidebar select:focus-visible { outline:var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset:calc(var(--yj-space-1) * -1); }
 .document-sidebar__reading { display:flex; align-items:center; flex-wrap:wrap; gap:var(--yj-space-2); padding:var(--yj-space-2) var(--yj-space-4); }
-.document-sidebar__reading select,.document-sidebar__reading button { max-width:100%; padding:var(--yj-space-1) var(--yj-space-2); border:var(--yj-border-width) solid var(--yj-color-border-default); border-radius:var(--yj-radius-md); background:var(--yj-color-bg-page); color:var(--yj-color-text-primary); font:inherit; }
+.document-sidebar__reading select { max-width:100%; padding:var(--yj-space-1) var(--yj-space-2); border:var(--yj-border-width) solid var(--yj-color-border-default); border-radius:var(--yj-radius-md); background:var(--yj-color-bg-page); color:var(--yj-color-text-primary); font:inherit; }
 .document-sidebar__viewport { flex:1; position:relative; min-height:0; min-width:0; overflow:hidden; }
 .document-media-dialog { width:min(90vw, 960px); }
 .document-media-dialog__viewport { height: min(65vh, 640px); display:grid; align-content:center; justify-items:center; color: var(--yj-color-text-secondary); }

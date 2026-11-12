@@ -575,12 +575,22 @@ pub(crate) fn attachment_image_projection(
             .map_err(|_| AttachmentImportError::InvalidContent)?;
         ("image/svg+xml", bytes.to_vec())
     } else {
-        let thumbnail = decode_image_content(mime, bytes)?.thumbnail(320, 240);
-        let mut output = Cursor::new(Vec::new());
-        thumbnail
-            .write_to(&mut output, ImageFormat::Png)
-            .map_err(|_| AttachmentImportError::Unavailable)?;
-        ("image/png", output.into_inner())
+        let image = decode_image_content(mime, bytes)?;
+        // A 2x hover preview uses the existing bounded decoder and wire budget.
+        // Detailed photos fall back to smaller projections, never larger IPCs.
+        let mut projected = Vec::new();
+        for edge in [576, 384, 256] {
+            let mut output = Cursor::new(Vec::new());
+            image
+                .thumbnail(edge, edge)
+                .write_to(&mut output, ImageFormat::Png)
+                .map_err(|_| AttachmentImportError::Unavailable)?;
+            projected = output.into_inner();
+            if projected.len() <= 512 * 1024 {
+                break;
+            }
+        }
+        ("image/png", projected)
     };
     if projected.len() > 512 * 1024 {
         return Err(AttachmentImportError::TooLarge);
@@ -617,6 +627,29 @@ fn has_complete_image_container(media_type: &str, content: &[u8]) -> bool {
         }
         _ => false,
     }
+}
+
+#[cfg(test)]
+#[test]
+fn input_image_projection_is_bounded_and_keeps_aspect_ratio() {
+    use base64::Engine;
+    let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+        900,
+        600,
+        image::Rgb([33, 128, 192]),
+    ));
+    let mut output = Cursor::new(Vec::new());
+    image.write_to(&mut output, ImageFormat::Png).unwrap();
+    let projected = attachment_image_projection("image/png", &output.into_inner()).unwrap();
+    assert!(projected.len() <= 700000);
+    let encoded = projected.strip_prefix("data:image/png;base64,").unwrap();
+    let decoded = image::load_from_memory(
+        &base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!((decoded.width(), decoded.height()), (576, 384));
 }
 
 #[cfg(test)]

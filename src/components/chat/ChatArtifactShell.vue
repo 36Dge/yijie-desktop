@@ -26,12 +26,10 @@ const props = defineProps<{
   reportNativeClient?: ChatArtifactReportNativeClient;
 }>();
 
-const image = useTemplateRef<InstanceType<typeof ChatArtifactImage>>("image");
 const video = useTemplateRef<InstanceType<typeof ChatArtifactVideo>>("video");
-const mediaLink = computed(() => props.artifact.status === "ready" && ["image", "video"].includes(props.artifact.kind));
-function openMedia(event: MouseEvent) {
-  if (props.artifact.kind === "image") void image.value?.openLightbox(event);
-  else void video.value?.play();
+const mediaLink = computed(() => props.artifact.status === "ready" && props.artifact.kind === "video");
+function openMedia() {
+  void video.value?.play();
 }
 const kindPresentation = computed(() => props.artifact.mediaType && props.artifact.kind !== "report" ? chatFilePresentation(props.artifact.mediaType) : ({
   image: { label: "图片", icon: "image" as const },
@@ -94,7 +92,14 @@ const progressLabel = computed(() => `${displayName.value}处理进度`);
 </script>
 
 <template>
+  <ChatArtifactImage
+    v-if="artifact.kind === 'image'"
+    :artifact="artifact"
+    :context-id="contextId"
+    :client="nativeClient"
+  />
   <article
+    v-else
     class="artifact-shell"
     :class="`artifact-shell--${artifact.status}`"
     :aria-busy="busy ? 'true' : 'false'"
@@ -113,13 +118,6 @@ const progressLabel = computed(() => `${displayName.value}处理进度`);
       </span>
       <NTag size="small" :bordered="false">{{ provenanceLabel }}</NTag>
     </header>
-
-    <ChatArtifactImage ref="image"
-      v-if="artifact.kind === 'image' && artifact.status === 'ready'"
-      :artifact="artifact"
-      :context-id="contextId"
-      :client="nativeClient"
-    />
 
     <ChatArtifactVideo ref="video"
       v-if="artifact.kind === 'video' && artifact.status === 'ready'"

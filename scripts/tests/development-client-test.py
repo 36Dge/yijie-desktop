@@ -26,22 +26,6 @@ class DevelopmentClientTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 development.environment(root, {**source, "YIJIE_FEAT170_TOOL_SEARCH": "false"}, tool_search_meter=True)
 
-    def test_daily_images_can_be_paused_without_changing_the_database(self):
-        with tempfile.TemporaryDirectory() as folder:
-            base = Path(folder).resolve()
-            selected = {"output": base / "development", "native": base / "native"}
-            selected["output"].mkdir()
-            (selected["native"] / "chat").mkdir(parents=True)
-            database = selected["native"] / "chat/conversations.db"
-            self.assertFalse(development.daily_images_setting(selected["output"]))
-            with self.assertRaises(ValueError):
-                development.set_daily_images(selected, True)
-            database.write_bytes(b"retained normal fixture")
-            for enabled in (True, True, False):
-                development.set_daily_images(selected, enabled)
-                self.assertEqual(development.daily_images_setting(selected["output"]), enabled)
-                self.assertEqual(database.read_bytes(), b"retained normal fixture")
-
     def test_interaction_selector_keeps_exact_boolean_without_extra_overrides(self):
         root = Path("/workspace/yijie-desktop")
         source = {"PATH": "/usr/bin", "HOME": str(Path.home())}
@@ -63,6 +47,18 @@ class DevelopmentClientTest(unittest.TestCase):
                 development.environment(root, {**source, "YIJIE_FEAT170_TOOL_SEARCH": "ordinary-selector"})
             with self.assertRaises(ValueError):
                 development.environment(root, {**source, "YIJIE_FEAT170_TOOL_SEARCH": "true", "YIJIE_FEAT169_INTERACTION_TOOLS": "false"})
+
+    def test_media_meter_is_explicit_and_uses_only_the_existing_loopback(self):
+        root = Path("/workspace/yijie-desktop")
+        source = {"PATH": "/usr/bin", "HOME": str(Path.home())}
+        with patch.object(development, "supported_go", return_value="/existing/toolchain/bin"):
+            ordinary = development.environment(root, source)
+            self.assertNotIn("YIJIE_PERMISSION_VERIFICATION_BASE_URL", ordinary)
+            measured = development.environment(root, source, media_meter=True)
+            self.assertEqual(measured["YIJIE_PERMISSION_VERIFICATION_BASE_URL"], "http://127.0.0.1:18083/v1")
+            self.assertEqual(measured["YIJIE_FEAT172_MEDIA_METER"], "true")
+            with self.assertRaises(ValueError):
+                development.environment(root, source, media_meter=True, tool_search_meter=True)
 
     def test_fixed_output_keeps_original_daily_homes(self):
         root = Path("/workspace/yijie-desktop")
@@ -99,7 +95,7 @@ class DevelopmentClientTest(unittest.TestCase):
         with patch.object(development, "supported_go", return_value="/existing/toolchain/bin"):
             env = development.environment(root, original)
         self.assertEqual(env["YIJIE_DEVELOPMENT_CLIENT"], "true")
-        self.assertEqual(env["YIJIE_FEAT168_DAILY_IMAGES"], "false")
+        self.assertNotIn("YIJIE_FEAT168_DAILY_IMAGES", env)
         self.assertNotIn("YIJIE_FEAT168_HOST_IMAGES", env)
         self.assertEqual(env["CARGO_TARGET_DIR"], str(root / ".local/development/target"))
         self.assertEqual(env["PATH"], "/existing/toolchain/bin:/usr/bin")

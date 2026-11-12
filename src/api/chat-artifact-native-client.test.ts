@@ -30,6 +30,7 @@ describe("Artifact native client", () => {
         requestId: REQUEST_ID,
         data: { status: "released" },
       };
+      if (command === "chat_copy_artifact_image_v1") return { schemaVersion: 1, requestId: REQUEST_ID, data: { status: "copied" } };
       return {
         schemaVersion: 1,
         requestId: REQUEST_ID,
@@ -41,11 +42,13 @@ describe("Artifact native client", () => {
     await client.openImagePreview(CONTEXT_ID, IDENTITY);
     await client.releaseImagePreview(CONTEXT_ID, IDENTITY);
     await client.saveImage(CONTEXT_ID, IDENTITY);
+    await client.copyImage(CONTEXT_ID, IDENTITY);
 
     expect(invoke.mock.calls.map(([command]) => command)).toEqual([
       "chat_open_artifact_image_preview_v1",
       "chat_release_artifact_image_preview_v1",
       "chat_save_artifact_image_v1",
+      "chat_copy_artifact_image_v1",
     ]);
     for (const [, arguments_] of invoke.mock.calls) {
       expect(arguments_).toEqual({

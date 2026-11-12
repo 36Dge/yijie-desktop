@@ -13,6 +13,8 @@ export default defineComponent({
   props: {
     text: String as PropType<string | null>,
     placement: { type: String as PropType<PopoverPlacement>, default: "top" },
+    showArrow: { type: Boolean, default: true },
+    to: { type: [String, Object, Boolean] as PropType<string | HTMLElement | false>, default: undefined },
   },
   emits: ["show"],
   setup(props, { slots, attrs, emit }) {
@@ -40,7 +42,7 @@ export default defineComponent({
     watch(() => props.text, () => { if (!props.text) dismiss(); });
     onBeforeUnmount(() => { if (activeTooltip.value === owner) activeTooltip.value = null; });
     return () => h(NTooltip, {
-      trigger: "manual", show: show.value, placement: props.placement, arrowPointToCenter: true,
+      trigger: "manual", show: show.value, placement: props.placement, showArrow: props.showArrow, arrowPointToCenter: true, to: props.to,
       onMouseenter: () => { hovered.value = true; resume(); },
       onMouseleave: () => { hovered.value = false; leave(); },
     }, {

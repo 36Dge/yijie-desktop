@@ -26,6 +26,34 @@ function textBlock(
 }
 
 describe("ChatSafeContent", () => {
+  it("puts input documents in their own row above the original message text", () => {
+    const file: ConversationTimelineAttachmentReferenceContentBlock = {
+      type: "attachment_reference", identity: "notes", blockIndex: 1, attachmentId: "notes",
+      kind: "file", name: "notes.md", mediaType: "text/markdown", sizeBytes: 128, status: "bound", expiresAt: 2_000_000_000,
+    };
+    const wrapper = mount(ChatSafeContent, { props: { mode: "plain", blocks: [textBlock("总结一下这个文件"), file] } });
+    expect(wrapper.get('[aria-label="文档附件"]').text()).toBe("notes.md");
+    expect(wrapper.element.firstElementChild?.className).toContain("document-row");
+    expect(wrapper.get(".chat-safe-content__paragraph").text()).toBe("总结一下这个文件");
+    wrapper.unmount();
+  });
+  it("groups only user input images above mixed file and text content in their original order", async () => {
+    const images: ConversationTimelineAttachmentReferenceContentBlock[] = Array.from({ length: 10 }, (_, index) => ({
+      type: "attachment_reference", identity: `image-${index}`, blockIndex: index + 1, attachmentId: `image-${index}`,
+      kind: "image", name: `${index}.png`, mediaType: "image/png", sizeBytes: 128, status: "bound", expiresAt: 2_000_000_000,
+    }));
+    const file = { ...images[0]!, identity: "file", attachmentId: "file", kind: "file" as const, name: "notes.md", mediaType: "text/markdown" };
+    const wrapper = mount(ChatSafeContent, { props: { mode: "plain", blocks: [textBlock("解释图片"), ...images, file] } });
+    expect(wrapper.get('[aria-label="10 张图片"]').findAll(".chat-safe-content__image-card").map(card => card.text())).toEqual(images.map(image => image.name));
+    expect(wrapper.get(".chat-safe-content__attachment").text()).toContain("notes.md");
+    expect(wrapper.element.firstElementChild?.className).toContain("image-stack");
+    await wrapper.setProps({ blocks: [images[0]!] });
+    expect(wrapper.find(".chat-safe-content__image-stack--multiple").exists()).toBe(false);
+    expect(wrapper.find("p").exists()).toBe(false);
+    await wrapper.setProps({ mode: "rich", blocks: images });
+    expect(wrapper.find(".chat-safe-content__image-stack").exists()).toBe(false);
+    wrapper.unmount();
+  });
   it("keeps message text selectable while the window and embedded copy controls are not selectable", async () => {
     const style = document.createElement("style");
     style.textContent = readFileSync("src/styles/main.css", "utf8");

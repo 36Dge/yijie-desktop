@@ -117,7 +117,6 @@ const CLEANUP_POLL_INTERVAL_MS = 1_000;
 const CLEANUP_POLL_MAX_ATTEMPTS = 120;
 const CHAT_TERMINAL_TURN_STATUSES = new Set(["completed", "failed", "interrupted"]);
 export const CHAT_DRAFT_ATTACHMENT_LIMIT = 10;
-export const CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS = 220;
 const ATTACHMENT_IMPORT_TRANSITIONS = {
   queued: ["importing"],
   importing: ["parsing", "error_terminal"],
@@ -144,8 +143,6 @@ type ActiveAttachmentImport = {
   readonly expectedItemCount: number | null;
   lastSequence: bigint;
   acceptedEvent: ChatAttachmentImportEvent | null;
-  readonly displayQueue: ChatAttachmentImportEvent[];
-  displayTimer: ReturnType<typeof setTimeout> | null;
   commandSettled: boolean;
 };
 
@@ -825,10 +822,6 @@ export function createChatStoreDefinition(
       draftEpoch += 1;
       draftAttachments.value = Object.freeze([]);
       attachmentImportAttempt.value = null;
-      const displayTimer = activeAttachmentImport?.displayTimer;
-      if (displayTimer !== null && displayTimer !== undefined) {
-        clearTimeout(displayTimer);
-      }
       activeAttachmentImport = null;
       attachmentImporting.value = false;
       attachmentErrorCode.value = null;
@@ -1145,9 +1138,7 @@ export function createChatStoreDefinition(
     function finishSettledAttachmentDisplay(active: ActiveAttachmentImport): void {
       if (
         activeAttachmentImport !== active ||
-        !active.commandSettled ||
-        active.displayTimer !== null ||
-        active.displayQueue.length > 0
+        !active.commandSettled
       ) return;
       const displayed = attachmentImportAttempt.value;
       if (displayed?.operationId !== active.operationId) return;
@@ -1157,38 +1148,15 @@ export function createChatStoreDefinition(
       }
     }
 
-    function displayNextAttachmentImportEvent(active: ActiveAttachmentImport): void {
-      if (activeAttachmentImport !== active || active.displayTimer !== null) return;
-      const next = active.displayQueue.shift();
-      if (!next) {
-        finishSettledAttachmentDisplay(active);
-        return;
-      }
-      attachmentImportAttempt.value = next;
-      if (next.stage === "error_terminal") {
-        attachmentErrorCode.value = next.issue;
-        finishSettledAttachmentDisplay(active);
-        return;
-      }
-      active.displayTimer = setTimeout(() => {
-        active.displayTimer = null;
-        if (activeAttachmentImport !== active) return;
-        if (active.displayQueue.length > 0) {
-          displayNextAttachmentImportEvent(active);
-        } else {
-          finishSettledAttachmentDisplay(active);
-        }
-      }, CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS);
-    }
-
     function acceptAttachmentImportEvent(
       active: ActiveAttachmentImport,
       event: ChatAttachmentImportEvent,
     ): void {
       active.lastSequence = BigInt(event.sequence);
       active.acceptedEvent = event;
-      active.displayQueue.push(event);
-      displayNextAttachmentImportEvent(active);
+      attachmentImportAttempt.value = event;
+      if (event.stage === "error_terminal") attachmentErrorCode.value = event.issue;
+      finishSettledAttachmentDisplay(active);
     }
 
     function syntheticAttachmentImportEvent(
@@ -3471,8 +3439,6 @@ export function createChatStoreDefinition(
           expectedItemCount,
           lastSequence: 0n,
           acceptedEvent: null,
-          displayQueue: [],
-          displayTimer: null,
           commandSettled: false,
         };
         const attachments = await operation(bound, target, importOperationId);

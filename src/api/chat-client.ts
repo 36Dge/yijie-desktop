@@ -124,7 +124,7 @@ export interface ChatClient {
   removeProject(contextId: string, projectId: string, operationId: string): Promise<string>;
   createSession(contextId: string, projectId: string | null, input: string, operationId: string): Promise<ChatCreatedTurn>;
   submitTurn(contextId: string, sessionId: string, input: string, operationId: string): Promise<ChatCreatedTurn>;
-  attachmentPresentation(contextId: string, draftTarget: ChatDraftTarget, attachmentId: string | null, action: "read" | "clear"): Promise<AttachmentPresentation>;
+  attachmentPresentation(contextId: string, draftTarget: ChatDraftTarget, attachmentId: string | null, action: "read" | "clear" | "read_bound"): Promise<AttachmentPresentation>;
   pickAttachments(contextId: string, draftTarget: ChatDraftTarget, remainingCapacity: number, operationId: string): Promise<readonly ChatAttachment[]>;
   importAttachments(contextId: string, draftTarget: ChatDraftTarget, paths: readonly string[], remainingCapacity: number, operationId: string): Promise<readonly ChatAttachment[]>;
   listDraftAttachments(contextId: string, draftTarget: ChatDraftTarget, signal?: AbortSignal): Promise<readonly ChatAttachment[]>;

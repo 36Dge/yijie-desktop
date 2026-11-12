@@ -34,6 +34,7 @@ import { chatModelsEnabled, kimiK31Candidate, defaultModelProfile } from "../../
 import ChatComposer from "../../components/chat/ChatComposer.vue";
 import ChatScrollToBottomButton from "../../components/chat/ChatScrollToBottomButton.vue";
 import ChatAttachmentChip from "../../components/chat/ChatAttachmentChip.vue";
+import ChatAttachmentImage from "../../components/chat/ChatAttachmentImage.vue";
 import { useChatAttachmentPresentation } from "../../composables/useChatAttachmentPresentation";
 import ChatShopControl from "../../components/chat/ChatShopControl.vue";
 import ChatConnectorControl from "../../components/chat/ChatConnectorControl.vue";
@@ -238,6 +239,15 @@ let locationEpoch = 0;
 const isNewDraftMode = computed(() => routeSessionId.value === null && route.query.create === "schedule");
 const isDraftMode = computed(() => isNewDraftMode.value || (routeSessionId.value !== null && chatStore.selectedSessionId === routeSessionId.value && chatStore.selectedSessionPurpose === "scheduled_plan_draft"));
 const normalPurposeReady = computed(() => routeSessionId.value === null || (chatStore.selectedSessionId === routeSessionId.value && chatStore.selectedSessionPurpose === "ordinary"));
+const sentImageTarget = computed(() => chatStore.selectedSessionId ? { type: "session" as const, sessionId: chatStore.selectedSessionId } : null);
+const sentImageScope = computed(() => `${chatStore.context?.contextId ?? ""}:${chatStore.selectedSessionId ?? ""}:${previewEnabled.value}`);
+const readSentImagePresentation = useChatAttachmentPresentation(
+  () => chatStore.context?.contextId ?? null,
+  () => sentImageTarget.value,
+  () => chatStore.history?.turns.flatMap(turn => turn.messages.filter(message => message.role === "user").flatMap(message => message.contentBlocks?.flatMap(block => block.type !== "text" && block.mediaType.startsWith("image/") && block.status === "bound" ? [block.attachmentId] : []) ?? [])) ?? [],
+  () => previewEnabled.value,
+  "bound",
+);
 const composerDraftTargetKey = computed(() => sharedComposerDraftsEnabled && isNewDraftMode.value ? "plan:new" as const : chatComposerDraftKey(routeSessionId.value));
 const prompt = computed({
   get: () => chatComposerDraftValue(composerDrafts.value, composerDraftTargetKey.value),
@@ -1425,7 +1435,8 @@ onBeforeUnmount(() => {
               />
             </template>
             <template #attachment-reference="{ block }">
-              <ChatAttachmentChip :attachment-id="block.attachmentId" :name="block.name" :media-type="block.mediaType" :status="block.status" :open-preview="attachmentPreview(block)" />
+              <ChatAttachmentImage v-if="block.mediaType.startsWith('image/')" :key="`${sentImageScope}:${block.attachmentId}`" :attachment-id="block.attachmentId" :name="block.name" :status="block.status" :scope-key="sentImageScope" :disabled="!previewEnabled" :read-presentation="readSentImagePresentation" />
+              <ChatAttachmentChip v-else :attachment-id="block.attachmentId" :name="block.name" :media-type="block.mediaType" :status="block.status" :open-preview="attachmentPreview(block)" />
             </template>
             <template #artifact-reference="{ item, block }">
               <template

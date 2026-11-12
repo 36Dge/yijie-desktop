@@ -67,7 +67,7 @@ defineExpose({focus});
   display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center;
   width: var(--yj-space-8); height: var(--yj-space-8); padding: 0;
   border: var(--yj-border-width) solid transparent; border-radius: var(--yj-radius-sm);
-  color: var(--yj-color-icon-muted); background: transparent; cursor: pointer;
+  color: var(--yj-color-icon-subtle); background: transparent; cursor: pointer;
 }
 .chat-answer-action::before {
   content: "";
@@ -81,7 +81,7 @@ defineExpose({focus});
 .chat-answer-action :deep(.yj-icon) { position: relative; color: inherit; }
 .chat-answer-action:hover:not([aria-disabled="true"]):not(.is-selected) {
   --chat-answer-action-background: var(--yj-color-control-hover);
-  color: var(--yj-color-text-primary);
+  color: var(--yj-color-icon-muted);
 }
 .chat-answer-action.is-selected { color: var(--yj-color-text-secondary); background: transparent; }
 .chat-answer-action:active:not([aria-disabled="true"]):not(.is-selected) { --chat-answer-action-background: var(--yj-color-control-pressed); }

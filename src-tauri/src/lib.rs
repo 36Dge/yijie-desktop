@@ -537,6 +537,7 @@ pub fn run() {
         chat::artifact_native::chat_open_artifact_image_preview_v1,
         chat::document_preview_native::chat_document_preview_v1,
         chat::artifact_native::chat_release_artifact_image_preview_v1,
+        chat::artifact_native::chat_copy_artifact_image_v1,
         chat::artifact_native::chat_save_artifact_image_v1,
         chat::artifact_video_native::chat_open_artifact_video_preview_v1,
         chat::artifact_video_native::chat_release_artifact_video_preview_v1,

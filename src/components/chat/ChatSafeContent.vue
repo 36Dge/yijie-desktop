@@ -45,9 +45,11 @@ const reveal = props.parsedNodes && inherited ? inherited
 provide(chatTextRevealKey, reveal);
 if (!props.parsedNodes) provide(messageLinkTargetKey, () => props.linkTarget);
 const nodes = computed(() => documentView.value.nodes);
+const inputImages = computed(() => props.mode === "plain" ? nodes.value.filter(node => node.kind === "attachment_reference" && node.block.mediaType.startsWith("image/")) : []);
+const inputDocuments = computed(() => props.mode === "plain" ? nodes.value.filter(node => node.kind === "attachment_reference" && !/^(image|video)\//.test(node.block.mediaType)) : []);
 const displayNodes = computed<readonly ChatContentNode[]>((previous) => {
   const cursor = reveal.frame.value.cursor;
-  const visible = nodes.value.filter(node => (node.startOffset < cursor || node.startOffset === node.endOffset && node.startOffset <= cursor) || node.kind === "artifact_reference" || node.kind === "attachment_reference" || node.kind === "unknown");
+  const visible = nodes.value.filter(node => !inputImages.value.includes(node) && !inputDocuments.value.includes(node) && ((node.startOffset < cursor || node.startOffset === node.endOffset && node.startOffset <= cursor) || node.kind === "artifact_reference" || node.kind === "attachment_reference" || node.kind === "unknown"));
   const ordered = props.mode === "plain" ? [...visible.filter(node => node.kind === "attachment_reference"), ...visible.filter(node => node.kind !== "attachment_reference")] : visible;
   // A reveal frame inside one block does not invalidate its surrounding layout.
   if (previous?.length === ordered.length && ordered.every((node, i) => node === previous[i])) return previous;
@@ -60,7 +62,17 @@ function visibleRows<T extends readonly { startOffset: number }[]>(rows: readonl
 </script>
 
 <template>
-  <div ref="root" class="chat-safe-content yj-selectable-text" :class="{ 'chat-safe-content--attachments': hasAttachments, 'chat-safe-content--answer': typography === 'answer' && mode === 'rich' }">
+  <div ref="root" class="chat-safe-content yj-selectable-text" :class="{ 'chat-safe-content--attachments': hasAttachments, 'chat-safe-content--input-images': inputImages.length > 0, 'chat-safe-content--input-documents': inputDocuments.length > 0, 'chat-safe-content--answer': typography === 'answer' && mode === 'rich' }">
+    <div v-if="inputImages.length" class="chat-safe-content__image-stack" :class="{ 'chat-safe-content__image-stack--multiple': inputImages.length > 1 }" role="group" :aria-label="`${inputImages.length} 张图片`">
+      <div v-for="node in inputImages" :key="node.key" class="chat-safe-content__image-card">
+        <slot v-if="node.kind === 'attachment_reference'" name="attachment-reference" :block="node.block"><span>{{ node.block.name }}</span></slot>
+      </div>
+    </div>
+    <div v-if="inputDocuments.length" class="chat-safe-content__document-row" role="group" aria-label="文档附件">
+      <div v-for="node in inputDocuments" :key="node.key" class="chat-safe-content__attachment" role="note">
+        <slot v-if="node.kind === 'attachment_reference'" name="attachment-reference" :block="node.block"><span>{{ node.block.name }}</span></slot>
+      </div>
+    </div>
     <p v-if="$slots['text-prefix'] && !firstParagraphKey" class="chat-safe-content__paragraph"><slot name="text-prefix" /></p>
     <template v-for="node in displayNodes" :key="node.key">
       <p v-if="node.kind === 'paragraph'" class="chat-safe-content__paragraph">
@@ -373,6 +385,7 @@ h3.chat-safe-content__heading {
 }
 
 .chat-safe-content__reference:has(.chat-artifact-document-card) { display: block; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; }
+.chat-safe-content__reference:has(.artifact-image) { display: block; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; }
 
 .chat-safe-content__unknown {
   color: var(--yj-color-text-body);
@@ -406,4 +419,12 @@ h3.chat-safe-content__heading {
 .chat-safe-content--attachments { display: flex; flex-wrap: wrap; align-items: center; gap: var(--yj-space-2); }
 .chat-safe-content__attachment { display: inline-flex; min-width: 0; max-width: 100%; }
 .chat-safe-content--attachments > .chat-safe-content__paragraph { min-width: 0; }
+.chat-safe-content--input-images, .chat-safe-content--input-documents { justify-content: flex-end; }
+.chat-safe-content__document-row { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--yj-space-2); width: 100%; min-width: 0; }
+.chat-safe-content__image-stack { display: flex; align-items: center; justify-content: flex-end; width: 100%; padding: var(--yj-space-3) var(--yj-space-2); box-sizing: border-box; }
+.chat-safe-content__image-card { position: relative; flex: 0 1 var(--yj-chat-attachment-message-size); min-width: 0; width: var(--yj-chat-attachment-message-size); }
+.chat-safe-content__image-stack--multiple .chat-safe-content__image-card:not(:last-child) { flex-basis: var(--yj-space-5); }
+.chat-safe-content__image-stack--multiple .chat-safe-content__image-card:last-child { transform: rotate(var(--yj-chat-attachment-stack-angle)); }
+.chat-safe-content__image-card :deep(.chat-attachment-image__thumbnail) { box-shadow: var(--yj-shadow-popover); }
+.chat-safe-content__image-card:hover, .chat-safe-content__image-card:focus-within { z-index: 1; }
 </style>

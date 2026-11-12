@@ -82,7 +82,7 @@ function toggle(): void {
       `chat-timeline-item-shell--${item.role}`,
       `chat-timeline-item-shell--${item.phase === 'active' && !busy ? 'incomplete' : item.phase}`,
       { 'chat-timeline-item-shell--answer': isAnswer, 'chat-timeline-item-shell--process-inline': processPresentation },
-      { 'chat-timeline-item-shell--artifact': item.presentation === 'artifact' && item.domainStatus === 'completed' && !busy && !collapsible },
+      { 'chat-timeline-item-shell--artifact': item.presentation === 'artifact' && !collapsible },
     ]"
     :aria-label="item.role === 'user' || plainProcess || isAnswer ? label : undefined"
     :aria-labelledby="item.role === 'user' || plainProcess || isAnswer ? undefined : titleId"
@@ -334,6 +334,12 @@ function toggle(): void {
 }
 .chat-timeline-item-shell--artifact:has(.chat-artifact-document-card) > .chat-timeline-item-shell__body { padding: 0; }
 
+/* Generated images provide their own title and lifecycle state, including while
+   generating. Do not nest them in the generic output metadata shell. */
+.chat-timeline-item-shell--artifact:has(.artifact-image) { border: 0; background: transparent; }
+.chat-timeline-item-shell--artifact:has(.artifact-image) > .chat-timeline-item-shell__header { display: none; }
+.chat-timeline-item-shell--artifact:has(.artifact-image) > .chat-timeline-item-shell__body { padding: 0; }
+
 .chat-timeline-item-shell__answer-actions {
   margin-block-start: var(--yj-space-3);
   padding-inline-end: var(--yj-space-0);
@@ -346,6 +352,10 @@ function toggle(): void {
   border-radius: var(--yj-radius-xl) var(--yj-radius-xl) 0 var(--yj-radius-xl);
   background: var(--yj-color-chat-user-bg);
 }
+
+.chat-timeline-item-shell--user:has(.chat-safe-content--input-images, .chat-safe-content--input-documents) .chat-timeline-item-shell__body { padding: 0; background: transparent; }
+.chat-timeline-item-shell--user:has(.chat-safe-content--input-images, .chat-safe-content--input-documents) :deep(.chat-safe-content__paragraph) { padding: var(--yj-space-3); border-radius: var(--yj-radius-xl) var(--yj-radius-xl) 0 var(--yj-radius-xl); background: var(--yj-color-chat-user-bg); }
+.chat-timeline-item-shell--user:has(.chat-safe-content--input-images, .chat-safe-content--input-documents) > .chat-timeline-item-shell__user-meta:empty { display: none; }
 
 .chat-timeline-item-shell__user-meta {
   display: flex;

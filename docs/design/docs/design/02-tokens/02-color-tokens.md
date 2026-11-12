@@ -62,6 +62,7 @@
 | `--yj-color-text-disabled` | `#A5ABB2` | `#69717B` | 真正不可用控件，不能承担正常说明 |
 | `--yj-color-icon-default` | `#25282B` | `#F5F7FA` | 普通操作图标 |
 | `--yj-color-icon-muted` | `#6F757D` | `#969EA8` | 辅助图标 |
+| `--yj-color-icon-subtle` | muted 85% + 页面底色 15% | muted 85% + 页面底色 15% | 回答操作与图片预览工具栏的弱化图标；悬停恢复 muted，选中、错误、禁用和键盘焦点保留独立语义 |
 
 只读值、错误原因、加载说明和权限原因仍使用 body/secondary，不得降为 disabled。普通链接使用中性文字并以链接语义/下划线识别。深绿只留给图表，真实 success 继续走独立状态体系。
 

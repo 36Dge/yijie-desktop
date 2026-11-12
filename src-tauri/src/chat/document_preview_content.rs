@@ -13,6 +13,10 @@ use std::sync::Arc;
 #[path = "document_preview_markdown.rs"]
 mod markdown;
 
+#[path = "document_preview_continuous.rs"]
+mod continuous;
+pub(super) use continuous::ContentPages;
+
 #[cfg(test)]
 #[path = "document_preview_content_tests.rs"]
 mod tests;
@@ -31,6 +35,7 @@ pub(super) struct Presentation {
     pub html: String,
     pub assets: BTreeMap<String, Vec<u8>>,
     pub pdf: Option<Arc<PdfPages>>,
+    pub continuous: Option<Arc<ContentPages>>,
     pub sections: Vec<Section>,
     pub section: usize,
     pub offset: usize,
@@ -496,6 +501,20 @@ fn choose_blocks(
 pub(super) fn render(
     mime: &str,
     bytes: &[u8],
+    _section: usize,
+    _offset: usize,
+    dark: bool,
+    zoom: f64,
+) -> Result<Presentation, Code> {
+    // Conversation readers always start one continuous document. Old section
+    // cursors remain accepted, but never hide earlier pages in the new reader.
+    let presentation = render_chunk(mime, bytes, 0, 0, dark, zoom)?;
+    ContentPages::wrap(mime, bytes, dark, zoom, presentation)
+}
+
+fn render_chunk(
+    mime: &str,
+    bytes: &[u8],
     section: usize,
     offset: usize,
     dark: bool,
@@ -509,6 +528,7 @@ pub(super) fn render(
         html: String::new(),
         assets: BTreeMap::new(),
         pdf: None,
+        continuous: None,
         sections: vec![],
         section: 0,
         offset: 0,
@@ -744,39 +764,15 @@ pub(super) fn render(
     Ok(result)
 }
 
-// Office layout keeps its existing selected-slide/page controls. Actual PDFs
-// use the continuous renderer above; the CLI keeps the single-page CG adapter.
+// Office layout shares the continuous PDF reader. The standalone image-export
+// CLI continues to call the single-page Core Graphics adapter directly.
 pub(super) fn render_pdf_page(
     bytes: &[u8],
-    section: usize,
+    _section: usize,
     dark: bool,
     zoom: f64,
 ) -> Result<Presentation, Code> {
-    if bytes.is_empty() || bytes.len() > SOURCE_BUDGET {
-        return Err(Code::LimitExceeded);
-    }
-    let (count, selected, png) = super::document_preview_pdf::render(bytes, section)?;
-    Ok(Presentation {
-        kind: "pdf",
-        html: page(
-            "<img class=\"page\" src=\"yijie-document://preview/image/page.png\" alt=\"文档页面\">",
-            dark,
-            zoom,
-        ),
-        assets: BTreeMap::from([("image/page.png".to_owned(), png)]),
-        pdf: None,
-        sections: (0..count)
-            .map(|id| Section {
-                id,
-                label: format!("第 {} 页", id + 1),
-            })
-            .collect(),
-        section: selected,
-        offset: 0,
-        next: None,
-        previous: None,
-        partial: false,
-    })
+    render("application/pdf", bytes, 0, 0, dark, zoom)
 }
 
 fn column(value: &str) -> Option<usize> {

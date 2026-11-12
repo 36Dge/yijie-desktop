@@ -8385,6 +8385,66 @@ pub async fn chat_attachment_presentation_v2(
         });
         return Ok(response(None, None));
     }
+    if request.payload.action == "read_bound" {
+        let DraftTarget::Session(session) = target else {
+            return Err(ChatIpcError::request_invalid(Some(request.request_id)).v2());
+        };
+        let id = request
+            .payload
+            .attachment_id
+            .filter(|id| !id.is_nil())
+            .ok_or_else(|| ChatIpcError::request_invalid(Some(request.request_id)).v2())?;
+        let (application, _, manager) = offline_applications(&chat_runtime, request.request_id)
+            .await
+            .map_err(ChatIpcError::v2)?;
+        authorize(
+            &manager,
+            request.context_id,
+            ChatAction::ReadSessions,
+            request.request_id,
+        )
+        .map_err(ChatIpcError::v2)?;
+        let _lease = image_runtime
+            .borrow_read(attachment::MAX_ATTACHMENT_BYTES)
+            .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request.request_id)).v2())?;
+        let content = application
+            .bound_image_presentation(session, id)
+            .await
+            .map_err(|e| map_chat_error(e, Some(request.request_id)).v2())?
+            .map_err(|_| map_chat_error(ChatError::NotFound, Some(request.request_id)).v2())?;
+        let revision = content.revision;
+        let expires = content.expires;
+        let image_url = tokio::task::spawn_blocking(move || {
+            attachment::attachment_image_projection(&content.mime, &content.bytes)
+        })
+        .await
+        .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request.request_id)).v2())?
+        .map_err(|e| map_attachment_import_error(e, request.request_id, 1))?;
+        authorize(
+            &manager,
+            request.context_id,
+            ChatAction::ReadSessions,
+            request.request_id,
+        )
+        .map_err(ChatIpcError::v2)?;
+        let checked_at =
+            unix_seconds().map_err(|e| map_chat_error(e, Some(request.request_id)).v2())?;
+        if !application
+            .bound_image_presentation_current(session, id, revision, checked_at)
+            .await
+            .map_err(|e| map_chat_error(e, Some(request.request_id)).v2())?
+        {
+            return Err(map_chat_error(ChatError::NotFound, Some(request.request_id)).v2());
+        }
+        return Ok(CommandResponse::new_v2(
+            request.request_id,
+            AttachmentPresentationDto {
+                source_path: None,
+                image_url: Some(image_url),
+                expires_at: expires.min(checked_at + 30),
+            },
+        ));
+    }
     if request.payload.action != "read"
         || request.payload.attachment_id.is_none_or(|id| id.is_nil())
     {

@@ -5,6 +5,8 @@ import {
   parseArtifactPreviewOpenResponse,
   parseArtifactPreviewReleaseResponse,
   parseArtifactSaveResponse,
+  parseArtifactCopyResponse,
+  type ArtifactCopyResult,
   type ArtifactNativeErrorShape,
   type ArtifactNativeIdentity,
   type ArtifactPreviewOpenResult,
@@ -28,6 +30,7 @@ export interface ChatArtifactNativeClient {
   openImagePreview(contextId: string, identity: ArtifactNativeIdentity): Promise<ArtifactPreviewOpenResult>;
   releaseImagePreview(contextId: string, identity: ArtifactNativeIdentity): Promise<ArtifactPreviewReleaseResult>;
   saveImage(contextId: string, identity: ArtifactNativeIdentity): Promise<ArtifactSaveResult>;
+  copyImage(contextId: string, identity: ArtifactNativeIdentity): Promise<ArtifactCopyResult>;
 }
 
 async function tauriInvoke(command: string, arguments_?: Record<string, unknown>): Promise<unknown> {
@@ -73,6 +76,9 @@ export function createChatArtifactNativeClient(
     ),
     saveImage: (contextId, identity) => run(
       "chat_save_artifact_image_v1", contextId, identity, parseArtifactSaveResponse,
+    ),
+    copyImage: (contextId, identity) => run(
+      "chat_copy_artifact_image_v1", contextId, identity, parseArtifactCopyResponse,
     ),
   };
 }

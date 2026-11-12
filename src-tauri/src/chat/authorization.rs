@@ -879,6 +879,9 @@ mod tests {
                 20,
             )
             .unwrap();
+        manager
+            .authorize(read_only.context_id, ChatAction::ReadSessions, 21)
+            .unwrap();
         assert_eq!(
             manager.authorize(read_only.context_id, ChatAction::SubmitTurn, 21),
             Err(ChatError::ScopeDenied)
@@ -896,6 +899,14 @@ mod tests {
                 22,
             )
             .unwrap();
+        assert_eq!(
+            manager.authorize_detailed(
+                create_without_read.context_id,
+                ChatAction::ReadSessions,
+                23
+            ),
+            Err(AuthorizationFailure::CapabilityDenied)
+        );
         assert_eq!(
             manager.authorize_detailed(create_without_read.context_id, ChatAction::SubmitTurn, 23),
             Err(AuthorizationFailure::CapabilityDenied)

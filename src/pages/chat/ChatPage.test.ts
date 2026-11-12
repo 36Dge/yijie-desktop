@@ -61,6 +61,11 @@ type ChatSubmissionResult,
 } from "../../stores/chat.store";
 import ChatPage from "./ChatPage.vue";
 
+vi.mock("naive-ui", async original => ({
+  ...await original<typeof import("naive-ui")>(),
+  useMessage: () => ({ success: vi.fn(), error: vi.fn() }),
+}));
+
 const promptBoundary = vi.hoisted(() => ({ invoke: null as null | ((command: string, args: unknown) => Promise<unknown>) }));
 vi.mock("@tauri-apps/api/core", async original => {
   const actual = await original<typeof import("@tauri-apps/api/core")>();
@@ -1530,7 +1535,7 @@ describe("FEAT-126 ChatPage", () => {
     wrapper.unmount();
   });
 
-  it("projects native attachment progress into the real composer", async () => {
+  it("keeps native attachment import busy without showing intermediate progress", async () => {
     const { wrapper, store } = await mountPage("/chat");
     store.attachmentImporting = true;
     store.attachmentImportAttempt = {
@@ -1544,7 +1549,9 @@ describe("FEAT-126 ChatPage", () => {
     } satisfies ChatAttachmentImportEvent;
     await flushPromises();
 
-    expect(wrapper.text()).toContain("3 个附件 · 正在建立索引");
+    expect(wrapper.getComponent(ChatComposer).props("attachmentImporting")).toBe(true);
+    expect(wrapper.text()).not.toContain("正在建立索引");
+    expect(wrapper.find(".chat-composer__attachment-progress").exists()).toBe(false);
     expect(wrapper.get('[aria-label="可添加文件、技能、连接器"]').attributes("disabled")).toBeDefined();
   });
 

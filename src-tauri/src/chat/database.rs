@@ -1739,6 +1739,30 @@ impl ChatRepository {
         Result<super::document_preview_native::StoredDocument, super::artifact::ReadyFileReadError>,
         ChatError,
     > {
+        self.bound_attachment_preview(session, message, attachment, false)
+    }
+
+    pub(super) fn bound_image_presentation(
+        &self,
+        session: Uuid,
+        attachment: Uuid,
+    ) -> Result<
+        Result<super::document_preview_native::StoredDocument, super::artifact::ReadyFileReadError>,
+        ChatError,
+    > {
+        self.bound_attachment_preview(session, None, attachment, true)
+    }
+
+    fn bound_attachment_preview(
+        &self,
+        session: Uuid,
+        message: Option<Uuid>,
+        attachment: Uuid,
+        image_only: bool,
+    ) -> Result<
+        Result<super::document_preview_native::StoredDocument, super::artifact::ReadyFileReadError>,
+        ChatError,
+    > {
         use super::artifact::ReadyFileReadError as ReadError;
         use sha2::Digest;
         let now = unix_seconds()?;
@@ -1749,10 +1773,11 @@ impl ChatRepository {
              FROM chat_attachments a JOIN chat_messages m ON m.id=a.message_id
              JOIN chat_sessions s ON s.id=m.session_id
              JOIN chat_message_content_blocks b ON b.message_id=m.id AND b.attachment_id=a.id
-             WHERE a.id=?1 AND (?2 IS NULL OR m.id=?2) AND s.id=?3 AND m.role='user' AND a.kind='file'
+             WHERE a.id=?1 AND (?2 IS NULL OR m.id=?2) AND s.id=?3 AND m.role='user'
+             AND ((?7=0 AND a.kind='file') OR (?7=1 AND a.media_type IN ('image/jpeg','image/png','image/webp','image/gif','image/svg+xml')))
              AND a.owner_user_id=?4 AND a.tenant_id=?5
              AND s.owner_user_id=a.owner_user_id AND s.tenant_id=a.tenant_id",
-            params![attachment.to_string(),message.map(|id| id.to_string()),session.to_string(),self.scope.owner_user_id,self.scope.tenant_id,now],
+            params![attachment.to_string(),message.map(|id| id.to_string()),session.to_string(),self.scope.owner_user_id,self.scope.tenant_id,now,image_only],
             |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?)),
         ).optional().map_err(map_sqlite_error)?;
         let Some((mime, state, size, revision, expires, bytes, name)) = row else {
@@ -1789,6 +1814,35 @@ impl ChatRepository {
         revision: String,
         now: i64,
     ) -> Result<bool, ChatError> {
+        self.document_preview_current_with_images(source, revision, now, false)
+    }
+
+    pub(super) fn bound_image_presentation_current(
+        &self,
+        session: Uuid,
+        attachment: Uuid,
+        revision: String,
+        now: i64,
+    ) -> Result<bool, ChatError> {
+        self.document_preview_current_with_images(
+            super::document_preview_native::DocumentSource::Attachment {
+                session_id: session,
+                message_id: None,
+                attachment_id: attachment,
+            },
+            revision,
+            now,
+            true,
+        )
+    }
+
+    fn document_preview_current_with_images(
+        &self,
+        source: super::document_preview_native::DocumentSource,
+        revision: String,
+        now: i64,
+        include_images: bool,
+    ) -> Result<bool, ChatError> {
         if let super::document_preview_native::DocumentSource::MessageFile(target) = &source {
             return Ok(self.message_file_project(target)?.is_some());
         }
@@ -1796,9 +1850,9 @@ impl ChatRepository {
         let sql=match source {
             super::document_preview_native::DocumentSource::MessageFile(_) => return Err(ChatError::InvalidInput),
             super::document_preview_native::DocumentSource::Artifact{..}=>
-                "SELECT EXISTS(SELECT 1 FROM chat_output_artifacts a JOIN chat_sessions s ON s.id=a.session_id JOIN chat_turns t ON t.id=a.turn_id AND t.session_id=s.id WHERE a.artifact_id=?1 AND a.turn_id=?2 AND a.session_id=?3 AND a.owner_user_id=?4 AND a.tenant_id=?5 AND s.owner_user_id=a.owner_user_id AND s.tenant_id=a.tenant_id AND a.state='ready' AND a.local_committed_at IS NOT NULL AND a.sha256=?6 AND a.expires_at>?7)",
+                "SELECT EXISTS(SELECT 1 FROM chat_output_artifacts a JOIN chat_sessions s ON s.id=a.session_id JOIN chat_turns t ON t.id=a.turn_id AND t.session_id=s.id WHERE a.artifact_id=?1 AND a.turn_id=?2 AND a.session_id=?3 AND a.owner_user_id=?4 AND a.tenant_id=?5 AND s.owner_user_id=a.owner_user_id AND s.tenant_id=a.tenant_id AND a.state='ready' AND a.local_committed_at IS NOT NULL AND a.sha256=?6 AND a.expires_at>?7 AND ?8=0)",
             super::document_preview_native::DocumentSource::Attachment{..}=>
-                "SELECT EXISTS(SELECT 1 FROM chat_attachments a JOIN chat_messages m ON m.id=a.message_id JOIN chat_sessions s ON s.id=m.session_id JOIN chat_message_content_blocks b ON b.message_id=m.id AND b.attachment_id=a.id WHERE a.id=?1 AND (?2 IS NULL OR m.id=?2) AND s.id=?3 AND a.owner_user_id=?4 AND a.tenant_id=?5 AND s.owner_user_id=a.owner_user_id AND s.tenant_id=a.tenant_id AND m.role='user' AND a.kind='file' AND a.state='bound' AND a.sha256=?6 AND a.expires_at>?7)",
+                "SELECT EXISTS(SELECT 1 FROM chat_attachments a JOIN chat_messages m ON m.id=a.message_id JOIN chat_sessions s ON s.id=m.session_id JOIN chat_message_content_blocks b ON b.message_id=m.id AND b.attachment_id=a.id WHERE a.id=?1 AND (?2 IS NULL OR m.id=?2) AND s.id=?3 AND a.owner_user_id=?4 AND a.tenant_id=?5 AND s.owner_user_id=a.owner_user_id AND s.tenant_id=a.tenant_id AND m.role='user' AND (a.kind='file' OR (?8=1 AND a.kind='image')) AND a.state='bound' AND a.sha256=?6 AND a.expires_at>?7)",
         };
         self.connection
             .query_row(
@@ -1810,7 +1864,8 @@ impl ChatRepository {
                     self.scope.owner_user_id,
                     self.scope.tenant_id,
                     revision,
-                    now
+                    now,
+                    include_images
                 ],
                 |r| r.get(0),
             )
@@ -10360,6 +10415,86 @@ mod tests {
                 .unwrap()
                 .host_session_bound
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn bound_input_image_presentation_reuses_binding_integrity_and_expiry_checks() {
+        let root = std::env::temp_dir().join(format!("yijie-bound-image-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let owner = scope();
+        let mut repository = open_repository_for_scope(&root, 43, owner.clone());
+        let project = register_synthetic_project(&mut repository, &root);
+        let bytes = crate::chat::attachment::test_image_bytes("png");
+        let prepared = crate::chat::attachment::prepare_bytes(
+            "normal.png".into(),
+            bytes.clone(),
+            unix_seconds().unwrap(),
+        )
+        .unwrap();
+        let id = prepared.id;
+        repository
+            .store_attachment(prepared, DraftTarget::New)
+            .unwrap();
+        let pending = repository
+            .create_session_and_enqueue_multimodal(
+                project,
+                &[DraftContentBlock::Image(id)],
+                Uuid::now_v7(),
+                7,
+            )
+            .unwrap();
+        let content = repository
+            .bound_image_presentation(pending.session_id, id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(content.bytes, bytes);
+        assert_eq!(content.mime, "image/png");
+        assert!(repository
+            .bound_image_presentation_current(
+                pending.session_id,
+                id,
+                content.revision.clone(),
+                unix_seconds().unwrap()
+            )
+            .unwrap());
+        assert!(!repository
+            .bound_image_presentation_current(
+                pending.session_id,
+                id,
+                content.revision.clone(),
+                content.expires
+            )
+            .unwrap());
+        assert!(repository
+            .draft_attachment_presentation(id, DraftTarget::New)
+            .is_err());
+        assert!(repository
+            .bound_image_presentation(Uuid::now_v7(), id)
+            .unwrap()
+            .is_err());
+        // The existing document reader retains its file-only behavior.
+        assert!(repository
+            .bound_document_preview(pending.session_id, None, id)
+            .unwrap()
+            .is_err());
+        drop(repository);
+        let other = open_repository_for_scope(&root, 43, scope());
+        assert!(other
+            .bound_image_presentation(pending.session_id, id)
+            .unwrap()
+            .is_err());
+        drop(other);
+        let reopened = open_repository_for_scope(&root, 43, owner);
+        assert_eq!(
+            reopened
+                .bound_image_presentation(pending.session_id, id)
+                .unwrap()
+                .unwrap()
+                .bytes,
+            bytes
+        );
+        drop(reopened);
         fs::remove_dir_all(root).unwrap();
     }
 

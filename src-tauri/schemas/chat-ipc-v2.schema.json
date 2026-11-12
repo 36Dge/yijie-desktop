@@ -640,10 +640,22 @@
         "action": {
           "enum": [
             "read",
-            "clear"
+            "clear",
+            "read_bound"
           ]
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "action": { "const": "read_bound" } } },
+          "then": {
+            "properties": {
+              "draftTarget": { "type": "object", "properties": { "type": { "const": "session" } }, "required": ["type"] },
+              "attachmentId": { "$ref": "#/$defs/uuid" }
+            }
+          }
+        }
+      ]
     },
     "attachmentPresentationRequest": {
       "type": "object",
@@ -724,5 +736,5 @@
       }
     }
   },
-  "x-yijie-attachment-presentation": "Main WebView only, current authorized unbound draft; ephemeral selected path and bounded image projection. Native reads borrow existing image read budget. No disk path input, output message field, persistence or provider transmission. Clear drops temporary selected-path metadata."
+  "x-yijie-attachment-presentation": "Main WebView only. read/clear retain the current authorized unbound draft semantics. read_bound requires a session target and attachment ID, ReadSessions authorization, an existing user-message binding, TTL and digest validation before and after bounded image decoding; sourcePath is always null. Native reads borrow the existing image read budget. No disk path input, persistent projection or provider transmission. Clear drops only temporary draft selected-path metadata."
 }

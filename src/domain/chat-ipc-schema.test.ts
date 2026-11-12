@@ -74,6 +74,15 @@ const historyResponse = Object.freeze({
 });
 
 describe("private chat IPC v2 JSON Schema", () => {
+  it("adds bound image reads while retaining draft presentation requests", () => {
+    const validate = validator("attachmentPresentationPayload");
+    const attachmentId = imageAttachment.attachmentId;
+    expect(validate({ action: "read", draftTarget: { type: "new" }, attachmentId })).toBe(true);
+    expect(validate({ action: "clear", draftTarget: { type: "new" }, attachmentId: null })).toBe(true);
+    expect(validate({ action: "read_bound", draftTarget: { type: "session", sessionId: attachmentId }, attachmentId }), JSON.stringify(validate.errors)).toBe(true);
+    expect(validate({ action: "read_bound", draftTarget: { type: "new" }, attachmentId })).toBe(false);
+    expect(validate({ action: "read_bound", draftTarget: { type: "session", sessionId: attachmentId }, attachmentId: null })).toBe(false);
+  });
   it("accepts an explicit null project for new tasks while requiring the project field", () => {
     const validate = validator("createSessionPayload");
     const payload = { projectId: null, contentBlocks: [{type: "text", text: "无项目任务"}], operationId: imageAttachment.attachmentId };

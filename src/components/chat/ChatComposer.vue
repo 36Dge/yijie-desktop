@@ -21,6 +21,7 @@ import type { ChatSkillChip } from "../../domain/chat-skills";
 import ChatReadinessNotice from "./ChatReadinessNotice.vue";
 import ChatAddControl from "./ChatAddControl.vue";
 import ChatAttachmentChip from "./ChatAttachmentChip.vue";
+import ChatAttachmentImage from "./ChatAttachmentImage.vue";
 import type { AttachmentPresentationReader } from "../../domain/chat-file-presentation";
 import type { ConnectorChipView } from "../../domain/connector-ui";
 
@@ -147,32 +148,7 @@ const attachmentButtonDisabled = computed(() =>
   props.attachmentImporting || props.attachments.length >= 10,
 );
 
-const ATTACHMENT_STATUS_LABELS = Object.freeze({
-  queued: "等待导入",
-  importing: "正在导入",
-  parsing: "正在解析",
-  indexing: "正在建立索引",
-  ready: "已就绪",
-  bound: "已发送",
-  error_terminal: "无法读取，请移除后重新选择",
-  expired: "已过期",
-});
-
-function attachmentImportStatus(attempt: ChatAttachmentImportEvent): string {
-  return ATTACHMENT_STATUS_LABELS[attempt.stage];
-}
-
-function attachmentImportDetails(attempt: ChatAttachmentImportEvent): string {
-  return `${attempt.itemCount} 个附件 · ${attachmentImportStatus(attempt)}`;
-}
-
-const attachmentProgressAnnouncement = computed(() => {
-  const attempt = props.attachmentImportAttempt;
-  if (!attempt) return "正在处理附件";
-  return `${attempt.itemCount} 个附件：${attachmentImportStatus(attempt)}`;
-});
-
-
+const failedAttachmentImport = computed(() => props.attachmentImportAttempt?.stage === "error_terminal" ? props.attachmentImportAttempt : null);
 
 function attachmentErrorMessage(code: string | null): string | null {
   switch (code) {
@@ -392,40 +368,48 @@ function handlePaste(event: ClipboardEvent): void {
       >
         <label class="chat-composer__label" for="chat-task-input">输入你的任务需求</label>
         <ul
-          v-if="attachments.length > 0 || attachmentImportAttempt"
+          v-if="attachments.length > 0 || failedAttachmentImport"
           v-show="!compactLayout"
           class="chat-composer__attachments"
           aria-label="待发送附件"
         >
           <li
-            v-if="attachmentImportAttempt"
-            :key="`import-${attachmentImportAttempt.operationId}`"
-            class="chat-composer__attachment"
-            :class="`chat-composer__attachment--${attachmentImportAttempt.stage}`"
+            v-if="failedAttachmentImport"
+            :key="`import-${failedAttachmentImport.operationId}`"
+            class="chat-composer__attachment chat-composer__attachment--error_terminal"
           >
             <span class="chat-composer__attachment-icon" aria-hidden="true">
               <YjIcon name="file" size="sm" />
             </span>
             <span class="chat-composer__attachment-copy">
-              <strong>{{ attachmentImportAttempt.itemCount }} 个附件</strong>
-              <span>{{ attachmentImportDetails(attachmentImportAttempt) }}</span>
+              <strong>附件添加失败</strong>
+              <span>请移除后重新选择</span>
             </span>
             <span class="chat-composer__attachment-actions">
-              <YjTooltip v-if="attachmentImportAttempt.stage === 'error_terminal'" text="移除失败的附件选择"><button
+              <YjTooltip text="移除失败的附件选择"><button
 
                 type="button"
                 class="chat-composer__attachment-action"
                 aria-label="移除失败的附件选择"
 
                 :disabled="submissionBusy || attachmentImporting"
-                @click="emit('dismiss-attachment-import', attachmentImportAttempt.operationId)"
+                @click="emit('dismiss-attachment-import', failedAttachmentImport.operationId)"
               >
                 <YjIcon name="dismiss" size="sm" />
               </button></YjTooltip>
             </span>
           </li>
           <li v-for="attachment in attachments" :key="attachment.attachmentId" class="chat-composer__capsule">
-            <ChatAttachmentChip
+            <ChatAttachmentImage
+              v-if="attachment.mediaType.startsWith('image/')"
+              :key="presentationScope"
+              :attachment-id="attachment.attachmentId" :name="attachment.name" :status="attachment.status"
+              :scope-key="presentationScope" removable :disabled="submissionBusy || !canSend"
+              :read-presentation="readAttachmentPresentation"
+              @remove="emit('remove-attachment', $event)"
+            />
+            <ChatAttachmentChip v-else
+              :key="presentationScope"
               :attachment-id="attachment.attachmentId" :name="attachment.name" :media-type="attachment.mediaType" :status="attachment.status"
               :active="activeAttachment === attachment.attachmentId" removable :disabled="submissionBusy || !canSend"
               :read-presentation="readAttachmentPresentation"
@@ -596,16 +580,6 @@ function handlePaste(event: ClipboardEvent): void {
     >
       {{ visibleValidationMessage }}
     </p>
-    <p
-      v-if="attachmentImporting || (attachmentImportAttempt && !['ready', 'error_terminal'].includes(attachmentImportAttempt.stage))"
-      class="chat-composer__attachment-progress"
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
-    >
-      <span class="chat-composer__progress-dot" aria-hidden="true" />
-      {{ attachmentProgressAnnouncement }}
-    </p>
     <p v-if="attachmentErrorMessage(attachmentErrorCode)" class="chat-composer__validation" role="alert">
       {{ attachmentErrorMessage(attachmentErrorCode) }}
     </p>
@@ -775,6 +749,7 @@ function handlePaste(event: ClipboardEvent): void {
   z-index: 1;
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
   gap: var(--yj-space-2);
   padding: var(--yj-space-3) var(--yj-space-3) 0;
   margin: 0;
@@ -990,22 +965,6 @@ function handlePaste(event: ClipboardEvent): void {
   color: var(--yj-color-semantic-error-ink);
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
-}
-
-.chat-composer__attachment-progress {
-  display: flex;
-  align-items: center;
-  gap: var(--yj-space-2);
-  margin: var(--yj-space-2) var(--yj-space-4) 0;
-  color: var(--yj-color-text-secondary);
-  font-size: var(--yj-font-size-caption);
-}
-
-.chat-composer__progress-dot {
-  width: var(--yj-space-2);
-  height: var(--yj-space-2);
-  border-radius: var(--yj-radius-full);
-  background: var(--yj-color-agent-running);
 }
 
 .chat-composer__send {

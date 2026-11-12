@@ -11,6 +11,11 @@ import { createArtifactProjection } from "../../domain/chat-artifact";
 import ChatArtifactList from "./ChatArtifactList.vue";
 import ChatArtifactShell from "./ChatArtifactShell.vue";
 
+vi.mock("naive-ui", async original => ({
+  ...await original<typeof import("naive-ui")>(),
+  useMessage: () => ({ success: vi.fn(), error: vi.fn() }),
+}));
+
 const SESSION_ID = "019c1a00-0000-7000-8000-000000000301";
 const TURN_ID = "019c1a00-0000-7000-8000-000000000302";
 const CONTEXT_ID = "019c1a00-0000-7000-8000-000000000300";
@@ -19,6 +24,7 @@ const NATIVE_CLIENT: ChatArtifactNativeClient = {
   openImagePreview: vi.fn(async () => ({ status: "opened" as const, previewUrl: PREVIEW_URL })),
   releaseImagePreview: vi.fn(async () => ({ status: "released" as const })),
   saveImage: vi.fn(async () => ({ status: "saved" as const, code: null })),
+  copyImage: vi.fn(async () => ({ status: "copied" as const })),
 };
 const FILE_NATIVE_CLIENT: ChatArtifactFileNativeClient = {
   readFilePreview: vi.fn(async () => ({
@@ -66,46 +72,41 @@ function artifact(
 }
 
 describe("ChatArtifactShell", () => {
-  it("FEAT166 routes both filename and preview action through the same artifact binding", async () => {
+  it("routes document and media previews through their respective artifact bindings", async () => {
     const openFile = vi.fn();
     const value = artifact(0, {kind:"file",status:"ready",mediaType:"application/pdf",displayName:"normal.pdf"});
-    const wrapper = mount(ChatArtifactList, {props:{artifacts:[value],contextId:CONTEXT_ID,openFile,fileNativeClient:FILE_NATIVE_CLIENT}});
+    const wrapper = mount(ChatArtifactList, {props:{artifacts:[value],contextId:CONTEXT_ID,openFile,nativeClient:NATIVE_CLIENT,fileNativeClient:FILE_NATIVE_CLIENT}});
     try {
-      await wrapper.get('[role="link"]').trigger("click");
-      await wrapper.get('[aria-label="产物详情与操作"]').trigger("click");
-      await wrapper.get(".artifact-file__actions button").trigger("click");
-      expect(openFile).toHaveBeenNthCalledWith(1,value);expect(openFile).toHaveBeenNthCalledWith(2,value);
-      for (const [kind, mime, name] of [
-        ["image", "image/svg+xml", "图.svg"], ["video", "video/mp4", "演示.mp4"],
-        ["report", "application/vnd.yijie.report+json;version=1", "分析.json"],
-      ] as const) {
-        const output = artifact(0, {kind, status:"ready", mediaType:mime, displayName:name});
-        await wrapper.setProps({artifacts:[output]});
-        const link = wrapper.get('[role="link"]');
-        expect(link.text()).toBe(`《${name}》`);
-        await link.trigger("click");
-        if (kind === "report") expect(openFile).toHaveBeenLastCalledWith(output);
-        else expect(openFile).toHaveBeenCalledTimes(2);
-      }
+      await wrapper.get('[aria-label="预览 normal.pdf"]').trigger("click");
+      expect(openFile).toHaveBeenCalledExactlyOnceWith(value);
+      await wrapper.get('[aria-label="另存为"]').trigger("click");
+      expect(FILE_NATIVE_CLIENT.saveFile).toHaveBeenCalled();
+      const image = artifact(0, {kind:"image",status:"ready",mediaType:"image/png",displayName:"图.png"});
+      await wrapper.setProps({artifacts:[image]});
+      expect(wrapper.get(".artifact-image__title").text()).toBe("图");
+      expect(wrapper.find(".artifact-shell").exists()).toBe(false);
+      const video = artifact(0, {kind:"video",status:"ready",mediaType:"video/mp4",displayName:"演示.mp4"});
+      await wrapper.setProps({artifacts:[video]});
+      expect(wrapper.get('[role="link"]').text()).toBe("《演示.mp4》");
+      expect(openFile).toHaveBeenCalledTimes(1);
     } finally {wrapper.unmount();}
   });
   it("renders safe metadata, all generic states, four kinds, and synthetic provenance", () => {
     const items = [
-      artifact(0, { kind: "image", status: "announced", displayName: "demo.png" }),
+      artifact(0, { kind: "file", status: "announced", displayName: "demo.txt" }),
       artifact(1, { kind: "video", status: "generating", progressStage: "generating" }),
       artifact(2, { kind: "file", status: "processing", progressStage: "processing", progressPercent: 42 }),
       artifact(3, { kind: "report", status: "transferring", mediaType: "application/vnd.yijie.report+json;version=1", sizeBytes: 32 }),
-      artifact(4, { status: "ready", mediaType: "image/png", sizeBytes: 32, localCommittedAt: 1_000, expiresAt: 605_801_000 }),
-      artifact(5, { status: "failed", errorCode: "artifact_failed", retryable: false }),
-      artifact(6, { status: "cancelled", errorCode: "turn_interrupted", retryable: false }),
-      artifact(7, { status: "expired", mediaType: "image/png", sizeBytes: 32, localCommittedAt: 1_000, expiresAt: 605_801_000 }),
+      artifact(4, { kind: "file", status: "ready", mediaType: "text/plain", sizeBytes: 32, localCommittedAt: 1_000, expiresAt: 605_801_000 }),
+      artifact(5, { kind: "file", status: "failed", errorCode: "artifact_failed", retryable: false }),
+      artifact(6, { kind: "file", status: "cancelled", errorCode: "turn_interrupted", retryable: false }),
+      artifact(7, { kind: "file", status: "expired", mediaType: "image/png", sizeBytes: 32, localCommittedAt: 1_000, expiresAt: 605_801_000 }),
     ];
     const wrapper = mount(ChatArtifactList, {
       props: { artifacts: items, contextId: CONTEXT_ID, nativeClient: NATIVE_CLIENT },
     });
 
-    expect(wrapper.text()).toContain("demo.png");
-    expect(wrapper.text()).toContain("图片");
+    expect(wrapper.text()).toContain("demo.txt");
     expect(wrapper.text()).toContain("视频");
     expect(wrapper.text()).toContain("文件");
     expect(wrapper.text()).toContain("报告");
@@ -119,7 +120,7 @@ describe("ChatArtifactShell", () => {
   it("exposes busy, live, focus, and trusted progress semantics without inventing a percent", () => {
     const unknown = mount(ChatArtifactShell, {
       props: {
-        artifact: artifact(0, { status: "generating", progressStage: "generating" }),
+        artifact: artifact(0, { kind: "file", status: "generating", progressStage: "generating" }),
         contextId: CONTEXT_ID,
         nativeClient: NATIVE_CLIENT,
       },
@@ -133,6 +134,7 @@ describe("ChatArtifactShell", () => {
     const trusted = mount(ChatArtifactShell, {
       props: {
         artifact: artifact(1, {
+          kind: "file",
           status: "processing",
           progressStage: "processing",
           progressPercent: 57,
@@ -162,8 +164,8 @@ describe("ChatArtifactShell", () => {
         contextId: CONTEXT_ID,
       },
     });
-    expect(retryable.text()).toContain("服务生成");
-    expect(retryable.get("[data-testid='artifact-failure-guidance']").text())
+    expect(retryable.text()).not.toContain("服务生成");
+    expect(retryable.get("[role='alert'] span").text())
       .toBe("图片生成失败，可在输入框重新提交需求。");
     expect(retryable.html()).not.toMatch(/(?:\/Users\/|minimax\.key|bearer|provider_raw)/i);
     expect((await axe.run(retryable.element)).violations).toEqual([]);
@@ -179,7 +181,7 @@ describe("ChatArtifactShell", () => {
         contextId: CONTEXT_ID,
       },
     });
-    expect(terminal.get("[data-testid='artifact-failure-guidance']").text())
+    expect(terminal.get("[role='alert'] span").text())
       .toBe("图片生成失败，请调整需求后重新提交。");
   });
 
