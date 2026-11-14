@@ -1,3 +1,4 @@
+import {verifyNativeSkillBuildCandidate} from "./native-skill-build-candidate.mjs";
 import {verifyDocumentBuildCandidate} from "./document-build-candidate.mjs";
 // FEAT-164 local provenance. Immutable mode checks Git objects and actual build
 // inputs independently. A source pin alone is not G2V or release qualification.
@@ -91,6 +92,7 @@ export function verifyKimiK31BuildCandidate(desktopRoot,contractsRoot,hostRoot,e
   execFileSync(process.execPath,["scripts/generate-video-generation.mjs","--consumer=host","--check"],{cwd:contractsRoot,stdio:"pipe"});
   for(const consumer of ["host","desktop"])execFileSync(process.execPath,["scripts/generate-document-runtime.mjs","--consumer="+consumer,"--check"],{cwd:contractsRoot,stdio:"pipe"});
  }
+ if(env.YIJIE_FEAT174_NATIVE_SKILLS === "true") return verifyNativeSkillBuildCandidate(desktopRoot,contractsRoot,hostRoot,env);
  if(env.YIJIE_FEAT171_DOCUMENT_RUNTIME === "true") return verifyDocumentBuildCandidate(desktopRoot,contractsRoot,hostRoot,env);
  if(env.YIJIE_FEAT169_NATIVE_TOOLS === "true") {
   checkPins(desktopRoot,hostRoot);

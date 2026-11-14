@@ -9,7 +9,7 @@ import { sha256 } from "./sync-desktop-skill-resources.mjs";
 it("stages pinned ordinary and expert resources beside the executable with a separate Cargo cache, and reuses them on reopen", async () => {
   const root = await mkdtemp(path.join(await realpath(os.tmpdir()), "yijie-development-resources-"));
   const env = {
-    YIJIE_DEVELOPMENT_CLIENT: "true", YIJIE_FEAT164_DAILY: "true", YIJIE_KIMI_K31_PRO_CANDIDATE: "true",
+    YIJIE_FEAT174_NATIVE_SKILLS: "true", YIJIE_DEVELOPMENT_CLIENT: "true", YIJIE_FEAT164_DAILY: "true", YIJIE_KIMI_K31_PRO_CANDIDATE: "true",
     YIJIE_KIMI_K31_CALL_SURFACES: "media", YIJIE_EXPERTS_ENABLED: "true", YIJIE_MARKET_CONNECTORS_ENABLED: "true",
     YIJIE_ARTIFACT_MEDIA_ENABLED: "true", YIJIE_FEAT155_SCHEDULED_DAILY: "true", YIJIE_FEAT155_SCHEDULED_CANDIDATE: "false",
     CARGO_TARGET_DIR: path.join(root, ".local/development/target"), CARGO_BUILD_BUILD_DIR: path.join(root, ".local/cache/desktop"),
@@ -29,7 +29,10 @@ it("stages pinned ordinary and expert resources beside the executable with a sep
     await file(".local/feat164-kimi-k31/skill-packages-experts/authority.json", authority);
     await file("contracts/desktop-skill-bundle-local.lock.json", JSON.stringify({ channels: { "local-development": { manifest_sha256: sha256(manifest) } } }));
     await file("contracts/experts-assets-feat164.candidate.json", JSON.stringify({ manifest_sha256: sha256(manifest), authority_sha256: sha256(authority) }));
-    await file("src-tauri/tauri.demo-fast.conf.json", JSON.stringify({ bundle: { resources: { "../.local/skill-packages": "skill-packages" } } }));
+    const native=Buffer.from("---\nname: ordinary-native\ndescription: A normal local resource.\n---\nOrdinary instructions.\n");
+    await file(".local/skill-marketplace/plugins/ordinary/skills/main/SKILL.md",native);
+    await file("contracts/native-skill-resources.candidate.json",JSON.stringify({files:{"plugins/ordinary/skills/main/SKILL.md":sha256(native)}}));
+    await file("src-tauri/tauri.demo-fast.conf.json", JSON.stringify({ bundle: { resources: { "../.local/skill-packages": "skill-packages", "../.local/skill-marketplace":"skill-marketplace" } } }));
     await file("src-tauri/tauri.feat164-experts.conf.json", JSON.stringify({ bundle: { resources: { "../.local/feat164-kimi-k31/skill-packages-experts": "skill-packages-experts" } } }));
     await file("src-tauri/tauri.workflow-local.conf.json", "{}");
     await stageDevelopmentResources(root, env, developmentArguments(env));
@@ -39,6 +42,7 @@ it("stages pinned ordinary and expert resources beside the executable with a sep
       expect(await readFile(path.join(target, slot, "packages/normal.txt"))).toEqual(resource);
     }
     expect(await readFile(path.join(target, "skill-packages-experts/authority.json"))).toEqual(authority);
+    expect(await readFile(path.join(target,"skill-marketplace/plugins/ordinary/skills/main/SKILL.md"))).toEqual(native);
     const before = await stat(path.join(target, "skill-packages-experts/authority.json"));
     await stageDevelopmentResources(root, env, developmentArguments(env));
     expect((await stat(path.join(target, "skill-packages-experts/authority.json"))).mtimeMs).toBe(before.mtimeMs);

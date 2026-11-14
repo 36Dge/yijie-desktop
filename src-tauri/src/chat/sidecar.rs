@@ -989,6 +989,12 @@ impl SidecarSupervisor {
                 );
             }
         }
+        if read_exact_boolean_environment("YIJIE_FEAT174_NATIVE_SKILLS")? {
+            if !self.demo_fast || self.market_management_only() || !read_exact_boolean_environment("YIJIE_FEAT169_NATIVE_TOOLS")? {return Err(ChatError::InvalidConfiguration);}
+            let roots=self.skill_roots.as_ref().ok_or(ChatError::InvalidConfiguration)?;
+            let (bundle,market,digest)=crate::skills::native_market_roots(roots).map_err(|_| ChatError::InvalidConfiguration)?;
+            command.env("YIJIE_FEAT174_NATIVE_SKILLS","true").env("YIJIE_NATIVE_SKILL_BUNDLE_ROOT",bundle).env("YIJIE_NATIVE_SKILL_BUNDLE_SHA256",digest).env("YIJIE_SKILL_MARKET_ROOT",market);
+        }
         // Only an exact developer rollback selector crosses the existing child
         // boundary. Host still admits video solely in its complete media profile.
         let video_selector = read_optional_environment("YIJIE_FEAT173_VIDEO_MCP")?;

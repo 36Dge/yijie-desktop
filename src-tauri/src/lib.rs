@@ -335,6 +335,7 @@ pub fn run() {
                     return Err(Box::new(error) as Box<dyn std::error::Error>);
                 }
             };
+            let app_data_directory=skills::acceptance_app_data(app_data_directory).map_err(|error|std::io::Error::other(error.code()))?;
             let skill_runtime = if local_profile.is_demo_fast() {
                 let experts_enabled = chat::experts::enabled();
                 match app
@@ -456,6 +457,11 @@ pub fn run() {
         workflows::workflow_editor_close,
         workflows::workflow_run_start,
         workflows::workflow_run_query,
+        skills::market_v2::skills_list_v2,
+        skills::market_v2::skills_mutate_v2,
+        skills::market_v2::skills_operation_v2,
+        skills::market_v2::skills_cancel_v2,
+        skills::market_v2::skills_import_v2,
         skills::host::skills_list_v1,
         skills::host::skills_scan_v1,
         skills::host::skills_install_v1,

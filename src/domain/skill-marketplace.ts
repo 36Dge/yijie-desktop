@@ -1,9 +1,11 @@
+import type { DependencyState, InstallState, Origin, PendingOperation } from "./skill-market-v2.generated";
 export const SKILL_CATEGORIES = [
   { key: "sourcing-selection", label: "货源与选品" },
   { key: "market-research", label: "市场调研与分析" },
   { key: "content-marketing", label: "内容创作与营销" },
   { key: "traffic-advertising", label: "流量获取与广告" },
   { key: "store-operations", label: "店铺运营与基建" },
+  { key: "personal", label: "我的技能" },
 ] as const;
 
 export type SkillCategory = (typeof SKILL_CATEGORIES)[number]["key"];
@@ -49,6 +51,12 @@ export type SkillFailureCode =
   | "unknown";
 
 export interface ManagedSkillProjection {
+  readonly nativeEpoch?: number;
+  readonly nativeOrigin?: Origin;
+  readonly nativeInstallation?: InstallState;
+  readonly nativeFailureCode?: string;
+  readonly retired?: boolean;
+  readonly dependencyState?: DependencyState;
   readonly id: string;
   readonly runtimeName: string;
   readonly category: SkillCategory;
@@ -76,7 +84,9 @@ export interface ManagedSkillProjection {
 }
 
 export interface SkillCatalogSnapshot {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 1 | 2;
+  readonly notice?: string;
+  readonly pendingOperations?: readonly PendingOperation[];
   readonly scannedAt: string;
   readonly skills: readonly ManagedSkillProjection[];
 }
@@ -397,7 +407,7 @@ export function parseSkillCatalogSnapshot(value: unknown): SkillCatalogSnapshot 
 export function projectSkillCategories(
   skills: readonly ManagedSkillProjection[],
 ): readonly SkillCategoryProjection[] {
-  return Object.freeze(SKILL_CATEGORIES.map((category) => Object.freeze({
+  return Object.freeze(SKILL_CATEGORIES.filter(category => category.key !== "personal" || skills.some(skill => skill.nativeEpoch !== undefined || skill.category === "personal")).map((category) => Object.freeze({
     ...category,
     skills: Object.freeze(skills.filter((skill) => skill.category === category.key)),
   })));
@@ -432,6 +442,12 @@ export function skillRiskLabel(level: SkillRiskLevel): string {
 }
 
 export function skillCapabilitySummary(skill: ManagedSkillProjection): string {
+  if (skill.nativeEpoch !== undefined) {
+    if (skill.dependencyState === "missing") return "所需工具尚未就绪";
+    if (skill.dependencyState === "needs_authorization") return "所需工具需要授权";
+    if (skill.dependencyState === "unknown") return "工具可用性将在任务中核对";
+    return "技能已可用";
+  }
   if (
     skill.executionMode === "model-only" &&
     skill.networkAccess === "none" &&
@@ -455,6 +471,7 @@ export function skillCapabilitySummary(skill: ManagedSkillProjection): string {
 }
 
 export function skillCanInstall(skill: ManagedSkillProjection): boolean {
+  if (skill.nativeEpoch !== undefined) return !skill.retired && skill.nativeOrigin !== "unknown" && skill.nativeInstallation === "not_installed" && !skill.nativeFailureCode;
   return (
     skill.catalogStatus === "installable" &&
     (skill.capabilityReadiness === "ready" || skill.capabilityReadiness === "degraded") &&

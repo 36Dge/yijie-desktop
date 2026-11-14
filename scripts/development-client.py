@@ -103,6 +103,10 @@ def environment(root, environ, tool_search_meter=False, document_meter=False, me
     primary.require(tool_search == "false" or interaction == "true", "Tool search requires interaction tools.")
     result = {**env, "YIJIE_FEAT170_TOOL_SEARCH": tool_search, "YIJIE_FEAT169_INTERACTION_TOOLS": interaction, "YIJIE_DEVELOPMENT_CLIENT": "true",
               "CARGO_TARGET_DIR": str(selected["target"]), "YIJIE_WORKER_TARGET_DIR": str(selected["worker_target"])}
+    native_skills = environ.get("YIJIE_FEAT174_NATIVE_SKILLS", "true")
+    primary.require(native_skills in ("true", "false"), "Invalid native Skill selector.")
+    primary.require(native_skills == "false" or interaction == "true", "Native Skills require the compatible interaction Runtime.")
+    result["YIJIE_FEAT174_NATIVE_SKILLS"] = native_skills
     video = environ.get("YIJIE_FEAT173_VIDEO_MCP", "true")
     primary.require(video in ("true", "false"), "Invalid builtin video selector.")
     result["YIJIE_FEAT173_VIDEO_MCP"] = video
@@ -129,10 +133,20 @@ def environment(root, environ, tool_search_meter=False, document_meter=False, me
     return result
 
 
-def start(bundle_for_ui=False, tool_search_meter=False, document_meter=False, media_meter=False):
+def start(bundle_for_ui=False, tool_search_meter=False, document_meter=False, media_meter=False, skill_acceptance=None):
     primary.require(not (tool_search_meter or document_meter or media_meter) or bundle_for_ui, "Acceptance meter requires start-ui.")
     selected = check()
     env = environment(ROOT, os.environ, tool_search_meter=tool_search_meter, document_meter=document_meter, media_meter=media_meter)
+    if skill_acceptance is not None:
+        primary.require(bundle_for_ui and re.fullmatch(r"[a-z0-9][a-z0-9-]{0,47}", skill_acceptance) is not None, "Skill acceptance requires start-ui and a simple run label.")
+        primary.require(env.get("YIJIE_FEAT174_NATIVE_SKILLS") == "true", "Skill acceptance requires the native Skill candidate.")
+        acceptance = ROOT / ".local/skill-market-acceptance" / skill_acceptance
+        for name in ("host-home", "codex-home"):
+            directory = acceptance / name
+            directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+            primary.directory(directory)
+        env["YIJIE_FEAT174_ACCEPTANCE"] = skill_acceptance
+        env["VITE_YIJIE_FEAT174_ACCEPTANCE"] = "true"
     if bundle_for_ui:
         env["YIJIE_DEVELOPMENT_UI_BUNDLE"] = "true"
     cache = build_cache.discover(ROOT, env)
@@ -169,6 +183,7 @@ def main():
     parser.add_argument("--document-meter", action="store_true",
                         help="Approved FEAT-171 UI acceptance through the fixed budget meter.")
     parser.add_argument("--media-meter", action="store_true", help="Approved FEAT-172 media acceptance through the fixed request-count meter.")
+    parser.add_argument("--skill-acceptance", metavar="RUN_LABEL", help="Normal Skill UI acceptance in separate Native/Host/Runtime data; never resets daily data.")
     args = parser.parse_args()
     primary.require(not (args.tool_search_meter or args.document_meter or args.media_meter) or args.action == "start-ui", "Acceptance meter requires start-ui.")
     if args.action == "check":
@@ -179,7 +194,7 @@ def main():
         workflow_ready()
         print("Existing authenticated workflow is ready.")
         return 0
-    return start(bundle_for_ui=args.action == "start-ui", tool_search_meter=args.tool_search_meter, document_meter=args.document_meter, media_meter=args.media_meter)
+    return start(bundle_for_ui=args.action == "start-ui", tool_search_meter=args.tool_search_meter, document_meter=args.document_meter, media_meter=args.media_meter, skill_acceptance=args.skill_acceptance)
 
 
 if __name__ == "__main__":

@@ -318,6 +318,17 @@ type ChatHistoryOnlySelectionSnapshot = Readonly<{
   lastErrorCode: string | null;
 }>;
 
+type ChatReadingSnapshot = Readonly<{
+  contextId: string;
+  sessionId: string;
+  history: ChatHistoryAuthority;
+  conversation: ConversationView;
+  approvals: ConversationApprovalState;
+  purpose: SessionPurpose;
+}>;
+const MAX_READING_SNAPSHOTS = 8;
+const MAX_READING_SNAPSHOT_BYTES = 32 * 1024 * 1024;
+
 function isHistoryV4(history: ChatHistoryAuthority): history is ChatHistoryPageV4 {
   return "sessionNotices" in history && !("schemaVersion" in history);
 }
@@ -419,6 +430,48 @@ export function createChatStoreDefinition(
     const deleteDisposition = shallowRef<DeleteDisposition | null>(null);
     const lastErrorCode = ref<string | null>(null);
     const lastBindFailureStage = ref<ChatBindFailureStage | null>(null);
+    // Presentation only. Never restore subscriptions, control-plane state,
+    // pending mutations or permission to act from a previously visited page.
+    const readingSnapshots = new Map<string, { snapshot: ChatReadingSnapshot; bytes: number }>();
+    const readingPreview = shallowRef<ChatReadingSnapshot | null>(null);
+    const readingView = computed(() => {
+      const preview = readingPreview.value;
+      const cached = history.value === null && preview !== null &&
+        preview.contextId === context.value?.contextId && preview.sessionId === selectedSessionId.value &&
+        hasAction("read_sessions") && cleanupStatus.value === null && deleteInFlightSessionId.value === null &&
+        ["resyncing", "binding-pending"].includes(phase.value);
+      return cached ? { ...preview, cached: true } : {
+        history: history.value, conversation: conversationState.value,
+        approvals: conversationApprovalState.value, purpose: selectedSessionPurpose.value, cached: false,
+      };
+    });
+    function forgetReadingSnapshot(sessionId: string) {
+      readingSnapshots.delete(sessionId);
+      if (readingPreview.value?.sessionId === sessionId) readingPreview.value = null;
+    }
+    function clearReadingSnapshots() { readingSnapshots.clear(); readingPreview.value = null; }
+    function rememberReadingSelection() {
+      const bound = context.value, sessionId = selectedSessionId.value;
+      if (!bound || !sessionId || !history.value || selectedSessionPurpose.value === null ||
+        !hasAction("read_sessions") || !["ready", "streaming"].includes(phase.value) ||
+        cleanupStatus.value !== null || deleteInFlightSessionId.value !== null) return;
+      const snapshot: ChatReadingSnapshot = Object.freeze({ contextId: bound.contextId, sessionId,
+        history: history.value, conversation: conversationState.value,
+        approvals: conversationApprovalState.value, purpose: selectedSessionPurpose.value });
+      const bytes = boundedValueStorageBytes(snapshot, MAX_READING_SNAPSHOT_BYTES + 1);
+      readingSnapshots.delete(sessionId);
+      if (bytes > MAX_READING_SNAPSHOT_BYTES) return;
+      readingSnapshots.set(sessionId, { snapshot, bytes });
+      let total = [...readingSnapshots.values()].reduce((sum, entry) => sum + entry.bytes, 0);
+      for (const [oldest, entry] of readingSnapshots) {
+        if (readingSnapshots.size <= MAX_READING_SNAPSHOTS && total <= MAX_READING_SNAPSHOT_BYTES) break;
+        total -= entry.bytes; readingSnapshots.delete(oldest);
+      }
+    }
+    watch([() => context.value?.contextId, () => hasAction("read_sessions")], clearReadingSnapshots, { flush: "sync" });
+    watch(cleanupStatus, status => {
+      if (status !== null && selectedSessionId.value) forgetReadingSnapshot(selectedSessionId.value);
+    }, { flush: "sync" });
     const isReady = computed(() => phase.value === "ready" || phase.value === "streaming");
     const hasSendPermission = computed(() => selectedSessionId.value === null
       ? hasAction("create_session") && hasAction("use_project")
@@ -703,6 +756,7 @@ export function createChatStoreDefinition(
     }
 
     function clearSelection(): void {
+      readingPreview.value = null;
       selectedSessionPurpose.value = null;
       selectionIntentEpoch += 1;
       selectionEpoch += 1;
@@ -915,6 +969,7 @@ export function createChatStoreDefinition(
     }
 
     function clearAuthority(nextPhase: ChatViewPhase): void {
+      clearReadingSnapshots();
       authorityEpoch += 1;
       pendingRenewal = null;
       boundTenantSelector = null;
@@ -1256,6 +1311,7 @@ export function createChatStoreDefinition(
       status: ChatSessionControlPlane,
       activateFromLiveBound = false,
     ): void {
+      if (status.state === "denied" || status.state === "blocked_auth") forgetReadingSnapshot(status.sessionId);
       if (status.sessionId !== selectedSessionId.value) return;
       controlPlane.value = status;
       const historyOnly = selectedAccessMode.value === "history-only";
@@ -1479,6 +1535,7 @@ export function createChatStoreDefinition(
         if (sequence !== controlPlaneSequence + 1n) return requestControlPlaneResync(sequence);
       }
       controlPlaneSequence = sequence;
+      if (event.state === "denied" || event.state === "blocked_auth") forgetReadingSnapshot(event.sessionId);
       if (event.sessionId !== selectedSessionId.value) return;
       if (
         controlPlaneRead?.sessionId === event.sessionId &&
@@ -2402,6 +2459,7 @@ export function createChatStoreDefinition(
       clearDraftTargetState();
       const oldSubscription = subscriptionId;
       const oldSession = selectedSessionId.value;
+      rememberReadingSelection();
       clearSelection();
       selectedSessionId.value = sessionId;
       // Establish the scoped activation intent before installing listeners or
@@ -2409,6 +2467,11 @@ export function createChatStoreDefinition(
       // the older GET is rejected by the selection generation.
       if (streamingV6Enabled) bindingPendingSessionId = sessionId;
       phase.value = "resyncing";
+      const retained = readingSnapshots.get(sessionId);
+      if (retained?.snapshot.contextId === bound.contextId) {
+        readingPreview.value = retained.snapshot;
+        readingSnapshots.delete(sessionId); readingSnapshots.set(sessionId, retained);
+      }
       if (oldSubscription && oldSession) {
         void client.unsubscribeSession(bound.contextId, oldSubscription).catch(() => undefined);
       }
@@ -2677,6 +2740,7 @@ export function createChatStoreDefinition(
         lastErrorCode.value = selectionError instanceof ChatClientError
           ? selectionError.shape.code
           : "chat_protocol_error";
+        forgetReadingSnapshot(sessionId);
         phase.value = phaseForError(selectionError);
         if (streamingV6Enabled) {
           conversationApprovalState.value = requireConversationApprovalReconciliation(
@@ -2707,6 +2771,7 @@ export function createChatStoreDefinition(
         : Promise.resolve();
       if (bound && !hasAction("create_session")) clearDraftTargetState();
       const oldSubscription = subscriptionId;
+      rememberReadingSelection();
       clearSelection();
       if (bound && oldSubscription) {
         void client.unsubscribeSession(bound.contextId, oldSubscription).catch(() => false);
@@ -3389,14 +3454,19 @@ export function createChatStoreDefinition(
     async function loadReasoning(turnId: string): Promise<readonly ChatReasoningItem[]> {
       const bound = context.value;
       if (!bound) return Object.freeze([]);
-      const { epoch, controller } = startRead();
+      // Reading a disclosure from a restored page must not cancel that page's
+      // authoritative history refresh. Its result is still selection-scoped.
+      const epoch = selectionEpoch, sessionId = selectedSessionId.value;
+      const controller = new AbortController();
+      const current = () => selectionEpoch === epoch && context.value?.contextId === bound.contextId &&
+        selectedSessionId.value === sessionId && hasAction("read_sessions");
       try {
         const items = await client.loadReasoning(bound.contextId, turnId, controller.signal);
-        if (!isCurrent(epoch, controller)) return Object.freeze([]);
-        activeRead = null;
+        if (!current()) return Object.freeze([]);
         return items;
       } catch (error: unknown) {
-        if (isCurrent(epoch, controller)) {
+        if (current()) {
+          activeRead?.abort();
           activeRead = null;
           phase.value = phaseForError(error);
         }
@@ -4208,6 +4278,7 @@ export function createChatStoreDefinition(
       deletedSessionId: string,
       status: ChatCleanupStatus,
     ): Promise<DeleteDisposition | null> {
+      forgetReadingSnapshot(deletedSessionId);
       if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== deletedSessionId) {
         return null;
       }
@@ -4269,6 +4340,7 @@ export function createChatStoreDefinition(
         }
       }
       deleteInFlightSessionId.value = sessionId;
+      forgetReadingSnapshot(sessionId);
       clearCleanupPoll();
       invalidateCleanupObservations();
       try {
@@ -4418,6 +4490,7 @@ export function createChatStoreDefinition(
       selectedAccessMode,
       selectedSessionPurpose,
       history,
+      readingView,
       conversationState,
       nativeLiveTurnId,
       conversationApprovalState,

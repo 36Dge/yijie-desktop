@@ -92,6 +92,7 @@ const categoryArtwork = {
   "content-marketing": artwork40,
   "traffic-advertising": artwork41,
   "store-operations": artwork42,
+  "personal": artwork40,
 } as const satisfies Readonly<Record<SkillCategory, string>>;
 
 export function skillCategoryArtwork(category: SkillCategory): string {

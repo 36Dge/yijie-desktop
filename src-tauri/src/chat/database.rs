@@ -918,6 +918,7 @@ impl ChatRepository {
                 migrations::SELECTED_SKILLS_SCHEMA_VERSION,
                 migrations::RETIRED_TOOL_PROFILE_SCHEMA_VERSION,
                 migrations::TOOL_PROFILE_RETIREMENT_SCHEMA_VERSION,
+                migrations::MARKET_INITIAL_HOST_TURN_SCHEMA_VERSION,
             ]
             .contains(&version)
             {
@@ -2880,7 +2881,7 @@ impl ChatRepository {
                 |row| row.get(0),
             )
             .map_err(map_sqlite_error)?;
-        if !session_ready {
+        if !session_ready && !(context.market && super::connectors::initial_host_turn::proven_unbound(transaction, scope, session_id, None)?) {
             return Err(ChatError::ConversationConflict);
         }
         let turn_id = Uuid::now_v7();
@@ -3634,6 +3635,36 @@ impl ChatRepository {
     ) -> Result<(), ChatError> {
         Self::bind_host_session_parts(transaction, scope, ids, now, recovered, true)
     }
+    pub(crate) fn bind_host_identity(
+        transaction: &rusqlite::Transaction<'_>,
+        scope: &ChatScope,
+        session: Uuid,
+        agent: Uuid,
+        thread: Uuid,
+    ) -> Result<(), ChatError> {
+        let existing: (Option<String>,Option<String>) = transaction.query_row(
+                "SELECT agent_session_id,runtime_thread_id FROM chat_sessions WHERE id=?1 AND owner_user_id=?2 AND tenant_id=?3",
+                params![session.to_string(),scope.owner_user_id,scope.tenant_id],|r|Ok((r.get(0)?,r.get(1)?))).map_err(map_sqlite_error)?;
+        if existing
+            .0
+            .as_deref()
+            .is_some_and(|v| v != agent.to_string())
+            || existing
+                .1
+                .as_deref()
+                .is_some_and(|v| v != thread.to_string())
+        {
+            return Err(ChatError::ConversationConflict);
+        }
+        transaction
+            .execute(
+                "UPDATE chat_sessions SET agent_session_id=?1,runtime_thread_id=?2 WHERE id=?3",
+                params![agent.to_string(), thread.to_string(), session.to_string()],
+            )
+            .map_err(map_constraint_or_database)?;
+        Ok(())
+    }
+
     pub(crate) fn bind_host_session_parts(
         transaction: &rusqlite::Transaction<'_>,
         scope: &ChatScope,
@@ -3685,41 +3716,13 @@ impl ChatRepository {
         {
             return Err(ChatError::ConversationConflict);
         }
-        let existing: (Option<String>, Option<String>) = transaction
-            .query_row(
-                "SELECT agent_session_id, runtime_thread_id FROM chat_sessions WHERE id=?1",
-                [&session_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if existing
-            .0
-            .as_deref()
-            .is_some_and(|value| value != agent_session_id.to_string())
-            || existing
-                .1
-                .as_deref()
-                .is_some_and(|value| value != codex_thread_id.to_string())
-        {
-            return Err(ChatError::ConversationConflict);
-        }
         super::delivery::observe_binding(
             transaction,
             create_operation_id,
             agent_session_id,
             codex_thread_id,
         )?;
-        transaction
-            .execute(
-                "UPDATE chat_sessions SET agent_session_id=?1, runtime_thread_id=?2
-                 WHERE id=?3",
-                params![
-                    agent_session_id.to_string(),
-                    codex_thread_id.to_string(),
-                    session_id
-                ],
-            )
-            .map_err(map_constraint_or_database)?;
+        Self::bind_host_identity(transaction, scope, parse_uuid_value(&session_id)?, agent_session_id, codex_thread_id)?;
         let changed=transaction.execute("UPDATE chat_outbox SET state='done',next_attempt_at=NULL WHERE operation_id=?1 AND (state IN ('inflight','done') OR (?2=1 AND state IN ('pending','failed')))",params![create_operation_id.to_string(),recovered]).map_err(map_sqlite_error)?;
         if changed != 1 {
             return Err(ChatError::ConversationConflict);

@@ -1,3 +1,5 @@
+import { createNativeSkillMarketClient } from "./native-skill-market-client";
+import type { PendingOperation } from "../domain/skill-market-v2.generated";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
@@ -31,6 +33,9 @@ export type SkillNativeFailureKind =
   | "incompatible";
 
 export interface SkillNativeClient {
+  importSkill?(): Promise<SkillCatalogSnapshot | null>;
+  cancelOperation?(id: string): Promise<SkillCatalogSnapshot>;
+  subscribeOperations?(handler: (operation: PendingOperation) => void): () => void;
   list(signal?: AbortSignal): Promise<SkillCatalogSnapshot>;
   scan(reason: SkillScanReason, signal?: AbortSignal): Promise<SkillCatalogSnapshot>;
   install(skillId: string): Promise<SkillCatalogSnapshot>;
@@ -49,7 +54,7 @@ export type SkillNativeListen = (
 ) => Promise<UnlistenFn>;
 
 export class SkillNativeClientError extends Error {
-  constructor(readonly kind: SkillNativeFailureKind) {
+  constructor(readonly kind: SkillNativeFailureKind, readonly code: string | null = null) {
     super(`skill-native-${kind}`);
     this.name = "SkillNativeClientError";
   }
@@ -208,4 +213,4 @@ export function createSkillNativeClient(
   };
 }
 
-export const skillNativeClient = createSkillNativeClient();
+export const skillNativeClient = import.meta.env.VITE_YIJIE_FEAT174_NATIVE_SKILLS === "true" ? createNativeSkillMarketClient() : createSkillNativeClient();

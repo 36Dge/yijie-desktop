@@ -1,7 +1,10 @@
 import type { YjIconName as IconName } from "../icons/registry";
 
 export type AttachmentPresentation = Readonly<{ sourcePath: string | null; imageUrl: string | null; expiresAt: number }>;
-export type AttachmentPresentationReader = (id: string, signal?: AbortSignal) => Promise<AttachmentPresentation>;
+export type AttachmentPresentationReader = ((id: string, signal?: AbortSignal) => Promise<AttachmentPresentation>) & {
+  peek?: (id: string) => AttachmentPresentation | null;
+  invalidate?: (id: string) => void;
+};
 export function chatDocumentIcon(mime: string, name = ""): IconName {
   if (!mime && name) {
     const extension = name.split(".").pop()?.toLowerCase() ?? "";

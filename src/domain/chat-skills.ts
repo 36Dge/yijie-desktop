@@ -40,7 +40,7 @@ export function selectedSkillIssue(selected: SelectedChatSkill, catalog: readonl
  */
 export function compileSkillInput(text: string, selection: readonly SelectedChatSkill[]): string {
   const names = [...new Set(selection.map(skill => skill.runtimeName))];
-  if (names.some(name => !/^[a-z0-9][a-z0-9-]{0,63}$/.test(name))) throw new Error("Invalid skill runtime name");
+  if (names.some(name => !/^[a-z0-9][a-z0-9-]{0,127}(?::[a-z0-9][a-z0-9-]{0,127})?$/.test(name))) throw new Error("Invalid skill runtime name");
   return names.length ? `${names.map(name => `$${name}`).join(" ")}\n\n${text}` : text;
 }
 
@@ -66,7 +66,7 @@ export function presentSkillMessage(
   const index = blocks.findIndex(block => block.type === "text");
   const first = blocks[index];
   if (!first || first.type !== "text") return unchanged;
-  const prefix = /^(\$[a-z0-9][a-z0-9-]{0,63}(?: \$[a-z0-9][a-z0-9-]{0,63})*)\n\n/.exec(first.text);
+  const prefix = /^(\$[a-z0-9][a-z0-9-]{0,127}(?::[a-z0-9][a-z0-9-]{0,127})?(?: \$[a-z0-9][a-z0-9-]{0,127}(?::[a-z0-9][a-z0-9-]{0,127})?)*)\n\n/.exec(first.text);
   if (!prefix) return unchanged;
   const names = [...new Set(prefix[1]!.split(" ").map(name => name.slice(1)))];
   const selected: SelectedChatSkill[] = [];

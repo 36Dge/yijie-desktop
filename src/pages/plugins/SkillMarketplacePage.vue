@@ -9,6 +9,7 @@ import {
   NSkeleton,
   useMessage,
 } from "naive-ui";
+import { nativeSkillFailureMessage } from "../../domain/native-skill-marketplace";
 import { skillNativeClient } from "../../api/skill-native-client";
 import { skillCategoryArtwork } from "../../icons/skill-artwork";
 import { usePermissionStore } from "../../stores/permission.store";
@@ -33,6 +34,7 @@ let uninstallTrigger: HTMLElement | null = null;
 let unlistenDirectoryChanged: UnlistenFn | null = null;
 let pageUnmounted = false;
 
+const acceptanceEnvironment = import.meta.env.VITE_YIJIE_FEAT174_ACCEPTANCE === "true";
 const canManage = computed(() => permissionStore.hasCapability("plugin.manage"));
 const uninstallTarget = computed(() =>
   skillStore.skills.find((skill) => skill.id === uninstallTargetId.value) ?? null,
@@ -42,7 +44,7 @@ const uninstallPending = computed(() =>
   skillStore.operations[uninstallTargetId.value] === "uninstall",
 );
 const refreshFailure = computed(() =>
-  skillStore.lastFailure === null ? null : skillNativeFailureMessage(skillStore.lastFailure),
+  skillStore.readFailureMessage ?? (skillStore.lastFailure === null ? null : skillNativeFailureMessage(skillStore.lastFailure)),
 );
 
 async function loadPage(): Promise<void> {
@@ -59,6 +61,11 @@ defineExpose({
   refreshing: computed(() => skillStore.refreshing),
   rescanDisabled: computed(() => skillStore.phase === "loading" || Object.keys(skillStore.operations).length > 0),
 });
+
+async function handleImport(): Promise<void> {
+  if (!props.active || !canManage.value) return;
+  if (await skillStore.importSkill()) message.success("技能已导入并安装。已有技能会保留原启停状态。", { duration: 3000 });
+}
 
 async function handleInstall(skillId: string): Promise<void> {
   if (!props.active || !canManage.value) return;
@@ -178,6 +185,19 @@ onBeforeUnmount(() => {
     </YjPageHeader>
 
     <slot />
+    <n-alert v-if="acceptanceEnvironment" type="info" :bordered="false">独立技能验收环境：操作使用单独的数据，不改变日常技能和聊天。</n-alert>
+
+    <div v-if="skillStore.canImport" class="skill-marketplace__import">
+      <p>内置技能随应用提供，点击加号添加。也可导入自己的技能。</p>
+      <n-button v-if="canManage" secondary :loading="skillStore.importing" :disabled="skillStore.phase === 'loading'" @click="handleImport">导入技能</n-button>
+      <span>支持 ZIP 或 SKILL.md，导入完成后默认启用。</span>
+    </div>
+    <n-alert v-if="skillStore.notice" type="info" :bordered="false">{{ skillStore.notice }}</n-alert>
+    <n-alert v-if="skillStore.importError" type="warning" :bordered="false" role="alert">{{ skillStore.importError }}</n-alert>
+    <n-alert v-for="operation in skillStore.pendingOperations" :key="operation.operation_id" type="info" :bordered="false" role="status">
+      {{ operation.error_code ? nativeSkillFailureMessage(operation.error_code) : operation.state === 'needs_attention' ? '技能操作需要检查，来源和旧数据已保留。' : '正在确认技能操作。已有任务结束后会继续处理。' }}
+      <n-button v-if="canManage" size="small" @click="skillStore.cancelOperation(operation.operation_id)">取消操作</n-button>
+    </n-alert>
 
     <n-alert v-if="!canManage && skillStore.phase === 'ready'" type="info" :bordered="false">
       当前仅可查看 Skill；安装、启停和卸载需要插件管理权限。
@@ -272,7 +292,7 @@ onBeforeUnmount(() => {
           </li>
         </ul>
         <p v-else class="skill-marketplace__category-empty">
-          本分类暂无已审核的 Skill。
+          {{ category.key === "personal" ? "还没有导入技能。" : "本分类暂无已审核的 Skill。" }}
         </p>
       </YjSection>
     </div>
@@ -315,6 +335,10 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.skill-marketplace__import { display: flex; align-items: center; flex-wrap: wrap; gap: var(--yj-space-3); }
+.skill-marketplace__import p { margin: 0; flex: 1; color: var(--yj-color-text-primary); }
+.skill-marketplace__import span { width: 100%; color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-sm); }
+
 .skill-marketplace__category-icon {
   display: block;
   width: var(--yj-space-6);

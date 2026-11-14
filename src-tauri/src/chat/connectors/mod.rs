@@ -3,6 +3,9 @@
 pub(crate) mod broker_generated;
 pub(crate) mod control;
 pub(crate) mod dispatch;
+pub(crate) mod initial_host_turn;
+#[allow(dead_code)]
+pub(crate) mod submission_rejection_generated;
 #[allow(dead_code)]
 pub(crate) mod generated;
 #[allow(dead_code, unused_imports)]

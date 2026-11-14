@@ -334,11 +334,11 @@ function toggle(): void {
 }
 .chat-timeline-item-shell--artifact:has(.chat-artifact-document-card) > .chat-timeline-item-shell__body { padding: 0; }
 
-/* Generated images provide their own title and lifecycle state, including while
-   generating. Do not nest them in the generic output metadata shell. */
-.chat-timeline-item-shell--artifact:has(.artifact-image) { border: 0; background: transparent; }
-.chat-timeline-item-shell--artifact:has(.artifact-image) > .chat-timeline-item-shell__header { display: none; }
-.chat-timeline-item-shell--artifact:has(.artifact-image) > .chat-timeline-item-shell__body { padding: 0; }
+/* Images own their lifecycle UI; ready videos use a compact cover. Both render
+   directly in the answer without the generic output metadata shell. */
+.chat-timeline-item-shell--artifact:has(.artifact-image, .artifact-video) { border: 0; background: transparent; }
+.chat-timeline-item-shell--artifact:has(.artifact-image, .artifact-video) > .chat-timeline-item-shell__header { display: none; }
+.chat-timeline-item-shell--artifact:has(.artifact-image, .artifact-video) > .chat-timeline-item-shell__body { padding: 0; }
 
 .chat-timeline-item-shell__answer-actions {
   margin-block-start: var(--yj-space-3);

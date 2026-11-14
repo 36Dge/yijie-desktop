@@ -51,13 +51,15 @@ async function checkLayout() {
   await nextTick();
   const scale = zoom.value / 100;
   const measurements = [...root.value!.querySelectorAll<HTMLElement>(".artifact-image")].map(figure => {
-    const image = figure.querySelector<HTMLImageElement>(".artifact-image__inline");
+    const image = figure.querySelector<HTMLImageElement | HTMLCanvasElement>(".artifact-image__inline");
     const button = figure.querySelector<HTMLElement>(".artifact-image__more");
-    if (!image?.complete || !image.naturalWidth || !button) return { ok: false, reason: "图片尚未就绪" };
+    const width = image instanceof HTMLImageElement ? image.naturalWidth : image?.width;
+    const height = image instanceof HTMLImageElement ? image.naturalHeight : image?.height;
+    if (!width || !height || !image || !button) return { ok: false, reason: "图片尚未就绪" };
     const img = image.getBoundingClientRect(), frame = figure.querySelector(".artifact-image__frame")!.getBoundingClientRect(), preview = figure.querySelector(".artifact-image__preview")!.getBoundingClientRect(), more = button.getBoundingClientRect();
     const same = (a: number, b: number) => Math.abs(a - b) <= 1;
-    return { ok: same(frame.width, img.width) && same(frame.height, img.height) && same(preview.width, img.width) && same(img.right - more.right, 8 * scale) && same(more.top - img.top, 8 * scale) && more.bottom <= img.bottom && img.width <= 440 * scale + 1 && img.height <= 440 * scale + 1 && Math.abs(img.width / img.height - image.naturalWidth / image.naturalHeight) < 0.005,
-      name: image.alt, image: [img.width, img.height], frame: [frame.width, frame.height], rightInset: img.right - more.right, topInset: more.top - img.top, scale };
+    return { ok: same(frame.width, img.width) && same(frame.height, img.height) && same(preview.width, img.width) && same(img.right - more.right, 8 * scale) && same(more.top - img.top, 8 * scale) && more.bottom <= img.bottom && img.width <= 440 * scale + 1 && img.height <= 440 * scale + 1 && Math.abs(img.width / img.height - width / height) < 0.005,
+      name: image.getAttribute("alt") ?? image.getAttribute("aria-label"), image: [img.width, img.height], frame: [frame.width, frame.height], rightInset: img.right - more.right, topInset: more.top - img.top, scale };
   });
   report.value = JSON.stringify({ ok: measurements.length > 0 && measurements.every(row => row.ok), measurements }, null, 2);
 }

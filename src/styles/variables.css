@@ -10,6 +10,9 @@
   --yj-image-menu-width: 240px;
   --yj-image-viewer-width: 900px;
   --yj-image-viewer-height: 700px;
+  --yj-video-inline-size: 240px;
+  --yj-video-play-bg: #000000b3;
+  --yj-video-play-ink: #ffffff;
   --yj-shadow-control-focus: 0 0 0 var(--yj-focus-ring-width) var(--yj-color-focus-ring);
 
   --yj-color-brand-primary: #c3f35b;

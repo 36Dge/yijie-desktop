@@ -778,6 +778,88 @@ describe("chat view-model store", () => {
     vi.unstubAllGlobals();
   });
 
+  it.each(["legacy", "native-v6"])("restores a visited %s conversation for reading immediately while fresh authority is pending", async mode => {
+    const harness = fakeClient({subscribeSessionV6: async (_context, sessionId) => ({
+      subscriptionId: sessionId === SESSION_A ? LOCAL_SUBSCRIPTION_A : LOCAL_SUBSCRIPTION_B,
+      pendingApprovalSnapshot: emptyPendingApprovalSnapshot(sessionId === SESSION_A ? HOST_GENERATION_A : HOST_GENERATION_B),
+    })});
+    const store = mode === "native-v6" ? createV6Store(harness.client) : createStore(harness.client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    expect({ phase: store.phase, error: store.lastErrorCode }).toEqual({phase: "ready", error: null});
+    const firstHistory = store.history, firstView = store.conversationState;
+    await store.selectSession(SESSION_B);
+    const purpose = new Deferred<{ sessionId: string; purpose: "ordinary" }>();
+    const read = vi.spyOn(harness.client, "getSessionPurpose").mockReturnValueOnce(purpose.promise);
+    const returning = store.selectSession(SESSION_A);
+    expect(store.readingView.cached).toBe(true);
+    expect(store.readingView.history).toBe(firstHistory);
+    expect(store.readingView.conversation).toBe(firstView);
+    expect(store.history).toBeNull();
+    expect(store.selectedAccessMode).toBeNull();
+    expect(store.canSend).toBe(false);
+    expect(store.canDecideApprovals).toBe(false);
+    await store.loadReasoning(TURN_A);
+    expect(store.readingView.cached).toBe(true);
+    purpose.resolve({ sessionId: SESSION_A, purpose: "ordinary" });
+    await returning;
+    expect(store.readingView.cached).toBe(false);
+    expect(store.readingView.history).toBe(store.history);
+    expect(store.history).not.toBeNull();
+    expect(store.history).not.toBe(firstHistory);
+    expect(read).toHaveBeenCalledOnce();
+  });
+
+  it("drops a cached reading view on a denied refresh and does not resurrect it", async () => {
+    const harness = fakeClient(), store = createStore(harness.client);
+    await store.bind(TENANT); await store.selectSession(SESSION_A); await store.selectSession(SESSION_B);
+    vi.spyOn(harness.client, "getSessionPurpose").mockRejectedValueOnce(new ChatClientError({
+      schemaVersion: 1, code: "chat_capability_denied", retryable: false, recovery: "none",
+    }));
+    const pending = store.selectSession(SESSION_A);
+    expect(store.readingView.cached).toBe(true);
+    await pending;
+    expect(store.readingView.history).toBeNull();
+    expect(store.readingView.cached).toBe(false);
+    const retried = store.selectSession(SESSION_A);
+    expect(store.readingView.cached).toBe(false);
+    await retried;
+  });
+
+  it("never lets a delayed previous selection replace the current cached reading view", async () => {
+    const harness = fakeClient(), store = createStore(harness.client);
+    await store.bind(TENANT); await store.selectSession(SESSION_A);
+    const a = store.history;
+    await store.selectSession(SESSION_B);
+    const b = store.history;
+    const gate = new Deferred<{ sessionId: string; purpose: "ordinary" }>();
+    vi.spyOn(harness.client, "getSessionPurpose").mockReturnValueOnce(gate.promise);
+    const pendingA = store.selectSession(SESSION_A);
+    expect(store.readingView.history).toBe(a);
+    const pendingB = store.selectSession(SESSION_B);
+    expect(store.readingView.history).toBe(b);
+    await pendingB;
+    const current = store.readingView.history;
+    gate.resolve({sessionId: SESSION_A, purpose: "ordinary"}); await pendingA;
+    expect(store.selectedSessionId).toBe(SESSION_B);
+    expect(store.readingView.history).toBe(current);
+  });
+
+  it("bounds visited reading snapshots and clears them on logout", async () => {
+    const harness = fakeClient(), store = createStore(harness.client);
+    await store.bind(TENANT); await store.selectSession(SESSION_A);
+    for (let index = 20; index < 29; index++) await store.selectSession(`019c1a00-0000-7000-8000-0000000000${index}`);
+    const evicted = store.selectSession(SESSION_A);
+    expect(store.readingView.cached).toBe(false);
+    await evicted;
+    await store.selectSession(SESSION_B);
+    store.clearForLogout();
+    await store.bind(TENANT);
+    const returnAfterLogout = store.selectSession(SESSION_A);
+    expect(store.readingView.cached).toBe(false);
+    await returnAfterLogout;
+  });
+
   it("authority renewal preserves the selected conversation, stream, attachments and subscriptions past the old deadline", async () => {
     const renewContext = vi.fn(async () => ({ contextId: CONTEXT,
       expiresAtEpochSeconds: Math.floor(Date.now() / 1000) + 300, allowedActions: ALL_ALLOWED_ACTIONS }));

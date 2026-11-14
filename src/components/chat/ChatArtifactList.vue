@@ -62,6 +62,7 @@ function hasDocumentCard(artifact: ArtifactProjection) {
 <style scoped>
 .artifact-list__items {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--yj-space-3);
   padding: 0;
   margin: 0;

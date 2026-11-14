@@ -87,7 +87,7 @@ async function main() {
   assert.deepEqual(JSON.parse(process.env[recipeKey] ?? "null"), args);
   const environment = withoutDevelopmentRunner(process.env);
   const inputs = ["src-tauri/tauri.conf.json", "src-tauri/icons/icon.icns", "pnpm-lock.yaml", "scripts/development-app-runner.mjs",
-    "contracts/desktop-skill-bundle-local.lock.json", "contracts/experts-assets-feat164.candidate.json"];
+    "contracts/desktop-skill-bundle-local.lock.json", "contracts/experts-assets-feat164.candidate.json", "contracts/native-skill-resources.candidate.json"];
   for (let i = 0; i < args.length; i++) if (args[i] === "--config") inputs.push(args[++i]);
   const binaryHash = await digest(source);
   const helper = path.join(target, "debug/yijie-document-render");

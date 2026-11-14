@@ -48,6 +48,20 @@ function scheduleRefresh() {
     refresh = setTimeout(() => { void read(); }, remaining - 5000);
   }
 }
+function present(value: Awaited<ReturnType<AttachmentPresentationReader>>) {
+  const remaining = Math.min(30000, value.expiresAt * 1000 - Date.now());
+  if (!value.imageUrl || remaining <= 0) throw new Error("preview_unavailable");
+  imageUrl.value = value.imageUrl;
+  expiresAt = Date.now() + remaining;
+  phase.value = "ready";
+  clearTimeout(expiry);
+  scheduleRefresh();
+  expiry = setTimeout(() => {
+    expiresAt = 0;
+    imageUrl.value = null;
+    if (phase.value !== "loading") { phase.value = "idle"; void read(); }
+  }, remaining);
+}
 async function read() {
   if (!wanted.value || !props.readPresentation || phase.value === "loading") return;
   const current = ++generation;
@@ -55,22 +69,10 @@ async function read() {
   request = new AbortController();
   phase.value = "loading";
   try {
+    if (imageUrl.value && expiresAt - Date.now() <= 5000) props.readPresentation.invalidate?.(props.attachmentId);
     const value = await props.readPresentation(props.attachmentId, request.signal);
     if (current !== generation || !available.value) return;
-    const remaining = Math.min(30000, value.expiresAt * 1000 - Date.now());
-    if (!value.imageUrl || remaining <= 0) throw new Error("preview_unavailable");
-    // Retain only the short-lived image projection, never its source path.
-    imageUrl.value = value.imageUrl;
-    expiresAt = Date.now() + remaining;
-    phase.value = "ready";
-    clearTimeout(expiry);
-    // Refresh before the lease ends so a visible thumbnail does not blink.
-    scheduleRefresh();
-    expiry = setTimeout(() => {
-      expiresAt = 0;
-      imageUrl.value = null;
-      if (phase.value !== "loading") { phase.value = "idle"; void read(); }
-    }, remaining);
+    present(value);
   } catch {
     if (current !== generation) return;
     imageUrl.value = null;
@@ -78,6 +80,10 @@ async function read() {
   }
 }
 function failed() {
+  // A removed <img> can report an error after its component has relinquished
+  // the projection. It must not invalidate the next conversation's cache.
+  if (!imageUrl.value) return;
+  props.readPresentation?.invalidate?.(props.attachmentId);
   generation++;
   request?.abort();
   clearTimeout(expiry);
@@ -104,7 +110,9 @@ function visibilityChanged() { foreground.value = document.visibilityState !== "
 // and renewal; it must not discard an image that still has a valid lease.
 watch(() => [props.attachmentId, props.scopeKey, props.readPresentation, available.value] as const, () => {
   release();
-  if (wanted.value) void read();
+  const retained = available.value ? props.readPresentation?.peek?.(props.attachmentId) : null;
+  if (retained) present(retained);
+  if (wanted.value && (!retained || expiresAt - Date.now() <= 5000)) void read();
 }, { immediate: true });
 watch(wanted, value => {
   if (!value) {

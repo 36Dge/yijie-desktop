@@ -26,6 +26,21 @@ pub struct SkillRoots {
     pub install_root: PathBuf,
 }
 
+pub(crate) fn native_market_roots(roots: &SkillRoots) -> Result<(PathBuf, PathBuf, String), SkillRootsError> {
+    let resources=roots.bundle_root.parent().ok_or(SkillRootsError::PathUnavailable)?;
+    let bundle=canonical_existing_directory(&resources.join("skill-marketplace"),SkillRootsError::ResourceDirectoryMissing)?;
+    validate_bundle_authority(&bundle)?;
+    let authority: serde_json::Value=serde_json::from_str(include_str!("../../../contracts/native-skill-resources.candidate.json")).map_err(|_| SkillRootsError::PathUnavailable)?;
+    let expected=authority["presentation_sha256"].as_str().ok_or(SkillRootsError::PathUnavailable)?.to_owned();
+    let bytes=fs::read(bundle.join("presentation.json")).map_err(|_| SkillRootsError::BundleManifestMissing)?;
+    if format!("{:x}",Sha256::digest(&bytes))!=expected {return Err(SkillRootsError::BundleManifestMissing);}
+    let app_data=roots.install_root.parent().and_then(Path::parent).ok_or(SkillRootsError::AppDataDirectoryMissing)?;
+    let market=ensure_private_child_directory(app_data,"skill-market")?;
+    ensure_private_child_directory(&market,"builtin")?;
+    ensure_private_child_directory(&market,"user")?;
+    Ok((bundle,market,expected))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SkillRootsError {
     PathNotAbsolute,
@@ -747,4 +762,15 @@ mod tests {
         let after_nested_delete = install_root_fingerprint(&installed).unwrap();
         assert_ne!(before_nested_delete, after_nested_delete);
     }
+}
+
+/// Explicit normal acceptance namespace from the canonical development entry.
+/// It is a label, never a path, and is shared by Native chat and Skill roots.
+pub(crate) fn acceptance_app_data(base: PathBuf) -> Result<PathBuf, SkillRootsError> {
+    let label=std::env::var("YIJIE_FEAT174_ACCEPTANCE").unwrap_or_default();
+    if label.is_empty(){return Ok(base);}
+    if std::env::var("YIJIE_DEVELOPMENT_CLIENT").as_deref()!=Ok("true") || !super::market_v2::enabled() || label.len()>48 || !label.bytes().all(|b|b.is_ascii_lowercase()||b.is_ascii_digit()||b==b'-') || !label.as_bytes().first().is_some_and(|b|b.is_ascii_lowercase()||b.is_ascii_digit()) {return Err(SkillRootsError::PathUnavailable);}
+    let base=canonical_app_data_directory(&base)?;
+    let runs=ensure_private_child_directory(&base,"skill-market-acceptance")?;
+    ensure_private_child_directory(&runs,&label)
 }

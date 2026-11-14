@@ -26,6 +26,24 @@ function observeViewport() {
   return (visible: boolean) => update(visible);
 }
 describe("input image presentation", () => {
+  it("renders a retained history thumbnail on the first render without another read", () => {
+    const value = result();
+    const read = Object.assign(vi.fn(async () => value), { peek: vi.fn(() => value) });
+    const view = image({ status: "bound", readPresentation: read });
+    expect(view.get("img").attributes("src")).toBe(imageUrl);
+    expect(view.find(".chat-attachment-image__placeholder").exists()).toBe(false);
+    expect(read).not.toHaveBeenCalled();
+  });
+  it("ignores an old image error after its history component unmounts", async () => {
+    const value = result();
+    const read = Object.assign(vi.fn(async () => value), { peek: () => value, invalidate: vi.fn() });
+    const view = image({ status: "bound", readPresentation: read });
+    const old = view.get("img").element;
+    view.unmount();
+    old.dispatchEvent(new Event("error"));
+    await flushPromises();
+    expect(read.invalidate).not.toHaveBeenCalled();
+  });
   it("keeps the same decoded thumbnail when scrolling out and back within its lease", async () => {
     const visible = observeViewport();
     const read = vi.fn(async () => result());

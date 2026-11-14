@@ -31,7 +31,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 45] = [
+const CATALOG: [CatalogEntry; 46] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -257,6 +257,11 @@ const CATALOG: [CatalogEntry; 45] = [
         name: "0045_remove_chat_tool_profiles",
         sql: include_str!("../../migrations/chat/0045_remove_chat_tool_profiles.sql"),
     },
+    CatalogEntry {
+        version: 46,
+        name: "0046_market_initial_host_turns",
+        sql: include_str!("../../migrations/chat/0046_market_initial_host_turns.sql"),
+    },
 ];
 
 // Preserve the existing activated-version surface; reader support is separate.
@@ -284,6 +289,7 @@ pub const SELECTED_SKILLS_SCHEMA_VERSION: i64 = 43;
 // Immutable historical migration, immediately retired by the next migration.
 pub const RETIRED_TOOL_PROFILE_SCHEMA_VERSION: i64 = 44;
 pub const TOOL_PROFILE_RETIREMENT_SCHEMA_VERSION: i64 = 45;
+pub const MARKET_INITIAL_HOST_TURN_SCHEMA_VERSION: i64 = 46;
 pub const SCHEDULE_CHAT_WORKSPACE_SCHEMA_VERSION: i64 = 29;
 pub const MARKET_CONNECTORS_SCHEMA_VERSION: i64 = 30;
 pub const MARKET_SELECTION_SCHEMA_VERSION: i64 = 31;
@@ -347,6 +353,7 @@ pub(super) fn migrate_to_target(connection: &mut Connection, target: i64) -> Res
         EXPERT_RESOURCE_OPERATIONS_SCHEMA_VERSION,
         ARTIFACT_MEDIA_SCHEMA_VERSION,
         CONNECTOR_SUSPEND_SCHEMA_VERSION,
+        MARKET_INITIAL_HOST_TURN_SCHEMA_VERSION,
     ]
     .contains(&target)
     {

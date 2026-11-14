@@ -54,6 +54,52 @@ struct Pending {
 }
 
 impl ChatRepository {
+    fn settle_market_rejection(
+        &mut self,
+        pending: &Pending,
+        proof: &super::submission_rejection_generated::Proof,
+        now: i64,
+    ) -> Result<bool, ChatError> {
+        if proof.validate().is_err()
+            || pending.expert_snapshot.is_some()
+            || pending.task.map(|v| v.to_string()).as_deref() != Some(&proof.task_id)
+            || proof.local_session_id != pending.session.to_string()
+            || proof.submission_operation_id != pending.operation.to_string()
+            || proof.turn_operation_id != pending.turn_operation.to_string()
+            || proof.selection_digest != pending.snapshot.selection_digest
+        {
+            return Ok(false);
+        }
+        // DatabaseWorker serializes the proof check and the terminal write.
+        let matches: bool = self
+            .connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM chat_market_dispatch d
+             JOIN chat_market_submissions m USING(submission_operation_id)
+             JOIN chat_turns t ON t.id=m.local_turn_id AND t.session_id=m.session_id
+             JOIN chat_sessions s ON s.id=m.session_id
+             WHERE d.submission_operation_id=?1 AND d.host_instance_id=?2
+               AND d.state IN ('inflight','uncertain') AND t.runtime_turn_id IS NULL
+               AND m.session_id=?3 AND m.local_turn_id=?4 AND m.turn_operation_id=?5
+               AND s.owner_user_id=?6 AND s.tenant_id=?7)",
+                params![
+                    pending.operation.to_string(),
+                    proof.host_instance_id,
+                    pending.session.to_string(),
+                    pending.turn.to_string(),
+                    pending.turn_operation.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+                |row| row.get(0),
+            )
+            .map_err(db_error)?;
+        if matches {
+            self.market_mark(pending.operation, "blocked", None, Some(&proof.reason), now)?;
+        }
+        Ok(matches)
+    }
+
     fn pending_market(&self, now: i64) -> Result<Option<Pending>, ChatError> {
         self.pending_market_with_experts(now, crate::chat::experts::enabled())
     }
@@ -219,6 +265,9 @@ impl ChatRepository {
             .collect::<Result<Vec<_>, _>>()?;
         let (profile, revision): (String,i64) = self.connection.query_row("SELECT profile_id,revision FROM chat_operation_models WHERE operation_id=?1 AND session_id=?2",params![pending.turn_operation.to_string(),pending.session.to_string()],|r|Ok((r.get(0)?,r.get(1)?))).map_err(db_error)?;
         let profile_id = decode(&format!("\"{profile}\""))?;
+        let initial = super::initial_host_turn::is_initial(&self.connection, pending.session, pending.operation, revision)?;
+        if pending.agent_session.is_none() && pending.operation == pending.turn_operation && !initial { return Err(ChatError::ConversationConflict); }
+        let revision = if initial { 0 } else { revision };
         if !pending.snapshot.selection.is_empty() {
             let admission = admission.ok_or(ChatError::OrchestrationUnavailable)?;
             super::provider::preflight(
@@ -369,6 +418,7 @@ impl ChatRepository {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .map_err(db_error)?;
+        let initial = super::initial_host_turn::is_initial(&tx, pending.session, pending.operation, revision)?;
         if profile != crate::chat::models::profile_id(receipt.profile_id)
             || if pending.operation != pending.turn_operation {
                 1
@@ -387,6 +437,8 @@ impl ChatRepository {
                 true,
                 true,
             )?;
+        } else if initial {
+            super::initial_host_turn::bind(&tx, &self.scope, [pending.session, pending.operation, task, agent, thread], &receipt.host_instance_id)?;
         } else {
             let existing: (String, String) = tx
                 .query_row(
@@ -608,6 +660,24 @@ pub(crate) async fn next(
                 }
             }
         }
+        if pending.expert_snapshot.is_none() {
+            if let Some(task) = pending.task {
+                if let Ok(proof) = host
+                    .market_submission_rejection(task, pending.turn_operation)
+                    .await
+                {
+                    let saved = pending.clone();
+                    if database
+                        .call(move |r| r.settle_market_rejection(&saved, &proof, now))
+                        .await?
+                    {
+                        return Ok(Some(DispatchOutcome::FailedSafely {
+                            operation_id: operation,
+                        }));
+                    }
+                }
+            }
+        }
         return Ok(Some(DispatchOutcome::Idle));
     }
     let _admission = authority.market_admission_lock().await;
@@ -615,7 +685,7 @@ pub(crate) async fn next(
         .call(move |r| r.claim_market_delivery(operation))
         .await?;
     let control = host.market_control().ok_or(ChatError::SidecarUnavailable)?;
-    let create = pending.operation != pending.turn_operation;
+    let create = pending.agent_session.is_none();
     let admission_now = super::now().map_err(|_| ChatError::OrchestrationUnavailable)?;
     let auth = dispatch_authority(authority, &pending, create, admission_now);
     let scope = match auth {
@@ -916,6 +986,24 @@ pub(crate) async fn next(
             database
                 .call(move |r| r.market_mark(operation, "uncertain", None, Some(&issue), now))
                 .await?;
+            if pending.expert_snapshot.is_none() {
+                if let Some(task) = pending.task {
+                    if let Ok(proof) = host
+                        .market_submission_rejection(task, pending.turn_operation)
+                        .await
+                    {
+                        let saved = pending.clone();
+                        if database
+                            .call(move |r| r.settle_market_rejection(&saved, &proof, now))
+                            .await?
+                        {
+                            return Ok(Some(DispatchOutcome::FailedSafely {
+                                operation_id: operation,
+                            }));
+                        }
+                    }
+                }
+            }
             Ok(Some(DispatchOutcome::TurnSubmissionUncertain {
                 operation_id: pending.turn_operation,
                 session_id: pending.session,
@@ -1265,6 +1353,201 @@ mod tests {
             .claim_next_conversation_outbox(now + 10, 30)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn feat174_market_rejection_proof_closes_only_bound_attempt_after_reopen() {
+        #[cfg(feature = "kimi-k31-pro-candidate")]
+        if crate::chat::model_test_support::run_in_current_model_environment(concat!(
+            module_path!(),
+            "::feat174_market_rejection_proof_closes_only_bound_attempt_after_reopen"
+        )) {
+            return;
+        }
+        let mut f = Fixture::new();
+        let pending = f.create();
+        let now = super::super::now().unwrap();
+        let host = Uuid::now_v7().to_string();
+        f.repo()
+            .market_mark(
+                pending.operation,
+                "uncertain",
+                Some(&host),
+                Some("submission_unknown"),
+                now,
+            )
+            .unwrap();
+        let proof = super::super::submission_rejection_generated::Proof {
+            schema_version: 1,
+            host_instance_id: host,
+            task_id: pending.task.unwrap().to_string(),
+            local_session_id: pending.session.to_string(),
+            submission_operation_id: pending.operation.to_string(),
+            turn_operation_id: pending.turn_operation.to_string(),
+            selection_digest: pending.snapshot.selection_digest.clone(),
+            reason: "skill_maintenance_busy".into(),
+            outcome: "not_dispatched".into(),
+        };
+        let retry_payload = |operation: Uuid| -> selection_generated::SubmitPayload {
+            serde_json::from_value(serde_json::json!({"operationId":operation,"sessionId":pending.session,"projectId":null,"contentBlocks":[{"type":"text","text":"Explicit new message after a proven rejection"}],"intent":{"profileId":crate::chat::model_test_support::active_profile(),"expectedRevision":1},"selection":[]})).unwrap()
+        };
+        assert!(f
+            .repo()
+            .market_submission_admitted(
+                retry_payload(Uuid::now_v7()),
+                1,
+                super::super::selection::ExecutionAdmission::test()
+            )
+            .is_err());
+        let scope = f.repo().scope.clone();
+        drop(f.repo.take());
+        f.repo = Some(
+            ChatRepository::open(
+                &f.root.join("chat"),
+                &DatabaseKey::from_bytes([57; 32]),
+                ReceiptKey::from_bytes([58; 32]),
+                scope,
+            )
+            .unwrap(),
+        );
+        assert!(f.repo().pending_market(now + 6).unwrap().is_some());
+        let mut unrelated = proof.clone();
+        unrelated.submission_operation_id = Uuid::now_v7().to_string();
+        assert!(!f
+            .repo()
+            .settle_market_rejection(&pending, &unrelated, now + 1)
+            .unwrap());
+        assert!(f.repo().pending_market(now + 6).unwrap().is_some());
+        assert!(f
+            .repo()
+            .settle_market_rejection(&pending, &proof, now + 2)
+            .unwrap());
+        assert!(f.repo().pending_market(now + 3).unwrap().is_none());
+        assert_eq!(
+            f.repo()
+                .local_submissions(pending.session, &[pending.turn])
+                .unwrap()[0]
+                .status,
+            "failed"
+        );
+        assert!(!f
+            .repo()
+            .settle_market_rejection(&pending, &proof, now + 3)
+            .unwrap());
+        assert!(f
+            .repo()
+            .claim_next_conversation_outbox(now + 10, 30)
+            .unwrap()
+            .is_none());
+        let scope = f.repo().scope.clone();
+        drop(f.repo.take());
+        f.repo = Some(
+            ChatRepository::open(
+                &f.root.join("chat"),
+                &DatabaseKey::from_bytes([57; 32]),
+                ReceiptKey::from_bytes([58; 32]),
+                scope,
+            )
+            .unwrap(),
+        );
+        assert!(f.repo().pending_market(now + 20).unwrap().is_none());
+        assert_eq!(
+            f.repo()
+                .local_submissions(pending.session, &[pending.turn])
+                .unwrap()[0]
+                .status,
+            "failed"
+        );
+
+        let repo = f.repo();
+        assert!(super::super::initial_host_turn::proven_unbound(
+            &repo.connection,
+            &repo.scope,
+            pending.session,
+            None
+        )
+        .unwrap());
+        let retry = f
+            .repo()
+            .market_submission_admitted(
+                retry_payload(Uuid::now_v7()),
+                1,
+                super::super::selection::ExecutionAdmission::test(),
+            )
+            .unwrap();
+        assert_eq!(retry.session_id, pending.session.to_string());
+        assert_ne!(retry.submission_operation_id, pending.operation.to_string());
+        let scope = f.repo().scope.clone();
+        drop(f.repo.take());
+        f.repo = Some(
+            ChatRepository::open(
+                &f.root.join("chat"),
+                &DatabaseKey::from_bytes([57; 32]),
+                ReceiptKey::from_bytes([58; 32]),
+                scope,
+            )
+            .unwrap(),
+        );
+        let next = f.repo().pending_market(now + 30).unwrap().unwrap();
+        let body = f.repo().market_body(&next, now + 30, None).unwrap();
+        assert_eq!(body.intent.expected_revision, 0);
+        assert_eq!(body.task_id, proof.task_id);
+        let current_host = Uuid::now_v7().to_string();
+        f.repo()
+            .market_mark(
+                next.operation,
+                "inflight",
+                Some(&current_host),
+                None,
+                now + 30,
+            )
+            .unwrap();
+        let receipt = wire::SubmissionReceipt {
+            host_instance_id: current_host,
+            runtime_generation: Some(Uuid::now_v7().to_string()),
+            task_id: body.task_id,
+            local_session_id: body.local_session_id,
+            submission_operation_id: next.operation.to_string(),
+            turn_operation_id: next.turn_operation.to_string(),
+            selection_digest: next.snapshot.selection_digest.clone(),
+            state: wire::SubmissionState::Accepted,
+            agent_session_id: Some(Uuid::now_v7().to_string()),
+            native_thread_id: Some(Uuid::now_v7().to_string()),
+            native_turn_id: Some(Uuid::now_v7().to_string()),
+            profile_id: body.intent.profile_id,
+            model_revision: 1,
+        };
+        f.repo().market_accept(&next, &receipt).unwrap();
+        assert_eq!(
+            f.repo()
+                .local_submissions(pending.session, &[pending.turn])
+                .unwrap()[0]
+                .status,
+            "failed"
+        );
+        assert!(f.repo().pending_market(now + 40).unwrap().is_none());
+        assert!(f
+            .repo()
+            .agent_session_id_for_session_optional_model(pending.session)
+            .unwrap()
+            .is_some());
+        let old_outbox: String = f
+            .repo()
+            .connection
+            .query_row(
+                "SELECT state FROM chat_outbox WHERE operation_id=?1",
+                [pending.operation.to_string()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(old_outbox, "failed");
+        assert_eq!(
+            f.repo()
+                .connection
+                .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            46
+        );
     }
 
     #[test]

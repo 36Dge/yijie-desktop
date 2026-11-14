@@ -60,6 +60,7 @@ useChatStore,
 type ChatSubmissionResult,
 } from "../../stores/chat.store";
 import ChatPage from "./ChatPage.vue";
+import { chatClient } from "../../api/chat-client";
 
 vi.mock("naive-ui", async original => ({
   ...await original<typeof import("naive-ui")>(),
@@ -606,6 +607,24 @@ describe("FEAT-126 ChatPage", () => {
     await flushPromises();
     expect(wrapper.text()).toContain("标题检查完成");
     expect(wrapper.text()).not.toContain("正在读取本地对话");
+  });
+
+  it("shows a visited task immediately during native revalidation without enabling submission", async () => {
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+    vi.spyOn(chatClient, "listDraftAttachments").mockResolvedValue([]);
+    await store.clearSelectedSession();
+    let reject!: (error: unknown) => void;
+    vi.spyOn(chatClient, "getSessionPurpose").mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail; }));
+    const returning = store.selectSession(SESSION_ID);
+    await flushPromises();
+    expect(wrapper.text()).toContain("标题检查完成");
+    expect(wrapper.text()).not.toContain("正在读取本地对话");
+    expect(store.readingView.cached).toBe(true);
+    expect(store.canSend).toBe(false);
+    reject(new ChatClientError({schemaVersion: 1, code: "chat_capability_denied", retryable: false, recovery: "none"}));
+    await returning; await flushPromises();
+    expect(wrapper.text()).not.toContain("标题检查完成");
+    expect(wrapper.text()).toContain("当前工作区权限不足");
   });
 
   // Run explicitly with VITE_YIJIE_CHAT_MODELS_ENABLED=true; the legacy suite

@@ -1,23 +1,28 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, useId, watch, watchEffect } from "vue";
 import { NModal, NPopover, useMessage } from "naive-ui";
 import type { ChatArtifactNativeClient } from "../../api/chat-artifact-native-client";
 import type { ArtifactProjection } from "../../domain/chat-artifact";
 import { useChatArtifactImage } from "../../composables/useChatArtifactImage";
+import { drawArtifactFrame } from "../../composables/chat-artifact-media-cache";
 import YjIcon from "../yijie/YjIcon.vue";
 import YjTooltip from "../yijie/YjTooltip.vue";
 
 const props = defineProps<{ artifact: ArtifactProjection; contextId: string; client?: ChatArtifactNativeClient }>();
 const message = useMessage();
-const { eligible, generating, title, status, alt, inlinePhase, inlineLease, inlineError, inlineBusy,
-  lightboxOpen, lightboxPhase, lightboxLease, lightboxError, lightboxBusy, openLightbox, closeLightbox,
-  openPreview, loaded, failed, action, performAction } = useChatArtifactImage(props, (text, tone) => { message[tone](text); });
+const { eligible, generating, title, status, alt, source, inlinePhase, inlineError, inlineBusy,
+  lightboxOpen, lightboxPhase, lightboxError, lightboxBusy, openLightbox, closeLightbox,
+  openPreview, action, performAction } = useChatArtifactImage(props, (text, tone) => { message[tone](text); });
 const id = useId();
 const menuOpen = ref(false);
 const overlay = ref<HTMLElement | null>(null);
 const trigger = ref<HTMLButtonElement | null>(null);
 const menu = ref<HTMLElement | null>(null);
 const preview = ref<HTMLButtonElement | null>(null);
+const inlineCanvas = ref<HTMLCanvasElement | null>(null);
+const inlineImageHost = ref<HTMLElement | null>(null);
+const viewerImageHost = ref<HTMLElement | null>(null);
+const viewerPresented = computed(() => lightboxOpen.value || viewerImageHost.value !== null);
 const closeButton = ref<HTMLButtonElement | null>(null);
 const viewport = ref<HTMLElement | null>(null);
 const zoom = ref(1);
@@ -31,6 +36,7 @@ const imageSize = computed(() => {
   return { width: `${width * fit * zoom.value}px`, height: `${height * fit * zoom.value}px` };
 });
 let observer: ResizeObserver | undefined;
+let viewerRevision = 0;
 let pan: { pointerId: number; x: number; y: number; left: number; top: number } | null = null;
 let gestureStartZoom: number | null = null;
 const panning = ref(false);
@@ -92,12 +98,14 @@ function measure() {
   if (viewport.value) bounds.value = { width: viewport.value.clientWidth, height: viewport.value.clientHeight };
 }
 watch(lightboxOpen, async open => {
+  const revision = ++viewerRevision;
   observer?.disconnect();
-  pan = null; panning.value = false; zoom.value = 1;
+  observer = undefined;
+  pan = null; panning.value = false;
   gestureStartZoom = null;
-  dimensions.value = { width: 0, height: 0 };
+  if (open) { zoom.value = 1; dimensions.value = { width: 0, height: 0 }; }
   await nextTick();
-  if (open && lightboxOpen.value) {
+  if (revision === viewerRevision && open && lightboxOpen.value) {
     closeButton.value?.focus();
     measure();
     if (viewport.value && typeof ResizeObserver !== "undefined") {
@@ -106,14 +114,26 @@ watch(lightboxOpen, async open => {
     }
   }
 });
-function eventUrl(event: Event) { return (event.target as HTMLImageElement).getAttribute("src") ?? ""; }
-function imageLoaded(event: Event) {
-  const image = event.target as HTMLImageElement;
-  if (eventUrl(event) !== lightboxLease.value?.url) return;
-  dimensions.value = { width: image.naturalWidth, height: image.naturalHeight };
+watchEffect(() => {
+  const image = source.value;
+  if (image && inlineCanvas.value && inlinePhase.value === "ready") drawArtifactFrame(inlineCanvas.value, image, 880);
+  if (!image || inlinePhase.value !== "ready") return;
+  const host = viewerPresented.value ? viewerImageHost.value : inlineImageHost.value;
+  if (!host) return;
+  image.className = viewerPresented.value ? "artifact-image__dialog-image" : "artifact-image__inline";
+  image.dataset.testid = viewerPresented.value ? "artifact-image-dialog-img" : "artifact-image-inline";
+  image.alt = alt.value;
+  image.draggable = false;
+  image.style.width = viewerPresented.value ? imageSize.value?.width ?? "" : "";
+  image.style.height = viewerPresented.value ? imageSize.value?.height ?? "" : "";
+  if (image.parentElement !== host) host.replaceChildren(image);
+}, { flush: "post" });
+watch([source, lightboxOpen, lightboxPhase], async () => {
+  if (!lightboxOpen.value || !source.value) return;
+  dimensions.value = { width: source.value.naturalWidth, height: source.value.naturalHeight };
+  await nextTick();
   measure();
-  loaded("lightbox", eventUrl(event));
-}
+}, { flush: "post" });
 async function setZoom(value: number) {
   if (lightboxPhase.value !== "ready" || !Number.isFinite(value)) return;
   const previous = zoom.value;
@@ -167,7 +187,7 @@ function key(event: KeyboardEvent) {
     void setZoom(event.key === "0" ? 1 : zoom.value + (event.key === "-" ? -0.1 : 0.1));
   }
 }
-onBeforeUnmount(() => observer?.disconnect());
+onBeforeUnmount(() => { ++viewerRevision; observer?.disconnect(); });
 defineExpose({ openLightbox: openViewer });
 </script>
 
@@ -176,12 +196,12 @@ defineExpose({ openLightbox: openViewer });
   <figure v-if="artifact.kind === 'image'" class="artifact-image" :aria-labelledby="`${id}-title`" :aria-busy="generating || inlineBusy">
     <figcaption :id="`${id}-title`" class="artifact-image__title">{{ title }}</figcaption>
     <div class="artifact-image__frame" :class="{ 'is-menu-open': menuOpen, 'is-loading-frame': inlineBusy }">
-      <button v-if="inlineLease" ref="preview" type="button" tabindex="0" class="artifact-image__preview" data-testid="artifact-image-preview"
-        :disabled="inlinePhase !== 'ready'" :aria-label="`预览图片：${title}`" @click="openViewer">
-        <img :key="inlineLease.url" class="artifact-image__inline" data-testid="artifact-image-inline" :src="inlineLease.url" :alt="alt"
-          :class="{ 'is-loading': inlineBusy }" draggable="false" @load="loaded('inline', eventUrl($event))" @error="failed('inline', eventUrl($event))">
+      <button v-if="inlinePhase === 'ready'" ref="preview" type="button" tabindex="0" class="artifact-image__preview" data-testid="artifact-image-preview"
+        :aria-label="`预览图片：${title}`" @click="openViewer">
+        <span ref="inlineImageHost" class="artifact-image__source-host" />
+        <canvas v-if="viewerPresented" ref="inlineCanvas" class="artifact-image__inline" data-testid="artifact-image-inline" role="img" :aria-label="alt" />
       </button>
-      <div v-if="generating || inlineBusy" class="artifact-image__placeholder" :class="{ 'is-overlay': inlineLease }" role="status" data-testid="artifact-image-loading">
+      <div v-if="generating || inlineBusy" class="artifact-image__placeholder"  role="status" data-testid="artifact-image-loading">
         <YjIcon class="artifact-image__loading-icon" name="image" size="xl" />
         <span>{{ generating ? status : '加载中…' }}</span>
       </div>
@@ -232,13 +252,14 @@ defineExpose({ openLightbox: openViewer });
             @wheel.prevent="wheel" @gesturestart.prevent="startGesture" @gesturechange.prevent="changeGesture" @gestureend.prevent="endGesture"
             @pointerdown="startPan" @pointermove="movePan" @pointerup="stopPan" @pointercancel="stopPan" @lostpointercapture="stopPan" @dblclick="setZoom(1)">
             <div class="artifact-image__canvas" :style="imageSize ? { minWidth: imageSize.width, minHeight: imageSize.height } : undefined">
-              <img v-if="lightboxLease" :key="lightboxLease.url" class="artifact-image__dialog-image" data-testid="artifact-image-dialog-img" :src="lightboxLease.url" :alt="alt"
-                :style="imageSize" :class="{ 'is-loading': lightboxBusy }" draggable="false" @load="imageLoaded" @error="failed('lightbox', eventUrl($event))">
+              <div ref="viewerImageHost" class="artifact-image__source-host" />
             </div>
           </div>
-          <div v-if="lightboxBusy" class="artifact-image__dialog-status" role="status"><YjIcon class="artifact-image__loading-icon" name="image" size="xl" />加载中…</div>
+          <div v-if="lightboxBusy" class="artifact-image__dialog-status" :class="{ 'artifact-image__dialog-status--refresh': inlinePhase === 'ready' }" role="status" data-testid="artifact-image-refresh-status">
+            <YjIcon v-if="inlinePhase !== 'ready'" class="artifact-image__loading-icon" name="image" size="xl" />{{ inlinePhase === 'ready' ? '刷新中…' : '加载中…' }}
+          </div>
           <div v-else-if="lightboxError" class="artifact-image__dialog-status" role="alert"><span>{{ lightboxError.message }}</span><button v-if="lightboxError.retryable" class="yj-control" type="button" @click="openPreview('lightbox')">重新加载</button></div>
-          <output v-if="lightboxPhase === 'ready'" class="artifact-image__zoom" data-testid="artifact-image-zoom-value" aria-label="缩放比例" aria-live="polite">{{ zoomLabel }}</output>
+          <output v-if="inlinePhase === 'ready'" class="artifact-image__zoom" data-testid="artifact-image-zoom-value" aria-label="缩放比例" aria-live="polite">{{ zoomLabel }}</output>
         </div>
         <p :id="`${id}-zoom-help`" class="sr-only">滚轮或触控板缩放图片，放大后可拖动。键盘加号放大、减号缩小、0 恢复，Escape 关闭。</p>
       </div>
@@ -253,7 +274,7 @@ defineExpose({ openLightbox: openViewer });
 .artifact-image__frame.is-loading-frame { width: var(--yj-image-placeholder-size); height: var(--yj-image-placeholder-size); }
 .artifact-image__frame.is-loading-frame .artifact-image__preview { position: absolute; inset: 0; visibility: hidden; }
 .artifact-image__preview { display: block; max-width: 100%; padding: 0; border: 0; border-radius: inherit; overflow: hidden; background: transparent; cursor: pointer; }
-.artifact-image__inline { display: block; width: auto; height: auto; max-width: 100%; max-height: var(--yj-image-inline-size); border-radius: inherit; object-fit: contain; }
+.artifact-image__frame :deep(.artifact-image__inline) { display: block; width: auto; height: auto; max-width: 100%; max-height: var(--yj-image-inline-size); border-radius: inherit; object-fit: contain; }
 .is-loading { opacity: 0; }
 .artifact-image__preview:disabled { cursor: wait; }
 .artifact-image__placeholder { display: flex; box-sizing: border-box; flex-direction: column; align-items: center; justify-content: center; gap: var(--yj-space-3); width: var(--yj-image-placeholder-size); max-width: 100%; aspect-ratio: 1; padding: var(--yj-space-6); border-radius: var(--yj-radius-md); background: var(--yj-color-bg-composer-tray); color: var(--yj-color-text-primary); font-size: var(--yj-font-size-body); text-align: center; }
@@ -284,8 +305,10 @@ defineExpose({ openLightbox: openViewer });
 .artifact-image__viewport.is-zoomed { cursor: grab; }
 .artifact-image__viewport.is-panning { cursor: grabbing; }
 .artifact-image__canvas { display: grid; width: 100%; height: 100%; place-items: center; }
-.artifact-image__dialog-image { display: block; max-width: none; max-height: none; object-fit: contain; user-select: none; }
+.artifact-image__source-host { display: contents; }
+.artifact-image__canvas :deep(.artifact-image__dialog-image) { display: block; max-width: none; max-height: none; object-fit: contain; user-select: none; }
 .artifact-image__dialog-status { position: absolute; inset: var(--yj-space-4); display: flex; align-items: center; justify-content: center; flex-direction: column; gap: var(--yj-space-3); background: var(--yj-color-bg-elevated); color: var(--yj-color-text-secondary); text-align: center; }
+.artifact-image__dialog-status--refresh { inset: auto var(--yj-space-4) var(--yj-space-4) auto; padding: var(--yj-space-2) var(--yj-space-3); border-radius: var(--yj-radius-md); background: color-mix(in srgb, var(--yj-color-bg-elevated) 94%, transparent); font-size: var(--yj-font-size-caption); pointer-events: none; }
 .artifact-image__zoom { position: absolute; left: 50%; bottom: var(--yj-space-6); transform: translateX(-50%); padding: var(--yj-space-1) var(--yj-space-3); border-radius: var(--yj-radius-full); background: color-mix(in srgb, var(--yj-color-bg-nav) 94%, transparent); color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); font-variant-numeric: tabular-nums; pointer-events: none; }
 .sr-only { position: absolute; width: var(--yj-border-width); height: var(--yj-border-width); padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @keyframes image-breathe { 0%, 100% { opacity: 0.45; transform: scale(0.96); } 50% { opacity: 1; transform: scale(1); } }

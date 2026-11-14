@@ -127,6 +127,13 @@ else
   export YIJIE_FEAT169_INTERACTION_TOOLS=false
 fi
 export VITE_YIJIE_INTERACTION_TOOLS="$YIJIE_FEAT169_INTERACTION_TOOLS"
+export YIJIE_FEAT174_NATIVE_SKILLS="${YIJIE_FEAT174_NATIVE_SKILLS:-false}"
+[[ "$YIJIE_FEAT174_NATIVE_SKILLS" == true || "$YIJIE_FEAT174_NATIVE_SKILLS" == false ]] || fail "invalid native Skill selector"
+if [[ "$YIJIE_FEAT174_NATIVE_SKILLS" == true ]]; then
+  [[ "$development_app" == true && "$YIJIE_FEAT169_NATIVE_TOOLS" == true && "$YIJIE_FEAT169_INTERACTION_TOOLS" == true ]] || fail "native Skills require the paired development Runtime"
+  node "$desktop_root/scripts/sync-native-skill-resources.mjs" --check
+fi
+export VITE_YIJIE_FEAT174_NATIVE_SKILLS="$YIJIE_FEAT174_NATIVE_SKILLS"
 # Keep the compatible reader when discovery is disabled; the flag only changes
 # the ordinary-thread model catalogue, never silently downgrades saved history.
 export YIJIE_FEAT170_TOOL_SEARCH_RUNTIME="$YIJIE_FEAT169_INTERACTION_TOOLS"
@@ -231,6 +238,12 @@ if [[ "$development_app" == "true" ]]; then
   python3 -B "$desktop_root/scripts/development-client.py" check
   daily_bound_host_home="$desktop_root/.local/demo-fast/host-home"
   daily_bound_codex_home="$desktop_root/.local/demo-fast/codex-home"
+  if [[ -n "${YIJIE_FEAT174_ACCEPTANCE:-}" ]]; then
+    [[ "$development_ui_bundle" == true && "$YIJIE_FEAT174_NATIVE_SKILLS" == true && "$YIJIE_FEAT174_ACCEPTANCE" =~ ^[a-z0-9][a-z0-9-]{0,47}$ ]] || fail "invalid Skill acceptance selector"
+    daily_bound_host_home="$desktop_root/.local/skill-market-acceptance/$YIJIE_FEAT174_ACCEPTANCE/host-home"
+    daily_bound_codex_home="$desktop_root/.local/skill-market-acceptance/$YIJIE_FEAT174_ACCEPTANCE/codex-home"
+    [[ -d "$daily_bound_host_home" && -d "$daily_bound_codex_home" && ! -L "$daily_bound_host_home" && ! -L "$daily_bound_codex_home" ]] || fail "Skill acceptance data roots must be prepared by the canonical entry"
+  fi
   provider_key_file="$host_root/.local/secrets/minimax-api-key"
   export YIJIE_KIMI_API_KEY_FILE="$host_root/.local/secrets/kimi-api-key"
   workflow_credential_file="$workspace_root/yijie-infra/environments/local/generated/feat-153/private/k-na.json"
@@ -298,6 +311,13 @@ if [[ "$scheduled_candidate" == "true" || "$scheduled_daily" == "true" ]]; then
   node "$workspace_root/yijie-contracts/scripts/sync-runtime-input-only.mjs" --check
   candidate_lock="$desktop_root/contracts/runtime-input-only.candidate.json"
   codex_runtime_root="${YIJIE_DEMO_FAST_RUNTIME_ROOT:-$workspace_root/yijie-codex/.yijie/build/input-only/aarch64-apple-darwin}"
+  if [[ "$YIJIE_FEAT174_NATIVE_SKILLS" == true ]]; then
+    node "$workspace_root/yijie-contracts/scripts/generate-runtime-skill-marketplace.mjs" --check
+    candidate_lock="$desktop_root/contracts/runtime-skill-marketplace.candidate.json"
+    native_skill_relative="$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1])).runtime_relative_path)' "$candidate_lock")"
+    [[ "$native_skill_relative" =~ ^\.yijie/build/native-skill-marketplace-v1/[a-f0-9]{64}/aarch64-apple-darwin$ ]] || fail "invalid native Skill Runtime path"
+    codex_runtime_root="$workspace_root/yijie-codex/$native_skill_relative"
+  fi
   codex_binary="$codex_runtime_root/codex"
   codex_manifest="$codex_runtime_root/runtime-manifest.json"
   runtime_binary_sha256="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write((v.runtime_artifact ?? v.authority.runtime_artifact).sha256)' "$candidate_lock")"
@@ -392,6 +412,13 @@ if [[ "$chat_models_enabled" == "true" ]]; then
     document_relative="$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1])).runtime_relative_path)' "$candidate_lock")"
     [[ "$document_relative" =~ ^\.yijie/build/document-runtime-v1/[a-f0-9]{64}/aarch64-apple-darwin$ ]] || fail "invalid document Runtime path"
     codex_runtime_root="$workspace_root/yijie-codex/$document_relative"
+  fi
+  if [[ "$YIJIE_FEAT174_NATIVE_SKILLS" == true ]]; then
+    node "$workspace_root/yijie-contracts/scripts/generate-runtime-skill-marketplace.mjs" --check
+    candidate_lock="$desktop_root/contracts/runtime-skill-marketplace.candidate.json"
+    native_skill_relative="$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1])).runtime_relative_path)' "$candidate_lock")"
+    [[ "$native_skill_relative" =~ ^\.yijie/build/native-skill-marketplace-v1/[a-f0-9]{64}/aarch64-apple-darwin$ ]] || fail "invalid native Skill Runtime path"
+    codex_runtime_root="$workspace_root/yijie-codex/$native_skill_relative"
   fi
   codex_binary="$codex_runtime_root/codex"
   codex_manifest="$codex_runtime_root/runtime-manifest.json"
@@ -719,7 +746,11 @@ fi
 if [[ "$development_app" == "true" ]]; then
   python3 -B "$desktop_root/scripts/development-client.py" ready
   if [[ "$development_ui_bundle" == "true" ]]; then
-    printf 'Local UI qualification: standard debug bundle, original daily Homes, no published application overwritten.\n'
+    if [[ -n "${YIJIE_FEAT174_ACCEPTANCE:-}" ]]; then
+      printf 'Skill UI qualification: canonical development bundle, separate Native/Host/Runtime data; daily data retained.\n'
+    else
+      printf 'Local UI qualification: standard debug bundle, original daily Homes, no published application overwritten.\n'
+    fi
   else
     printf 'Fixed development client: live frontend, original daily data, incremental native build.\n'
   fi

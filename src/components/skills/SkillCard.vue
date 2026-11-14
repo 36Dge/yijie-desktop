@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { nativeSkillFailureMessage } from "../../domain/native-skill-marketplace";
 import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, ref, useId } from "vue";
 import { NButton, NSwitch, NTag, NTooltip } from "naive-ui";
@@ -34,18 +35,18 @@ const installTooltipVisible = computed(
   () => installTooltipHovered.value || installTooltipFocused.value,
 );
 const artworkSrc = computed(() => skillCardArtwork(props.skill));
-const installed = computed(() => props.skill.installationStatus === "installed");
+const installed = computed(() => props.skill.installationStatus === "installed" || (props.skill.nativeInstallation !== undefined && props.skill.nativeInstallation !== "not_installed" && props.skill.nativeInstallation !== "unknown"));
 const installable = computed(() => props.canManage && skillCanInstall(props.skill));
 const blockedReason = computed(() =>
   skillCatalogBlockedReasonLabel(props.skill.catalogBlockedReason),
 );
 const failureMessage = computed(() =>
-  props.operationError ?? skillFailureMessage(props.skill.failureCode),
+  props.operationError ?? (props.skill.nativeFailureCode ? nativeSkillFailureMessage(props.skill.nativeFailureCode) : skillFailureMessage(props.skill.failureCode)),
 );
 const installActionLabel = computed(() =>
   failureMessage.value === null ? "安装" : "重试安装",
 );
-const pending = computed(() => props.operation !== null && props.operation !== undefined);
+const pending = computed(() => (props.operation !== null && props.operation !== undefined) || props.skill.nativeFailureCode === "compatibility_mode");
 const actionable = computed(() =>
   props.canManage && !pending.value && (installed.value || installable.value),
 );
@@ -64,6 +65,15 @@ const status = computed<{
       return { label: "正在同步", type: "default" };
     case "uninstall":
       return { label: "正在卸载", type: "default" };
+  }
+  if (props.skill.nativeEpoch !== undefined) {
+    if (failureMessage.value !== null) return { label: "待确认", type: "warning" };
+    if (props.skill.retired) return { label: "已下架，仍可管理", type: "warning" };
+    if (props.skill.dependencyState === "missing") return { label: "工具未就绪", type: "warning" };
+    if (props.skill.dependencyState === "needs_authorization") return { label: "工具需要授权", type: "warning" };
+    if (installed.value && props.skill.enabled && !props.skill.runtimeVisible) return { label: "当前策略未开放", type: "warning" };
+    if (installed.value && props.skill.dependencyState === "unknown") return { label: "工具可用性待核对", type: "default" };
+    return null;
   }
   if (props.skill.catalogStatus === "blocked") {
     return { label: "暂不可安装", type: "warning" };
@@ -124,7 +134,7 @@ function requestUninstall(event: MouseEvent): void {
           <n-switch
             :value="skill.enabled"
             :loading="operation === 'enable' || operation === 'disable'"
-            :disabled="!canManage || pending"
+            :disabled="!canManage || pending || (skill.nativeInstallation !== undefined && skill.nativeInstallation !== 'installed' && !skill.enabled) || (skill.nativeOrigin === 'unknown' && !skill.enabled)"
             :aria-label="enabledLabel"
             @update:value="emit('enabled-change', skill.id, $event)"
           />

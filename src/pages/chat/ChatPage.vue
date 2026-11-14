@@ -69,7 +69,7 @@ import ChatHomeMascot from "../../components/chat/ChatHomeMascot.vue";
 import type { ChatApprovalDecisionChange } from "../../components/chat/ChatCommandItem.vue";
 import ChatDocumentWorkspace from "../../components/chat/ChatDocumentWorkspace.vue";
 import { isSidebarFile } from "../../domain/conversation-file-preview";
-import type { ArtifactProjection } from "../../domain/chat-artifact";
+import { createArtifactProjection, type ArtifactProjection } from "../../domain/chat-artifact";
 import ChatArtifactList from "../../components/chat/ChatArtifactList.vue";
 import ChatCopyAction from "../../components/chat/ChatCopyAction.vue";
 import ChatReasoningDisclosure from "../../components/chat/ChatReasoningDisclosure.vue";
@@ -122,6 +122,7 @@ import { useArtifactStore } from "../../stores/artifact.store";
 import { chatArtifactNativeClient } from "../../api/chat-artifact-native-client";
 import { chatArtifactVideoNativeClient } from "../../api/chat-artifact-video-native-client";
 import { chatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
+import { provideArtifactMediaCache } from "../../composables/chat-artifact-media-cache";
 import { chatArtifactReportNativeClient } from "../../api/chat-artifact-report-native-client";
 import { browserChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
 
@@ -132,9 +133,17 @@ import { compileSkillInput, compileSelectedSkillRefs, nativeSkillInputEnabled, s
 const route = useRoute();
 const router = useRouter();
 const chatStore = useChatStore();
+// Keep stable field identities so streaming text remains frame-batched even
+// when the aggregate reading view changes.
+const readingHistory = computed(() => chatStore.readingView.history);
+const readingConversation = computed(() => chatStore.readingView.conversation);
+const readingApprovals = computed(() => chatStore.readingView.approvals);
+const readingPurpose = computed(() => chatStore.readingView.purpose);
+const readingFromCache = computed(() => chatStore.readingView.cached);
 const readingStore = useChatReadingStore();
 let anchoredSidebarSession: string | null = null;
 provideWebSourceActions(() => chatStore.context?.contextId);
+provideArtifactMediaCache(() => chatStore.context?.contextId ?? null, () => chatStore.hasAction("read_sessions"));
 const readAttachmentPresentation = useChatAttachmentPresentation(
   () => chatStore.context?.contextId ?? null,
   () => chatStore.draftTarget,
@@ -238,15 +247,16 @@ const locatingTurn = ref(false); const turnLocationNotice = ref("");
 let locationEpoch = 0;
 const isNewDraftMode = computed(() => routeSessionId.value === null && route.query.create === "schedule");
 const isDraftMode = computed(() => isNewDraftMode.value || (routeSessionId.value !== null && chatStore.selectedSessionId === routeSessionId.value && chatStore.selectedSessionPurpose === "scheduled_plan_draft"));
-const normalPurposeReady = computed(() => routeSessionId.value === null || (chatStore.selectedSessionId === routeSessionId.value && chatStore.selectedSessionPurpose === "ordinary"));
+const normalPurposeReady = computed(() => routeSessionId.value === null || (chatStore.selectedSessionId === routeSessionId.value && readingPurpose.value === "ordinary"));
 const sentImageTarget = computed(() => chatStore.selectedSessionId ? { type: "session" as const, sessionId: chatStore.selectedSessionId } : null);
 const sentImageScope = computed(() => `${chatStore.context?.contextId ?? ""}:${chatStore.selectedSessionId ?? ""}:${previewEnabled.value}`);
 const readSentImagePresentation = useChatAttachmentPresentation(
   () => chatStore.context?.contextId ?? null,
   () => sentImageTarget.value,
-  () => chatStore.history?.turns.flatMap(turn => turn.messages.filter(message => message.role === "user").flatMap(message => message.contentBlocks?.flatMap(block => block.type !== "text" && block.mediaType.startsWith("image/") && block.status === "bound" ? [block.attachmentId] : []) ?? [])) ?? [],
+  () => readingHistory.value?.turns.flatMap(turn => turn.messages.filter(message => message.role === "user").flatMap(message => message.contentBlocks?.flatMap(block => block.type !== "text" && block.mediaType.startsWith("image/") && block.status === "bound" ? [block.attachmentId] : []) ?? [])) ?? [],
   () => previewEnabled.value,
   "bound",
+  () => chatStore.hasAction("read_sessions"),
 );
 const composerDraftTargetKey = computed(() => sharedComposerDraftsEnabled && isNewDraftMode.value ? "plan:new" as const : chatComposerDraftKey(routeSessionId.value));
 const prompt = computed({
@@ -397,7 +407,7 @@ const reasoningItems = ref<Readonly<Record<string, readonly ChatReasoningItem[]>
 const reasoningLoading = ref<ReadonlySet<string>>(new Set());
 const reasoningFailed = ref<ReadonlySet<string>>(new Set());
 const conversationScroller = ref<HTMLElement | null>(null);
-const renderedConversationView = shallowRef(chatStore.conversationState);
+const renderedConversationView = shallowRef(readingConversation.value);
 let dragDropUnlisten: UnlistenFn | null = null;
 let dragDropDisposed = false;
 const {
@@ -416,7 +426,7 @@ const selectedSession = computed(() => chatStore.sessions.find((session) =>
 const activeProject = computed(() => chatStore.projects.find((project) =>
   project.projectId === selectedSession.value?.projectId,
 ) ?? null);
-const displayTurns = computed(() => sortHistoryTurns(chatStore.history?.turns ?? []));
+const displayTurns = computed(() => sortHistoryTurns(readingHistory.value?.turns ?? []));
 function timelineSelectionActive(): boolean {
   const scroller = conversationScroller.value;
   const selection = document.getSelection();
@@ -439,7 +449,7 @@ const conversationTimeline = computed(() => {
     : measureChatRender("timeline", () => withContextWindowTimeline(selectConversationTimeline(
         renderedConversationView.value,
         sessionId,
-        chatStore.conversationApprovalState,
+        readingApprovals.value,
         { protectApprovalProcessContent: feat137ApprovalUiEnabled, liveTurnId: chatStore.nativeLiveTurnId },
       ), contextDetails.value));
 });
@@ -691,7 +701,7 @@ function prepareConnectorSubmit(): boolean {
 
 const isHistoryLoading = computed(() =>
   isSessionRoute.value &&
-  chatStore.history === null &&
+  readingHistory.value === null &&
   ["binding", "loading", "binding-pending", "resyncing", "ready"].includes(chatStore.phase),
 );
 const canRecoverReadiness = computed(() => readiness.value.actionLabel !== null);
@@ -716,7 +726,7 @@ const statusAnnouncement = computed(() => {
 
 watch(
   [
-    () => chatStore.conversationState,
+    () => readingConversation.value,
     () => chatStore.phase,
   ],
   ([state, currentPhase]) => {
@@ -761,7 +771,7 @@ watch(
     // Replace any presentation frame queued for the previous session. The
     // native view remains synchronous; only its DOM projection
     // is frame-batched.
-    timelineFrameProjection.push(chatStore.conversationState, false);
+    timelineFrameProjection.push(readingConversation.value, false);
     reasoningItems.value = {};
     reasoningLoading.value = new Set();
     reasoningFailed.value = new Set();
@@ -781,7 +791,7 @@ watch(
   },
 );
 
-const presentedConversationChange = computed(() => [renderedConversationView.value, chatStore.conversationApprovalState]);
+const presentedConversationChange = computed(() => [renderedConversationView.value, readingApprovals.value]);
 
 watch(
   presentedConversationChange,
@@ -988,7 +998,7 @@ async function submit(recoverExpert = false): Promise<void> {
       }
       const issue = selectedSkillsAtStart.map(skill => skills.operations[skill.id] ? "技能正在更新，请稍后重试" : selectedSkillIssue(skill, skills.skills)).find(Boolean);
       if (issue) { transientNotice.value = issue; return; }
-      input = compileSkillInput(input, selectedSkillsAtStart);
+      if (import.meta.env.VITE_YIJIE_FEAT174_NATIVE_SKILLS !== "true" || !nativeSkillInputEnabled()) input = compileSkillInput(input, selectedSkillsAtStart);
     }
     const selectedRefs = nativeSkillInputEnabled() && !recoverExpert ? compileSelectedSkillRefs(selectedSkillsAtStart) : undefined;
     if (isSessionRoute.value) {
@@ -1177,6 +1187,11 @@ function artifactsForTimelineReference(
   const authority = artifactStore.authority;
   const context = chatStore.context;
   const selectedSessionId = chatStore.selectedSessionId;
+  if (readingFromCache.value && context && item.threadId === selectedSessionId) {
+    return (readingHistory.value?.turns.find(turn => turn.turnId === item.turnId)?.artifacts ?? [])
+      .filter(artifact => artifact.artifactId === block.artifactId)
+      .map(artifact => createArtifactProjection(item.threadId, item.turnId, artifact));
+  }
   if (
     authority === null ||
     context === null ||

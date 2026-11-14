@@ -1,11 +1,10 @@
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
+import { useArtifactMediaCache, type ArtifactMediaEntry } from "./chat-artifact-media-cache";
 import { chatArtifactNativeClient, ChatArtifactNativeClientError, type ChatArtifactNativeClient } from "../api/chat-artifact-native-client";
-import type { ArtifactNativeErrorCode, ArtifactNativeIdentity } from "../domain/chat-artifact-native";
+import type { ArtifactNativeErrorCode } from "../domain/chat-artifact-native";
 import type { ArtifactProjection } from "../domain/chat-artifact";
 import { artifactImageStatus, artifactImageTitle } from "../domain/chat-artifact-image";
 
-type Phase = "idle" | "opening" | "loading" | "ready" | "error";
-type Lease = Readonly<{ client: ChatArtifactNativeClient; contextId: string; identity: ArtifactNativeIdentity; url: string }>;
 type Failure = Readonly<{ message: string; retryable: boolean }>;
 
 function errorCode(error: unknown): ArtifactNativeErrorCode {
@@ -43,117 +42,46 @@ export function useChatArtifactImage(
   props: Readonly<{ artifact: ArtifactProjection; contextId: string; client?: ChatArtifactNativeClient }>,
   notify: (message: string, tone: "success" | "error") => void,
 ) {
-  const eligible = computed(() => props.artifact.kind === "image" && props.artifact.status === "ready");
+  const cache = useArtifactMediaCache();
+  const entry = shallowRef<ArtifactMediaEntry | null>(null);
+  const eligible = computed(() => props.artifact.kind === "image" && props.artifact.status === "ready" && cache.canRead(props.contextId));
   const generating = computed(() => ["announced", "generating", "processing", "transferring"].includes(props.artifact.status));
   const title = computed(() => artifactImageTitle(props.artifact.displayName));
   const status = computed(() => artifactImageStatus(props.artifact));
   const alt = computed(() => props.artifact.provenance === "synthetic" ? `本地合成演示图片：${title.value}` : title.value);
-  const inlinePhase = ref<Phase>("idle");
-  const inlineLease = ref<Lease | null>(null);
-  const inlineError = ref<Failure | null>(null);
+  const source = computed(() => entry.value?.image.value ?? null);
+  const phase = computed(() => entry.value?.phase.value ?? "idle");
+  const decoded = computed(() => { void phase.value; return Boolean(source.value && entry.value && entry.value.decodedBytes > 0); });
+  const inlinePhase = computed(() => decoded.value ? "ready" : phase.value);
+  const inlineBusy = computed(() => !decoded.value && phase.value === "loading");
+  const failure = computed(() => entry.value?.error.value ? previewFailure(errorCode(entry.value.error.value)) : null);
+  const inlineError = computed(() => decoded.value ? null : failure.value);
   const lightboxOpen = ref(false);
-  const lightboxPhase = ref<Phase>("idle");
-  const lightboxLease = ref<Lease | null>(null);
-  const lightboxError = ref<Failure | null>(null);
+  const lightboxPhase = phase;
+  const lightboxBusy = computed(() => phase.value === "loading");
+  const lightboxError = failure;
   const action = ref<"copy" | "save" | null>(null);
   let epoch = 0;
-  let inlineRequest = 0;
-  let lightboxRequest = 0;
   let disposed = false;
-  let pendingPreview = Promise.resolve();
-  // A release revokes all pending handles for this identity. Finish it before
-  // requesting a replacement, including rapid close/reopen of the lightbox.
-  const releases = new Set<Promise<void>>();
-  const identity = (): ArtifactNativeIdentity => ({ sessionId: props.artifact.sessionId, turnId: props.artifact.turnId, artifactId: props.artifact.artifactId });
-  function release(lease: Lease | null): Promise<void> {
-    if (!lease) return Promise.resolve();
-    const task = lease.client.releaseImagePreview(lease.contextId, lease.identity).then(() => {}, () => {});
-    releases.add(task);
-    void task.finally(() => releases.delete(task));
-    return task;
-  }
-  const inlineBusy = computed(() => ["opening", "loading"].includes(inlinePhase.value));
-  const lightboxBusy = computed(() => ["opening", "loading"].includes(lightboxPhase.value));
 
-  async function openPreview(mode: "inline" | "lightbox") {
-    if (!eligible.value || disposed) return;
-    const modal = mode === "lightbox";
-    const phase = modal ? lightboxPhase : inlinePhase;
-    const leaseRef = modal ? lightboxLease : inlineLease;
-    const error = modal ? lightboxError : inlineError;
-    if (phase.value === "opening" || phase.value === "loading") return;
-    const request = modal ? ++lightboxRequest : ++inlineRequest;
-    const generation = epoch;
-    const issuing = { client: props.client ?? chatArtifactNativeClient, contextId: props.contextId, identity: identity() };
-    const current = () => !disposed && generation === epoch && eligible.value && request === (modal ? lightboxRequest : inlineRequest) && (!modal || lightboxOpen.value);
-    const old = leaseRef.value;
-    leaseRef.value = null;
-    phase.value = "opening";
-    error.value = null;
-    // A late response from a closed viewer must be released before another
-    // preview for that identity is issued; native release is identity-scoped.
-    const pending = pendingPreview.then(async () => {
-      await nextTick();
-      await release(old);
-      await Promise.all([...releases]);
-      if (!current()) return;
-      try {
-        const result = await issuing.client.openImagePreview(issuing.contextId, issuing.identity);
-        const lease = { ...issuing, url: result.previewUrl };
-        if (!current()) { await release(lease); return; }
-        leaseRef.value = lease;
-        phase.value = "loading";
-      } catch (cause) {
-        if (!current()) return;
-        error.value = previewFailure(errorCode(cause));
-        phase.value = "error";
-      }
-    });
-    pendingPreview = pending;
-    await pending;
-  }
-  function loaded(mode: "inline" | "lightbox", url: string) {
-    if (mode === "inline" && inlineLease.value?.url === url) inlinePhase.value = "ready";
-    if (mode === "lightbox" && lightboxLease.value?.url === url) lightboxPhase.value = "ready";
-  }
-  async function failed(mode: "inline" | "lightbox", url: string) {
-    const generation = epoch;
-    const modal = mode === "lightbox";
-    const request = modal ? lightboxRequest : inlineRequest;
-    const lease = modal ? lightboxLease : inlineLease;
-    if (lease.value?.url !== url) return;
-    const phase = modal ? lightboxPhase : inlinePhase;
-    const error = modal ? lightboxError : inlineError;
-    const old = lease.value;
-    lease.value = null;
-    phase.value = "opening";
-    await nextTick();
-    await release(old);
-    if (disposed || generation !== epoch || request !== (modal ? lightboxRequest : inlineRequest) || (modal && !lightboxOpen.value)) return;
-    error.value = previewFailure("artifact_native_unavailable");
-    phase.value = "error";
+  function openPreview(mode: "inline" | "lightbox") {
+    if (mode === "lightbox" && !lightboxOpen.value) return;
+    if (!entry.value || !eligible.value || lightboxBusy.value || failure.value?.retryable === false) return;
+    return cache.prepare(entry.value, true);
   }
   function openLightbox() {
-    if (!eligible.value || lightboxOpen.value || inlinePhase.value !== "ready") return;
+    if (!eligible.value || lightboxOpen.value || !decoded.value) return;
     lightboxOpen.value = true;
-    lightboxPhase.value = "idle";
-    void openPreview("lightbox");
   }
   function closeLightbox() {
-    ++lightboxRequest;
-    const lease = lightboxLease.value;
     lightboxOpen.value = false;
-    lightboxLease.value = null;
-    lightboxPhase.value = "idle";
-    lightboxError.value = null;
-    void release(lease);
   }
   async function performAction(kind: "copy" | "save") {
     if (!eligible.value || action.value) return;
     const generation = epoch;
     const issuingClient = props.client ?? chatArtifactNativeClient;
     const contextId = props.contextId;
-    const boundIdentity = identity();
+    const boundIdentity = { sessionId: props.artifact.sessionId, turnId: props.artifact.turnId, artifactId: props.artifact.artifactId };
     action.value = kind;
     try {
       if (kind === "copy") {
@@ -171,26 +99,26 @@ export function useChatArtifactImage(
       if (!disposed && generation === epoch) action.value = null;
     }
   }
-  function clear() {
-    epoch++;
-    inlineRequest++;
-    lightboxRequest++;
-    const inline = inlineLease.value;
-    const modal = lightboxLease.value;
-    inlineLease.value = lightboxLease.value = null;
-    inlinePhase.value = lightboxPhase.value = "idle";
-    inlineError.value = lightboxError.value = null;
-    lightboxOpen.value = false;
+  function unbind() {
+    ++epoch;
+    closeLightbox();
+    source.value?.remove();
+    if (entry.value) cache.relinquish(entry.value);
+    entry.value = null;
     action.value = null;
-    void release(inline);
-    void release(modal);
   }
-  watch(() => [props.contextId, props.artifact.sessionId, props.artifact.turnId, props.artifact.artifactId, props.artifact.kind, props.artifact.status, props.client], () => {
-    clear();
-    if (eligible.value) void openPreview("inline");
+  watch([() => props.contextId, () => props.artifact.sessionId, () => props.artifact.turnId, () => props.artifact.artifactId,
+    () => props.artifact.kind, () => props.artifact.status, () => props.artifact.mediaType,
+    () => props.artifact.localCommittedAt, () => props.artifact.expiresAt, () => props.client, () => cache.revision.value], () => {
+    if (entry.value && entry.value.contextId !== props.contextId) cache.clear();
+    unbind();
+    if (!eligible.value) { cache.invalidate(props.artifact, props.contextId); return; }
+    const current = cache.retain(props.artifact, props.contextId, props.client ?? chatArtifactNativeClient);
+    entry.value = current;
+    void cache.prepare(current);
   }, { immediate: true });
-  onBeforeUnmount(() => { disposed = true; clear(); });
-  return { eligible, generating, title, status, alt, inlinePhase, inlineLease, inlineError, inlineBusy,
-    lightboxOpen, lightboxPhase, lightboxLease, lightboxError, lightboxBusy, openLightbox, closeLightbox,
-    openPreview, loaded, failed, action, performAction };
+  onBeforeUnmount(() => { disposed = true; unbind(); });
+  return { eligible, generating, title, status, alt, source, inlinePhase, inlineError, inlineBusy,
+    lightboxOpen, lightboxPhase, lightboxError, lightboxBusy, openLightbox, closeLightbox,
+    openPreview, action, performAction };
 }

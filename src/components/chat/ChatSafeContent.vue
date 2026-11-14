@@ -385,7 +385,7 @@ h3.chat-safe-content__heading {
 }
 
 .chat-safe-content__reference:has(.chat-artifact-document-card) { display: block; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; }
-.chat-safe-content__reference:has(.artifact-image) { display: block; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; }
+.chat-safe-content__reference:has(.artifact-image, .artifact-video) { display: block; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; }
 
 .chat-safe-content__unknown {
   color: var(--yj-color-text-body);

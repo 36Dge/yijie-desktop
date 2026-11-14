@@ -349,16 +349,14 @@ impl ChatRepository {
         }
         let op = id(&payload.operation_id)?;
         let session = payload.session_id.as_deref().map(id).transpose()?;
-        if let Some(session) = session {
-            // A local first turn without an actual Host binding cannot be
-            // transformed into a fresh Host create with a continuation revision.
-            if self
-                .agent_session_id_for_session_optional_model(session)?
-                .is_none()
-            {
-                return Err(ChatError::OrchestrationUnavailable);
-            }
-        }
+        let initial_host_turn = if let Some(session) = session {
+            if self.agent_session_id_for_session_optional_model(session)?.is_none() {
+                if expert.is_some() || !super::initial_host_turn::proven_unbound(&self.connection, &self.scope, session, None)? {
+                    return Err(ChatError::OrchestrationUnavailable);
+                }
+                true
+            } else { false }
+        } else { false };
         let permission_mode = self.permission_state(session)?.mode;
         if !payload.selection.is_empty()
             && permission_mode != crate::chat::runtime_permissions::PermissionMode::Ask
@@ -379,6 +377,9 @@ impl ChatRepository {
             (Some(_), None) => None,
             _ => return Err(ChatError::InvalidInput),
         };
+        if initial_host_turn {
+            crate::chat::migrations::migrate_to_target(&mut self.connection, crate::chat::migrations::MARKET_INITIAL_HOST_TURN_SCHEMA_VERSION)?;
+        }
         let now = super::now().map_err(|_| ChatError::DatabaseUnavailable)?;
         let tx = self.connection.transaction().map_err(db_error)?;
         // Recheck under the same transaction as the existing outbox writer.
@@ -444,6 +445,9 @@ impl ChatRepository {
         };
         receipt.validate().map_err(invalid)?;
         tx.execute("INSERT INTO chat_market_submissions(submission_operation_id,session_id,local_turn_id,turn_operation_id,format_version,request_digest,snapshot_json,display_json,receipt_json,created_at,authorization_revision,permission_mode,native_process_epoch) VALUES(?1,?2,?3,?4,1,?5,?6,?7,?8,?9,?10,?11,?12)",params![receipt.submission_operation_id,receipt.session_id,receipt.local_turn_id,receipt.turn_operation_id,request_digest,serde_json::to_string(&snapshot).map_err(invalid)?,serde_json::to_string(&display).map_err(invalid)?,serde_json::to_string(&receipt).map_err(invalid)?,now,i64::try_from(authorization_revision).map_err(invalid)?,permission_mode,admission.native_process_epoch]).map_err(db_error)?;
+        if initial_host_turn {
+            tx.execute("INSERT INTO chat_market_initial_host_turns(operation_id,session_id,format_version,local_model_revision) VALUES(?1,?2,1,?3)",params![receipt.submission_operation_id,receipt.session_id,payload.intent.expected_revision]).map_err(db_error)?;
+        }
         let delivery_family = if expert.is_some() { "expert" } else { "market" };
         if let Some((request, resolved)) = expert {
             expert_store::freeze_submission(&tx, &self.scope, request, resolved, &receipt, now)
@@ -771,7 +775,7 @@ pub(crate) async fn chat_market_submit_v1(
             _ => return Err(wire::ErrorCode::PermissionDenied),
         };
         let context = id(&request.context_id).map_err(|_| wire::ErrorCode::ContextInvalid)?;
-        let create = request.payload.session_id.is_none();
+        let mut create = request.payload.session_id.is_none();
         let selected = !request.payload.selection.is_empty();
         let authority = chat_runtime
             .authorization_manager()
@@ -817,6 +821,11 @@ pub(crate) async fn chat_market_submit_v1(
                 request_id: request.request_id,
                 data: receipt,
             });
+        }
+        if let Some(session) = request.payload.session_id.as_deref() {
+            let session = id(session).map_err(|_| wire::ErrorCode::InvalidRequest)?;
+            create = database.call(move |repo| Ok(repo.agent_session_id_for_session_optional_model(session)?.is_none()))
+                .await.map_err(|_| wire::ErrorCode::TemporarilyUnavailable)?;
         }
         chat_runtime
             .ensure_demo_fast_sidecar()

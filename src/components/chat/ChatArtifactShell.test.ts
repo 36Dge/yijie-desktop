@@ -102,7 +102,9 @@ describe("ChatArtifactShell", () => {
       expect(wrapper.find(".artifact-shell").exists()).toBe(false);
       const video = artifact(0, {kind:"video",status:"ready",mediaType:"video/mp4",displayName:"演示.mp4"});
       await wrapper.setProps({artifacts:[video]});
-      expect(wrapper.get('[role="link"]').text()).toBe("《演示.mp4》");
+      expect(wrapper.get('[aria-label="播放视频：演示.mp4"]').attributes("aria-haspopup")).toBe("dialog");
+      expect(wrapper.find(".artifact-shell").exists()).toBe(false);
+      expect(wrapper.text()).not.toMatch(/MP4|已就绪|本地合成演示/);
       expect(openFile).toHaveBeenCalledTimes(1);
     } finally {wrapper.unmount();}
   });

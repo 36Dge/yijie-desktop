@@ -4,6 +4,28 @@ use super::*;
 use crate::chat::connectors::host_generated as wire;
 
 impl HostBridge {
+    pub(crate) async fn market_submission_rejection(
+        &self,
+        task: Uuid,
+        operation: Uuid,
+    ) -> Result<crate::chat::connectors::submission_rejection_generated::Proof, HostBridgeError>
+    {
+        require_non_nil(task)?;
+        require_non_nil(operation)?;
+        let request = Uuid::now_v7().to_string();
+        let response: crate::chat::connectors::submission_rejection_generated::Response = self
+            .market_get(
+                &format!("/v1/market-chat/tasks/{task}/operations/{operation}/rejection"),
+                &request,
+            )
+            .await?;
+        response.validate().map_err(|_| protocol_error())?;
+        if response.request_id != request {
+            return Err(protocol_error());
+        }
+        Ok(response.data)
+    }
+
     pub(crate) async fn market_submit(
         &self,
         request: &wire::SubmitRequest,

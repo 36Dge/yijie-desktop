@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 2,
+  "feature": "FEAT-174",
+  "authority": "Native command names and file-picker boundary; shared bodies come from yijie-contracts skills/market-v2",
+  "wireSchema": "../../contracts/skill-market-v2.schema.json",
+  "commands": {
+    "skills_list_v2": {"capability": "plugin.read", "arguments": [], "response": "Catalog"},
+    "skills_mutate_v2": {"capability": "plugin.manage", "arguments": ["request"], "request": "Mutation", "response": "Operation"},
+    "skills_operation_v2": {"capability": "plugin.read", "arguments": ["operationId"], "operationId": "canonical nonzero UUID", "response": "Operation"},
+    "skills_cancel_v2": {"capability": "plugin.manage", "arguments": ["operationId"], "operationId": "canonical nonzero UUID", "response": "Operation"},
+    "skills_import_v2": {"capability": "plugin.manage", "arguments": ["operationId"], "operationId": "canonical nonzero UUID", "response": "Operation or null when picker is cancelled", "inputAuthority": "Native picker-owned regular file, bounded read and SHA-256; no renderer path or bytes"}
+  },
+  "errors": "ErrorResponse",
+  "admission": "Exact local managed profile and paired Runtime artifact; request authorization remains in Native and Host",
+  "retainedReaders": ["skills v1 operation results", "legacy starter marker", "legacy selected {id,version}"]
+}

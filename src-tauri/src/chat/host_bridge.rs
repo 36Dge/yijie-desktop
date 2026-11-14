@@ -1,4 +1,5 @@
 mod market;
+mod skill_market;
 pub(super) mod models;
 use super::artifact::{
     ArtifactCommit, ArtifactKind, ArtifactManifest, DownloadedArtifact, DownloadedResource,
@@ -1957,11 +1958,18 @@ async fn expect_json_status(
 }
 
 async fn read_json_body(response: Response) -> Result<Vec<u8>, HostBridgeError> {
+    read_json_body_with_limit(response, MAX_JSON_BYTES).await
+}
+
+async fn read_json_body_with_limit(
+    response: Response,
+    limit: usize,
+) -> Result<Vec<u8>, HostBridgeError> {
     validate_no_store(response.headers())?;
     if header_text(response.headers(), CONTENT_TYPE)? != "application/json" {
         return Err(protocol_error());
     }
-    let body = read_limited(response, MAX_JSON_BYTES).await?;
+    let body = read_limited(response, limit).await?;
     if body.is_empty() {
         return Err(protocol_error());
     }
@@ -2570,6 +2578,22 @@ mod tests {
             instance_nonce: nonce.to_owned(),
         })
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn feat174_catalog_transport_exceeds_chat_envelope_without_dropping_rows() {
+        let token = TestToken::new(0o600);
+        let rows: Vec<_> = (0..1024).map(|i| serde_json::json!({"id":format!("ordinary-{i}"),"version":"1.0.0","runtime_name":"ordinary", "display_name":"Ordinary notes", "description":"Normal local description. ".repeat(70),"category":"personal", "order":0,"icon_key":"skill", "origin":"user","installation_state":"installed", "enabled":true,"runtime_visible":true,"retired":false,"dependency_state":"unknown","required_tools":[],"epoch":1,"failure_code":""})).collect();
+        let body = serde_json::json!({"schema_version":2,"revision":"a".repeat(64),"skills":rows,"operations":[]}).to_string();
+        assert!(body.len() > MAX_JSON_BYTES);
+        assert!(body.len() < crate::skills::market_v2_generated::MAX_CATALOG_RESPONSE_BYTES);
+        let (port,server) = serve(vec![ready_response(NONCE),json_response("200 OK",&body)]).await;
+        let client = bridge(port, token.path.clone(), NONCE);
+        let catalog = client.skill_market_catalog().await.unwrap();
+        assert_eq!(catalog.skills.len(),1024);
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(),2);
+        assert!(requests[1].starts_with("GET /v2/skills "));
     }
 
     #[tokio::test]

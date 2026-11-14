@@ -42,6 +42,22 @@ export async function stageBundleResources(source, destination, manifestDigest, 
   return { files: files.length, changed: true };
 }
 
+export async function stageNativeSkillResources(source, destination, authority) {
+  assert.equal(await realpath(source), source, "native Skill source must be canonical");
+  const files=[];
+  for (const [name,digest] of Object.entries(authority.files)) {
+    const relativePath=safeRelativePath(name);
+    const bytes=await readRegularFile(path.join(source,relativePath),64*1024*1024);
+    assert.equal(sha256(bytes),digest,"native Skill resource differs from its pin");
+    files.push({relativePath,bytes});
+  }
+  await verifyOutput(source,files);
+  try { await verifyOutput(destination,files);return {files:files.length,changed:false}; }
+  catch(error) { if(error?.code==="EACCES"||error?.code==="EPERM")throw error; }
+  await installOutput(destination,files);await verifyOutput(destination,files);
+  return {files:files.length,changed:true};
+}
+
 export async function stageDevelopmentResources(root, environment, arguments_) {
   if (environment.YIJIE_DEVELOPMENT_CLIENT !== "true") return;
   assert.equal(await realpath(root), root, "development project must be canonical");
@@ -59,7 +75,12 @@ export async function stageDevelopmentResources(root, environment, arguments_) {
     ["../.local/skill-packages", "skill-packages", ordinary.channels["local-development"].manifest_sha256],
     ["../.local/feat164-kimi-k31/skill-packages-experts", "skill-packages-experts", expert.manifest_sha256, expert.authority_sha256],
   ];
-  assert.deepEqual(resources, Object.fromEntries(slots.map(([source, slot]) => [source, slot])), "development resource configuration changed");
+  const nativeSource="../.local/skill-marketplace",nativeSlot="skill-marketplace";
+  const includeNative=resources[nativeSource]!==undefined;
+  if(environment.YIJIE_FEAT174_NATIVE_SKILLS==="true")assert(includeNative,"native Skill resource slot is required");
+  const expected=Object.fromEntries(slots.map(([source,slot])=>[source,slot]));
+  if(includeNative)expected[nativeSource]=nativeSlot;
+  assert.deepEqual(resources, expected, "development resource configuration changed");
   let directory = root;
   for (const segment of [".local", "development", "target", "debug"]) {
     directory = path.join(directory, segment);
@@ -70,5 +91,10 @@ export async function stageDevelopmentResources(root, environment, arguments_) {
   for (const [source, slot, manifest, authority] of slots) {
     const result = await stageBundleResources(path.resolve(root, "src-tauri", source), path.join(directory, slot), manifest, authority);
     process.stdout.write(`Development resources verified: ${slot}, ${result.files} files${result.changed ? ", staged" : ", unchanged"}.\n`);
+  }
+  if(includeNative){
+    const authority=JSON.parse(await readRegularFile(path.join(root,"contracts/native-skill-resources.candidate.json"),1024*1024));
+    const result=await stageNativeSkillResources(path.resolve(root,"src-tauri",nativeSource),path.join(directory,nativeSlot),authority);
+    process.stdout.write(`Development resources verified: ${nativeSlot}, ${result.files} files${result.changed?", staged":", unchanged"}.\n`);
   }
 }
