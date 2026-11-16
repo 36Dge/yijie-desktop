@@ -1,6 +1,6 @@
 """Fixed local development client: HMR, incremental builds, original daily data.
 
-Private deployment interface v3. Routine dependency startup and normal cleanup;
+Private deployment interface v4. Source preflight, canonical incremental builds;
 fixed macOS dev bundle/HMR, no installer, backup, migration or model dispatch.
 """
 import argparse
@@ -18,6 +18,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import feat164_primary as primary
 import feat162_build_cache as build_cache
+import development_preflight as preflight
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -165,19 +166,25 @@ def start(bundle_for_ui=False, tool_search_meter=False, document_meter=False, me
     # Reuse the existing bounded Cargo intermediates. One owner, including
     # during the live App session; no concurrent rebuild can replace its files.
     with build_cache.acquire(ROOT, cache):
-        workflow_session("ensure")
-        workflow_ready()
         command = ["/bin/bash", str(ROOT / "scripts/run-local-demo-fast.sh"), "--development", "--kimi-k31-daily"]
         def pending(_signal, _frame):
             print("请通过易界菜单或 ⌘Q 正常退出；开发入口不会强制终止客户端或服务。", flush=True)
         previous = {sig: signal.signal(sig, pending) for sig in (signal.SIGINT, signal.SIGTERM)}
         try:
+            env["YIJIE_DEVELOPMENT_STARTUP_ID"] = preflight.prepare(ROOT, env, cache)
+            workflow_session("ensure")
+            workflow_ready()
             child = subprocess.Popen(command, cwd=ROOT, env=env, start_new_session=True)
             code = child.wait()
             # The service controller checks that the App and Host have exited.
             # A failed/unfinished cleanup never escalates to a process kill.
             workflow_session("stop")
+            if code != 0:
+                preflight.failure(ROOT)
             return code
+        except (ValueError, OSError, subprocess.CalledProcessError):
+            preflight.failure(ROOT)
+            raise
         finally:
             for sig, handler in previous.items():
                 signal.signal(sig, handler)

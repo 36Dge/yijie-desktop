@@ -7,6 +7,18 @@ import { lstat, mkdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { installOutput, readRegularFile, safeRelativePath, sha256, verifyOutput } from "./sync-desktop-skill-resources.mjs";
 
+export async function developmentResourceIdentity(root) {
+  const readPin = async file => JSON.parse(await readRegularFile(path.join(root, "contracts", file), 1024 * 1024));
+  const ordinary = await readPin("desktop-skill-bundle-local.lock.json");
+  const expert = await readPin("experts-assets-feat164.candidate.json");
+  const native = await readPin("native-skill-resources.candidate.json");
+  return {
+    ordinary: ordinary.channels["local-development"].manifest_sha256,
+    expert: { manifest: expert.manifest_sha256, authority: expert.authority_sha256 },
+    native: Object.fromEntries(Object.entries(native.files).sort(([a], [b]) => a.localeCompare(b))),
+  };
+}
+
 export async function stageBundleResources(source, destination, manifestDigest, authorityDigest) {
   assert.equal(await realpath(source), source, "resource source must be canonical");
   const manifestBytes = await readRegularFile(path.join(source, "bundle-manifest.json"), 1024 * 1024);

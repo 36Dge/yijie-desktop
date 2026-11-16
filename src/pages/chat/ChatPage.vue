@@ -595,6 +595,8 @@ const marketChat = useMarketChat(
   () => marketConnectorsEnabled && !isDraftMode.value && normalPurposeReady.value ? chatStore.context?.contextId ?? null : null,
   () => routeSessionId.value,
   () => isStreaming.value,
+  undefined,
+  () => chatStore.marketNativeRevision,
 );
 // Labels come from each accepted turn's immutable display snapshot, never the
 // current composer selection or renamed/uninstalled catalog entries.

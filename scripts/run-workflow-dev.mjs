@@ -2,11 +2,11 @@
 // Canonical FEAT-153 dev entry: the same App and Vite config, with normal close.
 import { spawn } from "node:child_process";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, rename } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, rename } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { stageDevelopmentResources } from "./development-resources.mjs";
-import { runnerEnvironment } from "./development-app-runner.mjs";
+import { bundleArguments, inspectDevelopmentBundle, mayReuseNativeOutput, runnerEnvironment } from "./development-app-runner.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const stateRoot = path.join(root, process.env.YIJIE_DEVELOPMENT_CLIENT === "true" ? ".local/development" : ".local/demo-fast/workflow-dev");
@@ -74,7 +74,23 @@ export async function runWorkflowDev() {
     const { createServer } = await import("vite");
     server = await createServer({ root, configFile: path.join(root, "vite.config.ts"), server: { host: "localhost", port: 1420, strictPort: true, hmr: { host: "localhost", port: 1421 } } });
     await server.listen();
-    child = spawn("pnpm", arguments_, { cwd: root, env: runnerEnvironment(nativeEnvironment, arguments_), stdio: "inherit", detached: true, shell: false });
+    const launchEnvironment = runnerEnvironment(nativeEnvironment, arguments_);
+    let reuseNative = false;
+    if (nativeEnvironment.YIJIE_DEVELOPMENT_CLIENT === "true" && process.platform === "darwin") {
+      const startup = JSON.parse(await readFile(path.join(stateRoot, "startup-check.json"), "utf8"));
+      if (startup.build_plan?.actions?.native === "reuse") {
+        const bundle = await inspectDevelopmentBundle(bundleArguments(arguments_));
+        reuseNative = mayReuseNativeOutput(startup, nativeEnvironment.YIJIE_DEVELOPMENT_STARTUP_ID, bundle.binaryHash);
+        require(reuseNative, "native output changed after component preflight");
+      }
+    }
+    // A prior successful source/toolchain/profile snapshot plus exact bundle
+    // bytes can reuse the same dev App. Vite, the runner's final source check,
+    // the normal shutdown owner and all earlier contract checks remain active.
+    const program = reuseNative ? process.execPath : "pnpm";
+    const launchArguments = reuseNative ? [path.join(root, "scripts/development-app-runner.mjs"), path.join(root, ".local/development/target/debug/yijie-desktop"), "--reuse-native"] : arguments_;
+    if (reuseNative) process.stdout.write("DAILY PREFLIGHT: reusing verified native output; resources checked separately; Vite HMR retained.\n");
+    child = spawn(program, launchArguments, { cwd: root, env: launchEnvironment, stdio: "inherit", detached: true, shell: false });
     const finished = new Promise((resolve, reject) => {
       child.once("error", error => { childFinished = true; reject(error); });
       child.once("exit", (code, signal) => { childFinished = true; resolve({ code, signal }); });

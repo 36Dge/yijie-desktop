@@ -127,13 +127,21 @@ impl HostBridge {
         &self,
         session: Uuid,
         turn: Uuid,
+        source: Option<wire::ToolsReadMode>,
     ) -> Result<wire::ToolSnapshot, HostBridgeError> {
         require_non_nil(session)?;
         require_non_nil(turn)?;
         let request = Uuid::now_v7().to_string();
         let response: wire::ToolsResponse = self
             .market_get(
-                &format!("/v1/market-chat/agent-sessions/{session}/turns/{turn}/tools"),
+                &format!(
+                    "/v1/market-chat/agent-sessions/{session}/turns/{turn}/tools{}",
+                    match source {
+                        Some(wire::ToolsReadMode::Events) => "?source=events",
+                        Some(wire::ToolsReadMode::History) => "?source=history",
+                        _ => "",
+                    }
+                ),
                 &request,
             )
             .await?;

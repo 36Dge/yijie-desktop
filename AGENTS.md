@@ -115,6 +115,18 @@ dirty/floating sibling 只能用于本地候选验证，不能作为发布来源
 `scripts/workflow-session.py` 拥有，使用原容器身份和只读存储核验，普通重开不做数据备份。
 真实异常或未完成操作须保留现场，不重放任务，也不自动执行旧 recovery 备份流程。
 
+2026-11-14 用户要求：固定入口每次新启动先核对当前源码、来源记录与受管服务制品，
+再执行原增量编译及按需打包；App 启动前再次比较构建输入。相同代码的提交号前进可由
+canonical generator 的 `--refresh-provenance` 自动同步，实际协议／生成内容差异不能
+用刷新摘要放行。该入口可在契约检查后记录当前本地 Host 构建候选，仍为 release=false。
+不得绕过 `development_preflight.py` 或在运行中替换产物；变更和兼容边界见
+`docs/development-client.md`。日常检查不自动调用模型、修改数据库或晋升发布资格。
+
+同日追加：启动检查按前端、原生、外置资源、Host、worker、媒体组件分别判断，复用
+`scripts/development_build_plan.py` 的依赖与工具链摘要；不要退回“一处源码变化就重编
+全部组件”。Rust 嵌入资源/校验清单仍是原生编译输入。前端使用既有 Vite HMR，外置资源
+单独装配；构建前后全体输入检查和原有契约门禁不能因分组件复用而省略。
+
 统一使用 pnpm，不混用 npm 或 yarn。提交 `pnpm-lock.yaml` 和 `src-tauri/Cargo.lock`，不提交 `node_modules/`、`dist/`、Rust `target/`、本地环境文件或生产凭据。
 
 以下命令是按需入口，不是每次改动的必跑清单：

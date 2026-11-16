@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { developmentArguments } from "./run-workflow-dev.mjs";
-import { bundleArguments, runnerEnvironment, withoutDevelopmentRunner } from "./development-app-runner.mjs";
+import { bundleArguments, mayReuseNativeBuild, mayReuseNativeOutput, runnerEnvironment, withoutDevelopmentRunner } from "./development-app-runner.mjs";
 
 const current = {
   YIJIE_DEVELOPMENT_CLIENT: "true", YIJIE_FEAT164_DAILY: "true", YIJIE_KIMI_K31_PRO_CANDIDATE: "true",
@@ -9,6 +9,14 @@ const current = {
 };
 
 describe("fixed development launch selection", () => {
+  it("reuses compiled native code for a frontend or external-resource update", () => {
+    const binary = "a".repeat(64);
+    const startup = { run_id: "current", phase: "building", plan_version: 2, source_changed: true, reusable_artifacts: { desktop: binary }, build_plan: { actions: { native: "reuse", resources: "bundle" } } };
+    expect(mayReuseNativeOutput(startup, "current", binary)).toBe(true);
+    expect(mayReuseNativeOutput({ ...startup, build_plan: { actions: { native: "build" } } }, "current", binary)).toBe(false);
+    expect(mayReuseNativeOutput(startup, "previous", binary)).toBe(false);
+    expect(mayReuseNativeOutput(startup, "current", "b".repeat(64))).toBe(false);
+  });
   it("keeps all current resources in a no-watch dev launch without a package action", () => {
     const args = developmentArguments(current);
     expect(args.slice(0, 3)).toEqual(["exec", "tauri", "dev"]);
@@ -40,5 +48,23 @@ describe("fixed development launch selection", () => {
   it("does not install a Cargo runner outside the fixed macOS client", () => {
     expect(runnerEnvironment(current, developmentArguments(current), "/project", "linux")).toEqual(current);
     expect(runnerEnvironment({}, developmentArguments({}), "/project", "darwin")).toEqual({});
+  });
+  it("keeps the startup check identity out of the running application environment", () => {
+    expect(withoutDevelopmentRunner({ ...current, YIJIE_DEVELOPMENT_STARTUP_ID: "current-build" })).toEqual(current);
+  });
+  it("reuses only the successful artifact pair for this unchanged-source startup", () => {
+    const binary = "a".repeat(64), bundle = "b".repeat(64);
+    const startup = { run_id: "current", phase: "building", source_changed: false, reusable_artifacts: { desktop: binary, bundle } };
+    expect(mayReuseNativeBuild(startup, "current", binary, bundle)).toBe(true);
+    expect(mayReuseNativeBuild({ ...startup, source_changed: true }, "current", binary, bundle)).toBe(false);
+    expect(mayReuseNativeBuild(startup, "previous", binary, bundle)).toBe(false);
+    expect(mayReuseNativeBuild({ ...startup, phase: "failed" }, "current", binary, bundle)).toBe(false);
+  });
+  it("rebuilds when either the native output or the complete bundle no longer matches", () => {
+    const binary = "a".repeat(64), bundle = "b".repeat(64);
+    const startup = { run_id: "current", phase: "building", source_changed: false, reusable_artifacts: { desktop: binary, bundle } };
+    expect(mayReuseNativeBuild(startup, "current", "c".repeat(64), bundle)).toBe(false);
+    expect(mayReuseNativeBuild(startup, "current", binary, "c".repeat(64))).toBe(false);
+    expect(mayReuseNativeBuild({ ...startup, reusable_artifacts: undefined }, "current", undefined, undefined)).toBe(false);
   });
 });

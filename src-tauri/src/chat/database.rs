@@ -919,6 +919,7 @@ impl ChatRepository {
                 migrations::RETIRED_TOOL_PROFILE_SCHEMA_VERSION,
                 migrations::TOOL_PROFILE_RETIREMENT_SCHEMA_VERSION,
                 migrations::MARKET_INITIAL_HOST_TURN_SCHEMA_VERSION,
+                migrations::MARKET_DECISION_FACTS_SCHEMA_VERSION,
             ]
             .contains(&version)
             {
@@ -2881,7 +2882,15 @@ impl ChatRepository {
                 |row| row.get(0),
             )
             .map_err(map_sqlite_error)?;
-        if !session_ready && !(context.market && super::connectors::initial_host_turn::proven_unbound(transaction, scope, session_id, None)?) {
+        if !(session_ready
+            || context.market
+                && super::connectors::initial_host_turn::proven_unbound(
+                    transaction,
+                    scope,
+                    session_id,
+                    None,
+                )?)
+        {
             return Err(ChatError::ConversationConflict);
         }
         let turn_id = Uuid::now_v7();

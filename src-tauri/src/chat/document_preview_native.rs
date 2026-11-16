@@ -988,13 +988,14 @@ window.addEventListener('load',()=>window.scrollTo({},{}),{{once:true}});
             let page_app = app.clone();
             let page_live = live.clone();
             let busy = Arc::new(AtomicBool::new(false));
+            let root_uri = wry::http::Uri::from_static(root);
             builder = builder
                 .with_initialization_script(format!(
                     "window.__yijieDocumentRestore={{x:{},y:{}}};",
                     location.scroll_x, location.scroll_y
                 ))
                 .with_ipc_handler(move |request| {
-                    if request.uri().to_string() != root
+                    if !exact_document_uri(request.uri(), &root_uri)
                         || request.body().len() > 64
                         || !page_live.load(Ordering::Acquire)
                     {
@@ -1056,10 +1057,43 @@ window.addEventListener('load',()=>window.scrollTo({},{}),{{once:true}});
         Ok(live)
     }
 
+    fn exact_document_uri(uri: &wry::http::Uri, expected: &wry::http::Uri) -> bool {
+        // Uri's PartialEq folds scheme/authority case and treats an empty query
+        // as absent. Preserve the original exact formatted-URI check instead.
+        uri.scheme_str() == expected.scheme_str()
+            && uri.authority().map(|v| v.as_str()) == expected.authority().map(|v| v.as_str())
+            && uri.path() == expected.path()
+            && uri.query() == expected.query()
+    }
+
     fn resource_response(mime: &str, body: Vec<u8>, video: bool) -> wry::http::Response<Vec<u8>> {
         wry::http::Response::builder().status(if body.is_empty(){404}else{200}).header("Content-Type",mime).header("Cache-Control","no-store").header("X-Content-Type-Options","nosniff")
             .header("Content-Security-Policy",if video { "sandbox; default-src 'none'; style-src 'unsafe-inline'; media-src data:; base-uri 'none'; form-action 'none'" } else { "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: yijie-document:; font-src data: yijie-document:; connect-src 'none'; media-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" })
             .body(body).expect("constant resource headers")
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::exact_document_uri;
+        use wry::http::Uri;
+
+        #[test]
+        fn document_ipc_uri_keeps_exact_source_spelling_and_query() {
+            let root = Uri::from_static("yijie-document://preview/document");
+            for (source, allowed) in [
+                ("yijie-document://preview/document", true),
+                ("yijie-document://preview/document?", false),
+                ("yijie-document://preview/document?page=2", false),
+                ("yijie-document://preview/image/1", false),
+                ("yijie-document://PREVIEW/document", false),
+                ("YIJIE-DOCUMENT://preview/document", false),
+            ] {
+                assert_eq!(
+                    exact_document_uri(&Uri::from_static(source), &root),
+                    allowed
+                );
+            }
+        }
     }
 }
 

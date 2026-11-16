@@ -109,7 +109,7 @@ final class DevelopmentEntry: NSObject, NSApplicationDelegate, NSWindowDelegate 
             DispatchQueue.main.async {
                 if self.stopRequested { self.finish(); return }
                 guard ready else { self.fail("Docker 尚未就绪，请查看 Docker 状态后重新打开易界。"); return }
-                self.label.stringValue = "正在启动服务并加载易界…"
+                self.label.stringValue = "正在检查更新并准备易界…"
                 self.runPython(script: self.root.appendingPathComponent("scripts/development-client.py"), arguments: ["start"]) { code in
                     self.starting = false
                     if code == 0 { self.finish() }
@@ -148,6 +148,14 @@ final class DevelopmentEntry: NSObject, NSApplicationDelegate, NSWindowDelegate 
     }
 
     func tick() {
+        if !seenNative && starting && process != nil {
+            let report = root.appendingPathComponent(".local/development/startup-status.json")
+            if let bytes = try? Data(contentsOf: report), bytes.count <= 4096,
+               let value = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+               let message = value["message"] as? String, message.count <= 160 {
+                label.stringValue = message
+            }
+        }
         if let app = native {
             if !seenNative {
                 seenNative = true

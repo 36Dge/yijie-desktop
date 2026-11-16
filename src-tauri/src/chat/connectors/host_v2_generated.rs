@@ -1410,6 +1410,24 @@ pub struct ToolObservation {
     )]
     pub error_code: Option<String>,
     pub truncated: bool,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub correlation: Option<GatewayCallReceipt>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub result_text_source: Option<ResultTextSource>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub structured_result_text: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1445,6 +1463,24 @@ struct ToolObservationWire {
     )]
     pub error_code: Option<String>,
     pub truncated: bool,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub correlation: Option<GatewayCallReceipt>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub result_text_source: Option<ResultTextSource>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub structured_result_text: Option<String>,
 }
 impl TryFrom<ToolObservationWire> for ToolObservation {
     type Error = &'static str;
@@ -1461,6 +1497,9 @@ impl TryFrom<ToolObservationWire> for ToolObservation {
             result_text: w.result_text,
             error_code: w.error_code,
             truncated: w.truncated,
+            correlation: w.correlation,
+            result_text_source: w.result_text_source,
+            structured_result_text: w.structured_result_text,
         };
         v.validate()?;
         Ok(v)
@@ -1559,6 +1598,22 @@ impl ToolObservation {
                 .contains(&value_error_code.as_str())
                 {
                     return Err("invalid broker enum");
+                }
+                Ok(())
+            })
+            .transpose()?;
+        self.correlation
+            .as_ref()
+            .map(|value_correlation| -> Result<(), &'static str> {
+                value_correlation.validate()?;
+                Ok(())
+            })
+            .transpose()?;
+        self.structured_result_text
+            .as_ref()
+            .map(|value_structured_result_text| -> Result<(), &'static str> {
+                if value_structured_result_text.chars().count() > 65536 {
+                    return Err("invalid broker text");
                 }
                 Ok(())
             })
@@ -3140,6 +3195,12 @@ pub struct NativeObservePayload {
         deserialize_with = "optional_non_null"
     )]
     pub native_turn_id: Option<NativeId>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub tools_read: Option<ToolsReadMode>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -3151,6 +3212,12 @@ struct NativeObservePayloadWire {
         deserialize_with = "optional_non_null"
     )]
     pub native_turn_id: Option<NativeId>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub tools_read: Option<ToolsReadMode>,
 }
 impl TryFrom<NativeObservePayloadWire> for NativeObservePayload {
     type Error = &'static str;
@@ -3158,6 +3225,7 @@ impl TryFrom<NativeObservePayloadWire> for NativeObservePayload {
         let v = Self {
             session_id: w.session_id,
             native_turn_id: w.native_turn_id,
+            tools_read: w.tools_read,
         };
         v.validate()?;
         Ok(v)
@@ -3223,6 +3291,24 @@ pub struct NativeObservation {
         deserialize_with = "optional_non_null"
     )]
     pub turns_truncated: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub decision_facts: Option<Vec<DecisionFact>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub decision_facts_truncated: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub remote_issue: Option<ErrorCode>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -3253,6 +3339,24 @@ struct NativeObservationWire {
         deserialize_with = "optional_non_null"
     )]
     pub turns_truncated: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub decision_facts: Option<Vec<DecisionFact>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub decision_facts_truncated: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub remote_issue: Option<ErrorCode>,
 }
 impl TryFrom<NativeObservationWire> for NativeObservation {
     type Error = &'static str;
@@ -3264,6 +3368,9 @@ impl TryFrom<NativeObservationWire> for NativeObservation {
             tools: w.tools,
             available_turns: w.available_turns,
             turns_truncated: w.turns_truncated,
+            decision_facts: w.decision_facts,
+            decision_facts_truncated: w.decision_facts_truncated,
+            remote_issue: w.remote_issue,
         };
         v.validate()?;
         Ok(v)
@@ -3301,6 +3408,18 @@ impl NativeObservation {
                     return Err("invalid broker collection");
                 }
                 for item in value_available_turns.iter() {
+                    item.validate()?;
+                }
+                Ok(())
+            })
+            .transpose()?;
+        self.decision_facts
+            .as_ref()
+            .map(|value_decision_facts| -> Result<(), &'static str> {
+                if value_decision_facts.len() > 128 {
+                    return Err("invalid broker collection");
+                }
+                for item in value_decision_facts.iter() {
                     item.validate()?;
                 }
                 Ok(())
@@ -3810,6 +3929,235 @@ impl std::fmt::Debug for SuspendResponse {
         f.write_str("SuspendResponse([redacted])")
     }
 }
+pub use super::broker_generated::ArgsDigest;
+pub use super::broker_generated::GatewayCallReceipt;
+pub use super::broker_generated::GatewayDecisionReceipt;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ToolsReadMode {
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "events")]
+    Events,
+    #[serde(rename = "history")]
+    History,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ResultTextSource {
+    #[serde(rename = "content")]
+    Content,
+    #[serde(rename = "structured")]
+    Structured,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DecisionFactKind {
+    #[serde(rename = "requested")]
+    Requested,
+    #[serde(rename = "acknowledged")]
+    Acknowledged,
+    #[serde(rename = "unconfirmed")]
+    Unconfirmed,
+}
+pub use super::broker_generated::ToolName;
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "DecisionFactWire")]
+pub struct DecisionFact {
+    pub approval_id: CanonicalId,
+    pub decision_id: CanonicalId,
+    pub call_ref: CanonicalId,
+    pub service_id: ServiceId,
+    pub reference: SelectionRef,
+    pub native_thread_id: NativeId,
+    pub native_turn_id: NativeId,
+    pub turn_operation_id: CanonicalId,
+    pub selection_digest: SelectionDigest,
+    pub tool_name: ToolName,
+    pub args_digest: ArgsDigest,
+    pub decision: Decision,
+    pub kind: DecisionFactKind,
+    pub schema_version: i64,
+    pub args_encoding: String,
+    pub observed_at_unix_ms: i64,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DecisionFactWire {
+    pub approval_id: CanonicalId,
+    pub decision_id: CanonicalId,
+    pub call_ref: CanonicalId,
+    pub service_id: ServiceId,
+    pub reference: SelectionRef,
+    pub native_thread_id: NativeId,
+    pub native_turn_id: NativeId,
+    pub turn_operation_id: CanonicalId,
+    pub selection_digest: SelectionDigest,
+    pub tool_name: ToolName,
+    pub args_digest: ArgsDigest,
+    pub decision: Decision,
+    pub kind: DecisionFactKind,
+    pub schema_version: i64,
+    pub args_encoding: String,
+    pub observed_at_unix_ms: i64,
+}
+impl TryFrom<DecisionFactWire> for DecisionFact {
+    type Error = &'static str;
+    fn try_from(w: DecisionFactWire) -> Result<Self, Self::Error> {
+        let v = Self {
+            approval_id: w.approval_id,
+            decision_id: w.decision_id,
+            call_ref: w.call_ref,
+            service_id: w.service_id,
+            reference: w.reference,
+            native_thread_id: w.native_thread_id,
+            native_turn_id: w.native_turn_id,
+            turn_operation_id: w.turn_operation_id,
+            selection_digest: w.selection_digest,
+            tool_name: w.tool_name,
+            args_digest: w.args_digest,
+            decision: w.decision,
+            kind: w.kind,
+            schema_version: w.schema_version,
+            args_encoding: w.args_encoding,
+            observed_at_unix_ms: w.observed_at_unix_ms,
+        };
+        v.validate()?;
+        Ok(v)
+    }
+}
+impl DecisionFact {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        {
+            let value_approval_id = &self.approval_id;
+            if !canonical_id(value_approval_id) {
+                return Err("invalid market UUID");
+            }
+            if value_approval_id == "00000000-0000-0000-0000-000000000000" {
+                return Err("invalid broker identity");
+            }
+        }
+        {
+            let value_decision_id = &self.decision_id;
+            if !canonical_id(value_decision_id) {
+                return Err("invalid market UUID");
+            }
+            if value_decision_id == "00000000-0000-0000-0000-000000000000" {
+                return Err("invalid broker identity");
+            }
+        }
+        {
+            let value_call_ref = &self.call_ref;
+            if !canonical_id(value_call_ref) {
+                return Err("invalid market UUID");
+            }
+            if value_call_ref == "00000000-0000-0000-0000-000000000000" {
+                return Err("invalid broker identity");
+            }
+        }
+        {
+            let value_service_id = &self.service_id;
+            if value_service_id.chars().count() < 1 {
+                return Err("invalid broker text");
+            }
+            if value_service_id.chars().count() > 128 {
+                return Err("invalid broker text");
+            }
+            if value_service_id.is_empty()
+                || !value_service_id.as_bytes()[0].is_ascii_alphanumeric()
+                || !value_service_id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+            {
+                return Err("invalid service ID");
+            }
+        }
+        {
+            let value_reference = &self.reference;
+            value_reference.validate()?;
+        }
+        {
+            let value_native_thread_id = &self.native_thread_id;
+            if value_native_thread_id.chars().count() < 1 {
+                return Err("invalid broker text");
+            }
+            if value_native_thread_id.chars().count() > 256 {
+                return Err("invalid broker text");
+            }
+        }
+        {
+            let value_native_turn_id = &self.native_turn_id;
+            if value_native_turn_id.chars().count() < 1 {
+                return Err("invalid broker text");
+            }
+            if value_native_turn_id.chars().count() > 256 {
+                return Err("invalid broker text");
+            }
+        }
+        {
+            let value_turn_operation_id = &self.turn_operation_id;
+            if !canonical_id(value_turn_operation_id) {
+                return Err("invalid market UUID");
+            }
+            if value_turn_operation_id == "00000000-0000-0000-0000-000000000000" {
+                return Err("invalid broker identity");
+            }
+        }
+        {
+            let value_selection_digest = &self.selection_digest;
+            if value_selection_digest.len() != 64
+                || !value_selection_digest
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            {
+                return Err("invalid market digest");
+            }
+        }
+        {
+            let value_tool_name = &self.tool_name;
+            if value_tool_name.chars().count() < 1 {
+                return Err("invalid broker text");
+            }
+            if value_tool_name.chars().count() > 128 {
+                return Err("invalid broker text");
+            }
+        }
+        {
+            let value_args_digest = &self.args_digest;
+            if value_args_digest.len() != 64
+                || !value_args_digest
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            {
+                return Err("invalid market digest");
+            }
+        }
+        {
+            let value_schema_version = &self.schema_version;
+            if *value_schema_version != 1 {
+                return Err("invalid broker constant");
+            }
+        }
+        {
+            let value_args_encoding = &self.args_encoding;
+            if value_args_encoding != "worker-json-v1" {
+                return Err("invalid broker constant");
+            }
+        }
+        {
+            let value_observed_at_unix_ms = &self.observed_at_unix_ms;
+            if *value_observed_at_unix_ms < 0 {
+                return Err("invalid broker number");
+            }
+            if *value_observed_at_unix_ms > 9007199254740991 {
+                return Err("invalid broker number");
+            }
+        }
+        Ok(())
+    }
+}
+impl std::fmt::Debug for DecisionFact {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DecisionFact([redacted])")
+    }
+}
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", try_from = "StartTurnV2TextBlockWire")]
 pub struct StartTurnV2TextBlock {
@@ -4268,3 +4616,6 @@ pub const MAX_CONTROL_RECEIPTS: usize = 1024;
 pub const MAX_APPROVAL_RECORDS: usize = 128;
 pub const MAX_TOOL_ITEMS: usize = 128;
 pub const MAX_RESULT_TEXT_BYTES: usize = 65536;
+pub const MAX_DECISION_FACTS: usize = 128;
+pub const MAX_LIVE_TOOL_TURNS: usize = 64;
+pub const MAX_LIVE_TOOL_BYTES: usize = 8388608;

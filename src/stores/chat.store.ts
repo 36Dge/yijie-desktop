@@ -404,6 +404,13 @@ export function createChatStoreDefinition(
     let nativeLiveRevocationEpoch = 0;
     watch(phase, value => { if (value !== "streaming") nativeLiveTurnId.value = null; }, {flush: "sync"});
     const nativeViews = shallowRef<Readonly<Record<string, NativeConversationView>>>({});
+    // Invalidation only: reuse the existing native subscription, without a new
+    // listener, result lifecycle or timer. Text deltas do not change this key.
+    const marketNativeRevision = computed(() => JSON.stringify(Object.values(nativeViews.value)
+      .filter(view => view.sessionId === selectedSessionId.value)
+      .map(view => [view.runtimeThreadId, view.runtimeTurnId, view.source, view.diagnostic, view.terminalObserved,
+        view.items.filter(entry => entry.item.type === "mcpToolCall" && entry.item.mcp?.server === "yijie_market")
+          .map(entry => [entry.item.id, entry.lastMethod, entry.item.status])])));
     const nativeRecordDiagnostics = shallowRef<Readonly<Record<string, NativeRecordDiagnostic>>>({});
     const conversationState = shallowRef<ConversationView>(emptyConversationView());
     const conversationApprovalState = shallowRef<ConversationApprovalState>(
@@ -4493,6 +4500,7 @@ export function createChatStoreDefinition(
       readingView,
       conversationState,
       nativeLiveTurnId,
+      marketNativeRevision,
       conversationApprovalState,
       approvalTransients,
       approvalAuthorityRevision,

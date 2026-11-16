@@ -7,6 +7,7 @@ import { constants } from "node:fs";
 import { lstat, open, readdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { developmentResourceIdentity } from "./development-resources.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const recipeKey = "YIJIE_DEVELOPMENT_BUNDLE_ARGUMENTS";
@@ -40,6 +41,7 @@ export function withoutDevelopmentRunner(environment) {
   delete result.CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER;
   delete result.CARGO_TARGET_X86_64_APPLE_DARWIN_RUNNER;
   delete result[recipeKey];
+  delete result.YIJIE_DEVELOPMENT_STARTUP_ID;
   return result;
 }
 
@@ -75,40 +77,73 @@ async function run(executable, args, environment, cwd = root) {
   assert.ok(result.code === 0 && result.signal === null, "development child did not exit normally");
 }
 
+export function mayReuseNativeBuild(startup, runId, binaryHash, bundleHash) {
+  return /^[a-f0-9]{64}$/u.test(binaryHash ?? "") && /^[a-f0-9]{64}$/u.test(bundleHash ?? "") &&
+    typeof runId === "string" && startup?.run_id === runId && startup?.phase === "building" &&
+    startup?.source_changed === false && startup?.reusable_artifacts?.desktop === binaryHash &&
+    startup?.reusable_artifacts?.bundle === bundleHash;
+}
+
+export function mayReuseNativeOutput(startup, runId, binaryHash) {
+  return /^[a-f0-9]{64}$/u.test(binaryHash ?? "") && typeof runId === "string" &&
+    startup?.run_id === runId && startup?.phase === "building" && startup?.plan_version === 2 &&
+    startup?.build_plan?.actions?.native === "reuse" && startup?.reusable_artifacts?.desktop === binaryHash;
+}
+
+export async function inspectDevelopmentBundle(args, project = root) {
+  const target = path.join(project, ".local/development/target");
+  const source = path.join(target, "debug/yijie-desktop");
+  const inputs = ["src-tauri/tauri.conf.json", "src-tauri/icons/icon.icns", "pnpm-lock.yaml", "scripts/development-app-runner.mjs", "scripts/development-resources.mjs"];
+  for (let i = 0; i < args.length; i++) if (args[i] === "--config") inputs.push(args[++i]);
+  const binaryHash = await digest(source);
+  const helper = path.join(target, "debug/yijie-document-render");
+  const pins = await Promise.all(inputs.map(async file => [file, await digest(path.join(project, file))]));
+  pins.push(["resource-content", await developmentResourceIdentity(project)]);
+  const recipeFor = helperHash => createHash("sha256").update(JSON.stringify([args, binaryHash, helperHash, pins])).digest("hex");
+  const optionalDigest = async file => { try { return await digest(file); } catch (error) { if (error.code !== "ENOENT") throw error; return null; } };
+  const recipe = recipeFor(await optionalDigest(helper));
+  const app = path.join(target, "debug/bundle/macos/易界 AI.app");
+  const executable = path.join(app, "Contents/MacOS/yijie-desktop");
+  const receipt = path.join(project, ".local/development/dev-app-build.json");
+  let previous;
+  try { previous = JSON.parse(await readFile(receipt, "utf8")); } catch (error) { if (error.code !== "ENOENT") throw error; }
+  let reuse = false;
+  if (previous?.recipe === recipe && previous?.project === project) {
+    try { reuse = previous.bundle_sha256 === await treeDigest(app); } catch (error) { if (error.code !== "ENOENT") throw error; }
+  }
+  return { source, binaryHash, helper, recipeFor, recipe, app, executable, receipt, previous, reuse };
+}
+
 async function main() {
   assert.equal(process.platform, "darwin");
   assert.equal(process.env.YIJIE_DEVELOPMENT_CLIENT, "true");
-  const target = path.join(root, ".local/development/target");
-  assert.equal(process.env.CARGO_TARGET_DIR, target);
-  const source = path.join(target, "debug/yijie-desktop");
-  assert.equal(path.resolve(process.argv[2] ?? ""), source, "runner only accepts the canonical Cargo output");
+  assert.equal(process.env.CARGO_TARGET_DIR, path.join(root, ".local/development/target"));
   const { developmentArguments } = await import("./run-workflow-dev.mjs");
   const args = bundleArguments(developmentArguments(process.env));
   assert.deepEqual(JSON.parse(process.env[recipeKey] ?? "null"), args);
   const environment = withoutDevelopmentRunner(process.env);
-  const inputs = ["src-tauri/tauri.conf.json", "src-tauri/icons/icon.icns", "pnpm-lock.yaml", "scripts/development-app-runner.mjs",
-    "contracts/desktop-skill-bundle-local.lock.json", "contracts/experts-assets-feat164.candidate.json", "contracts/native-skill-resources.candidate.json"];
-  for (let i = 0; i < args.length; i++) if (args[i] === "--config") inputs.push(args[++i]);
+  const startup = JSON.parse(await readFile(path.join(root, ".local/development/startup-check.json"), "utf8"));
+  assert.equal(startup.run_id, process.env.YIJIE_DEVELOPMENT_STARTUP_ID);
+  assert.equal(startup.plan_version, 2);
+  const source = path.join(root, ".local/development/target/debug/yijie-desktop");
   const binaryHash = await digest(source);
-  const helper = path.join(target, "debug/yijie-document-render");
-  const pins = await Promise.all(inputs.map(async file => [file, await digest(path.join(root, file))]));
-  const recipeFor = helperHash => createHash("sha256").update(JSON.stringify([args, binaryHash, helperHash, pins])).digest("hex");
-  const optionalDigest = async file => { try { return await digest(file); } catch (error) { if (error.code !== "ENOENT") throw error; return null; } };
-  let recipe = recipeFor(await optionalDigest(helper));
-  const app = path.join(target, "debug/bundle/macos/易界 AI.app");
-  const executable = path.join(app, "Contents/MacOS/yijie-desktop");
-  const receipt = path.join(root, ".local/development/dev-app-build.json");
-  let previous;
-  try { previous = JSON.parse(await readFile(receipt, "utf8")); } catch (error) { if (error.code !== "ENOENT") throw error; }
-  let reuse = false;
-  if (previous?.recipe === recipe && previous?.project === root) {
-    try { reuse = previous.bundle_sha256 === await treeDigest(app); } catch (error) { if (error.code !== "ENOENT") throw error; }
-  }
-  if (!reuse) {
-    // Build the normal project helper only when the native recipe changes.
-    // Frontend HMR and unchanged reopens do not rebuild either native binary.
+  assert.equal(path.resolve(process.argv[2] ?? ""), source, "runner only accepts the canonical Cargo output");
+  const reuseOnly = process.argv[3] === "--reuse-verified";
+  const reuseNative = process.argv[3] === "--reuse-native";
+  if (reuseNative) assert(mayReuseNativeOutput(startup, process.env.YIJIE_DEVELOPMENT_STARTUP_ID, binaryHash), "native output is not eligible for this startup");
+  const helper = path.join(root, ".local/development/target/debug/yijie-document-render");
+  if (startup.build_plan.actions.helper === "build") {
     await run("cargo", ["build", "--locked", "--no-default-features", "--bin", "yijie-document-render", "--features", "kimi-k31-pro-candidate"], environment, path.join(root, "src-tauri"));
-    recipe = recipeFor(await digest(helper));
+  } else {
+    assert.equal(startup.build_plan.actions.helper, "reuse");
+    assert.equal(await digest(helper), startup.reusable_artifacts.helper, "document helper changed before reuse");
+  }
+  const bundleState = await inspectDevelopmentBundle(args);
+  const { recipeFor, app, executable, receipt } = bundleState;
+  const reuse = bundleState.reuse && startup.build_plan.changed.resources === false;
+  if (reuseOnly) assert(reuse, "verified development bundle changed before opening");
+  if (!reuse) {
+    const recipe = recipeFor(await digest(helper));
     // Fixed project build output only; no installed, signed or released app is
     // updated. This bundles the dev binary without switching to a release build.
     const bundlerEnvironment = { ...environment };
@@ -120,12 +155,17 @@ async function main() {
     await rename(temporary, receipt);
   }
   assert.equal(await digest(executable), binaryHash);
+  assert.match(process.env.YIJIE_DEVELOPMENT_STARTUP_ID ?? "", /^[a-f0-9-]{36}$/u, "use the fixed daily startup preflight");
+  // The build owner checked sources before starting services. Recheck the same
+  // inputs after Cargo/bundling so an edit during compilation cannot launch an
+  // obsolete native executable. The ID is not forwarded to the running App.
+  await run("python3", ["-B", "scripts/development_preflight.py", "verify", process.env.YIJIE_DEVELOPMENT_STARTUP_ID], environment);
   if(environment.YIJIE_DEVELOPMENT_BUILD_ONLY === "true") {
     process.stdout.write("DAILY BUILD COMPLETE: normal App artifacts verified; App, queues and models were not started.\n");
     return;
   }
   process.stdout.write(`Development App verified: ${binaryHash}; ${reuse ? "reused" : "bundled"}; Vite HMR retained.\n`);
-  await run(executable, process.argv.slice(3), environment);
+  await run(executable, process.argv.slice(reuseOnly || reuseNative ? 4 : 3), environment);
 }
 
 if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? "")) {

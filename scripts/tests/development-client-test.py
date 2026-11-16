@@ -43,7 +43,9 @@ class DevelopmentClientTest(unittest.TestCase):
         source = {"PATH": "/usr/bin", "HOME": str(Path.home())}
         with patch.object(development, "supported_go", return_value="/existing/toolchain/bin"):
             self.assertEqual(development.environment(root, source)["YIJIE_FEAT169_INTERACTION_TOOLS"], "true")
-            self.assertEqual(development.environment(root, {**source, "YIJIE_FEAT169_INTERACTION_TOOLS": "false"})["YIJIE_FEAT169_INTERACTION_TOOLS"], "false")
+            with self.assertRaisesRegex(ValueError, "Native Skills require"):
+                development.environment(root, {**source, "YIJIE_FEAT169_INTERACTION_TOOLS": "false"})
+            self.assertEqual(development.environment(root, {**source, "YIJIE_FEAT169_INTERACTION_TOOLS": "false", "YIJIE_FEAT174_NATIVE_SKILLS": "false"})["YIJIE_FEAT169_INTERACTION_TOOLS"], "false")
             with self.assertRaises(ValueError):
                 development.environment(root, {**source, "YIJIE_FEAT169_INTERACTION_TOOLS": "ordinary-selector"})
 
@@ -53,7 +55,7 @@ class DevelopmentClientTest(unittest.TestCase):
         with patch.object(development, "supported_go", return_value="/existing/toolchain/bin"):
             self.assertEqual(development.environment(root, source)["YIJIE_FEAT170_TOOL_SEARCH"], "true")
             self.assertEqual(development.environment(root, {**source, "YIJIE_FEAT170_TOOL_SEARCH": "false"})["YIJIE_FEAT170_TOOL_SEARCH"], "false")
-            self.assertEqual(development.environment(root, {**source, "YIJIE_FEAT169_INTERACTION_TOOLS": "false"})["YIJIE_FEAT170_TOOL_SEARCH"], "false")
+            self.assertEqual(development.environment(root, {**source, "YIJIE_FEAT169_INTERACTION_TOOLS": "false", "YIJIE_FEAT174_NATIVE_SKILLS": "false"})["YIJIE_FEAT170_TOOL_SEARCH"], "false")
             self.assertEqual(development.environment(root, {**source, "YIJIE_FEAT170_TOOL_SEARCH": "true"})["YIJIE_FEAT170_TOOL_SEARCH"], "true")
             with self.assertRaises(ValueError):
                 development.environment(root, {**source, "YIJIE_FEAT170_TOOL_SEARCH": "ordinary-selector"})

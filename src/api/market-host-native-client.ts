@@ -9,7 +9,7 @@ const selectionValidators=kimiK31Candidate ? selectionValidatorsCurrent : select
 import legacySchema from "../../contracts/market-host-native.schema.json";
 import currentSchema from "../../contracts/market-host-v2-native.schema.json";
 const schema=kimiK31Candidate ? currentSchema : legacySchema;
-import type { Decision, ErrorCode, NativeApprovalDecidePayload, NativeObservation, MarketApproval } from "../domain/market-host-v2-native.generated";
+import type { Decision, ErrorCode, NativeApprovalDecidePayload, NativeObservation, MarketApproval, ToolsReadMode } from "../domain/market-host-v2-native.generated";
 import type { SubmitPayload, SubmissionReceipt } from "../domain/market-selection-v2.generated";
 
 type Transport = (command: string, args: { request: unknown }) => Promise<unknown>;
@@ -20,9 +20,10 @@ const definitions = schema.$defs as unknown as Record<string, Schema>;
 function project(definition: Schema, value: unknown): unknown {
   if (value === null) return null;
   if (definition.$ref) return project(definitions[definition.$ref.replace("#/$defs/", "")]!, value);
+  if (definition.anyOf?.length === 2 && definition.anyOf[1]?.type === "null") return project(definition.anyOf[0]!, value);
   if (definition.type === "object") {
     const source = value as Record<string, unknown>;
-    return Object.fromEntries(Object.entries(definition.properties ?? {}).filter(([key]) => Object.prototype.hasOwnProperty.call(source, key)).map(([key, child]) => [key, project(child, source[key])]));
+    return Object.fromEntries(Object.entries(definition.properties ?? {}).filter(([key]) => Object.prototype.hasOwnProperty.call(source, key) && source[key] !== undefined).map(([key, child]) => [key, project(child, source[key])]));
   }
   if (definition.type === "array") return (value as unknown[]).map(item => project(definition.items ?? {}, item));
   return value;
@@ -46,6 +47,7 @@ export function marketChatErrorMessage(error: unknown): string {
   }
 }
 export function createMarketHostNativeClient(transport: Transport = invoke) {
+  let legacyReadContext: string | null = null;
   async function call(command: string, contextId: string, payload: unknown, mutation: boolean): Promise<unknown> {
     const requestId = crypto.randomUUID(); const request = { schemaVersion: 1, requestId, contextId, payload };
     const isObserve = command === "chat_market_observe_v1";
@@ -62,7 +64,20 @@ export function createMarketHostNativeClient(transport: Transport = invoke) {
     return project(definitions[isObserve ? "NativeObservation" : "MarketApproval"]!, response.data);
   }
   return {
-    observe: (contextId: string, sessionId: string, nativeTurnId?: string) => call("chat_market_observe_v1", contextId, { sessionId, ...(nativeTurnId ? { nativeTurnId } : {}) }, false) as Promise<NativeObservation>,
+    async observe(contextId: string, sessionId: string, nativeTurnId?: string, toolsRead?: ToolsReadMode): Promise<NativeObservation> {
+      const payload = { sessionId, ...(nativeTurnId ? { nativeTurnId } : {}) };
+      const mode = legacyReadContext === contextId ? undefined : toolsRead;
+      try {
+        return await call("chat_market_observe_v1", contextId, { ...payload, ...(mode ? { toolsRead: mode } : {}) }, false) as NativeObservation;
+      } catch (error) {
+        // An older paired Native reader rejects the additive query field before
+        // accessing Host. Retry only this read, never an approval/submission.
+        if (!mode || !(error instanceof MarketChatError) || error.code !== "invalid_request") throw error;
+        const result = await call("chat_market_observe_v1", contextId, payload, false) as NativeObservation;
+        legacyReadContext = contextId;
+        return result;
+      }
+    },
     async decide(contextId: string, payload: NativeApprovalDecidePayload): Promise<MarketApproval> {
       const result = await call("chat_market_approval_decide_v1", contextId, payload, true) as MarketApproval;
       if (result.approvalId !== payload.approvalId || result.decisionId !== payload.decisionId || result.decision !== payload.decision) throw new MarketChatError("operation_uncertain", true);

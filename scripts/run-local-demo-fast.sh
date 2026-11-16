@@ -42,6 +42,7 @@ image_generation_enabled="false"
 stable_api_only="false"
 packaged_app="false"
 development_app="false"
+development_preflight="false"
 development_ui_bundle="${YIJIE_DEVELOPMENT_UI_BUNDLE:-false}"
 [[ "$development_ui_bundle" == "false" || "$development_ui_bundle" == "true" ]] || fail "invalid development UI bundle selector"
 expert_profile="daily"
@@ -209,6 +210,11 @@ if [[ "$#" -ge 1 && "$1" == "--experts-local" ]]; then
 elif [[ "$#" -ge 1 && ( "$1" == "--experts-content-v011" || "$1" == "--experts-content-v012" || "$1" == "--experts-content-v013" ) ]]; then
   [[ "$experts_requested" == "true" ]] || fail "content isolation requires explicit YIJIE_EXPERTS_ENABLED=true"
   expert_profile="${1#--experts-}"
+  shift
+fi
+if [[ "$#" == "1" && "$1" == "--preflight-only" ]]; then
+  [[ "$development_app" == "true" ]] || fail "preflight requires the fixed development client"
+  development_preflight="true"
   shift
 fi
 if [[ "$#" == "1" && "$1" == "--reopen" ]]; then
@@ -504,7 +510,7 @@ if [[ "$market_connectors_enabled" == "true" ]]; then
     node "$desktop_root/scripts/sync-market-catalog.mjs" --check
   fi
   if [[ "$kimi_k31_candidate" == "true" ]]; then
-    node "$workspace_root/yijie-contracts/scripts/sync-model-call-surfaces-v2.mjs" --consumer=desktop --check
+    node "$desktop_root/scripts/check-market-call-surfaces.mjs" --check
   else
     node "$workspace_root/yijie-contracts/scripts/sync-market-selection.mjs" --consumer=desktop --check
     node "$workspace_root/yijie-contracts/scripts/sync-market-host.mjs" --consumer=desktop --check
@@ -562,7 +568,7 @@ if [[ "$experts_requested" == "true" ]]; then
     [[ "$scheduled_daily" == "true" ]] || fail "daily experts require the existing daily data profile"
   fi
   if [[ "$kimi_k31_candidate" == "true" ]]; then
-    node "$workspace_root/yijie-contracts/scripts/sync-model-call-surfaces-v2.mjs" --consumer=desktop --check
+    node "$desktop_root/scripts/check-market-call-surfaces.mjs" --check
   else
     node "$workspace_root/yijie-contracts/scripts/sync-experts.mjs" --consumer=desktop --check
   fi
@@ -653,20 +659,36 @@ if [[ "$reopen_app" == "false" ]]; then
   if [[ "$scheduled_enabled" == "true" ]]; then
     node --input-type=module -e 'import {verifyScheduledHostCandidate} from "./scripts/scheduled-host-build-candidate.mjs"; await verifyScheduledHostCandidate(process.cwd(), process.argv[1], process.argv[2]);' "$workspace_root/yijie-contracts" "$host_root"
   fi
-  if [[ "$market_connectors_enabled" == "true" ]]; then
+  if [[ "$development_preflight" == "true" ]]; then
+    printf 'DAILY PREFLIGHT: canonical source, contract, Runtime and resource checks passed; no service or client started.\n'
+    exit 0
+  fi
+  build_worker="true"
+  build_host="true"
+  build_media="true"
+  if [[ "$development_app" == "true" ]]; then
+    component_actions="$(python3 -B "$desktop_root/scripts/development_preflight.py" sidecars "${YIJIE_DEVELOPMENT_STARTUP_ID:-}")" || fail "component build plan is unavailable"
+    read -r build_worker build_host build_media <<< "$component_actions"
+  fi
+  if [[ "$market_connectors_enabled" == "true" && "$build_worker" == "true" ]]; then
     if [[ -n "$primary_output" ]]; then
       bash "$workspace_root/yijie-connectors/scripts/build-market-worker.sh" --output-root "$primary_output/worker"
     else
       bash "$workspace_root/yijie-connectors/scripts/build-market-worker.sh"
     fi
   fi
+  if [[ "$build_host" == "true" ]]; then
   (
     cd "$host_root"
     go build -trimpath -o "$host_binary" ./cmd/desktop-host
   )
+  fi
+  if [[ "$development_app" == "true" ]]; then
+    printf 'DAILY COMPONENTS: worker build=%s; host build=%s; media build=%s\n' "$build_worker" "$build_host" "$build_media"
+  fi
 fi
 
-if [[ "${YIJIE_ARTIFACT_MEDIA_ENABLED:-false}" == "true" && ( "$kimi_k31_candidate" != "true" || "$reopen_app" == "false" ) ]]; then
+if [[ "${YIJIE_ARTIFACT_MEDIA_ENABLED:-false}" == "true" && ( "$kimi_k31_candidate" != "true" || "$reopen_app" == "false" ) && "${build_media:-true}" == "true" ]]; then
   bash "$host_root/scripts/build-artifact-adapter.sh" "$(dirname "$host_binary")"
 fi
 

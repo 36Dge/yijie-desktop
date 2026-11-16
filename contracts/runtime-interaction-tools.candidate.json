@@ -4,7 +4,7 @@
   "mode": "local_worktree_candidate",
   "release": false,
   "runtime_source": {
-    "base_commit": "fe3f5b1c768f2a1464314e2a350d419a3e63d9c6",
+    "base_commit": "5c64ed3f03808639faf7c11674e87636a94ab221",
     "sources": {
       ".yijie/patches/0001-feat-126-filter-persistent-diagnostics.patch": "6b337a02caf064c6819fab5c7367a485004c85cce0d42acb06fa6d5003e599a0",
       ".yijie/patches/0002-feat-136-unified-exec-pre-emitter-command-lifecycle.patch": "43de168e1443f4b9ca60d7f61e3de2daf20e1cfea14d2e196d28ba417bf3e06d",
@@ -150,5 +150,5 @@
     "ToolRequestUserInputParams.json": "f287110bd94e6697c2129c1d97e0b2d53c4da6556ae74c2ca38ae844add9676f",
     "ToolRequestUserInputResponse.json": "4f2fe3e98cd00462df03e51fe2b984ae4f63feb6337d5f21b72d8bdbee88011f"
   },
-  "generator_sha256": "8e501fc869843b299756ad84a88a0474d696c230abf105de73d9d5c542a5c736"
+  "generator_sha256": "9567834a6d4a41b72887c718ea4ae4c32c0847fcca6440967580eef52fb251ee"
 }

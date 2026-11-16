@@ -12,6 +12,7 @@ pub(crate) mod generated;
 #[cfg_attr(feature = "kimi-k31-pro-candidate", path = "host_v2_generated.rs")]
 pub(crate) mod host_generated;
 pub(crate) mod observe;
+mod decision_facts;
 pub(crate) mod provider;
 #[allow(dead_code)]
 pub(crate) mod provider_generated;

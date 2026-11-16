@@ -54,7 +54,14 @@ export type ErrorCode =
 export type OperationState = "pending" | "succeeded" | "rejected" | "unknown";
 export type Revision = number;
 export type BindingState = "none" | "ready" | "applying" | "unknown" | "unavailable";
-export type ContentBlock = TextContentBlock | FileInput | ImageInput;
+export type ContentBlock = StartTurnV2TextBlock | FileInput | ImageInput;
+/**
+ * Ordered selections frozen with the user turn. IDs must be unique across the entire turn. Absence preserves legacy behavior. Native Skill inputs own instruction loading and per-turn deduplication. Consumers send only after the new source pin is admitted.
+ *
+ * @minItems 1
+ * @maxItems 256
+ */
+export type SelectedSkills = SelectedSkillRef[];
 export type ProfileId = "kimi-k3-max-v1" | "minimax-m3-high-v1";
 export type ReferencedReferencedRevision = number;
 export type ReferencedRevision = number;
@@ -279,9 +286,20 @@ export interface MarketSubmitPayload {
   intent: ModelIntent;
   selection: Selection;
 }
-export interface TextContentBlock {
+export interface StartTurnV2TextBlock {
   type: "text";
+  /**
+   * Non-blank user text, bounded to 1 MiB in UTF-8 bytes.
+   */
   text: string;
+  skills?: SelectedSkills;
+}
+/**
+ * User-selected managed Skill identity. Host resolves the exact enabled installation and native SKILL.md path from its verified catalog and receipt. No client path or prompt content is accepted.
+ */
+export interface SelectedSkillRef {
+  id: string;
+  version: string;
 }
 export interface FileInput {
   type: "file";

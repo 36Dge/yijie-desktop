@@ -157,7 +157,7 @@ fn validate_approval(
     Ok(())
 }
 fn validate_tools(
-    tools: &wire::ToolSnapshot,
+    tools: &mut wire::ToolSnapshot,
     view: &LocalView,
     binding: &TurnBinding,
 ) -> Result<(), Code> {
@@ -172,6 +172,27 @@ fn validate_tools(
     }
     // A historical result is not an execution capability. Its original Host
     // nonce may differ; decisions still use validate_approval's exact nonce.
+    for item in &mut tools.items {
+        if let Some(receipt) = &item.correlation {
+            let linked = item.server_name == "yijie_market"
+                && item.call_ref.as_ref() == Some(&receipt.call_ref)
+                && receipt.native_thread_id == item.native_thread_id
+                && receipt.native_turn_id == item.native_turn_id
+                && receipt.tool_name == item.tool_name
+                && receipt.turn_operation_id == binding.snapshot.turn_operation_id
+                && receipt.selection_digest == binding.snapshot.selection_digest
+                && binding.snapshot.selection.contains(&receipt.reference)
+                && binding.display.iter().any(|entry| {
+                    entry.service_id == receipt.service_id && entry.reference == receipt.reference
+                });
+            if !linked {
+                // Preserve the native result, but never use a current install or
+                // a same-name tool to repair an inconsistent historical link.
+                item.correlation = None;
+                item.call_ref = None;
+            }
+        }
+    }
     Ok(())
 }
 async fn observe(
@@ -214,7 +235,28 @@ async fn observe(
         turns_truncated: Some(view.turns_truncated),
         approvals: None,
         tools: None,
+        decision_facts: None,
+        decision_facts_truncated: None,
+        remote_issue: None,
     };
+    if let Some(binding) = selected {
+        let owner = scope.clone();
+        let session = request.payload.session_id.clone();
+        let turn = binding.turn.clone();
+        let (facts, truncated) = db
+            .call(move |repo| {
+                Ok(super::decision_facts::read(
+                    &repo.connection,
+                    &owner,
+                    &session,
+                    &turn,
+                ))
+            })
+            .await
+            .map_err(|_| Code::TemporarilyUnavailable)??;
+        result.decision_facts = Some(facts);
+        result.decision_facts_truncated = Some(truncated);
+    }
     // Ordinary history needs no Host. Readiness failures in a connector worker
     // must not block a conversation that has never used the market family.
     if !view.managed {
@@ -226,32 +268,95 @@ async fn observe(
     }
     let host = match runtime.local_host_bridge().await {
         Ok(host) => Some(host),
-        Err(crate::chat::ChatError::SidecarUnavailable) => None,
+        Err(crate::chat::ChatError::SidecarUnavailable) => {
+            if request.payload.tools_read.is_some() {
+                result.remote_issue = Some(Code::NotReady);
+            }
+            None
+        }
+        Err(_) if request.payload.tools_read.is_some() => {
+            result.remote_issue = Some(Code::NotReady);
+            None
+        }
         Err(_) => return Err(Code::NotReady),
     };
     if let (Some(agent), Some(host)) = (view.agent.as_ref().filter(|_| view.managed), host) {
-        let agent_id = Uuid::parse_str(agent).map_err(|_| Code::AuthorityMismatch)?;
-        let approvals = host
-            .market_approvals(agent_id)
-            .await
-            .map_err(|_| Code::TemporarilyUnavailable)?;
-        if approvals.agent_session_id != *agent {
-            return Err(Code::AuthorityMismatch);
-        }
-        for approval in &approvals.requests {
-            validate_approval(approval, &view, &scope, host.instance_nonce())?;
-        }
-        result.approvals = Some(approvals);
-        if let Some(binding) = selected {
-            let tools = host
-                .market_tools(
-                    agent_id,
-                    Uuid::parse_str(&binding.turn).map_err(|_| Code::AuthorityMismatch)?,
-                )
+        let remote: Result<_, Code> = async {
+            let agent_id = Uuid::parse_str(agent).map_err(|_| Code::AuthorityMismatch)?;
+            let approvals = host
+                .market_approvals(agent_id)
                 .await
                 .map_err(|_| Code::TemporarilyUnavailable)?;
-            validate_tools(&tools, &view, binding)?;
-            result.tools = Some(tools);
+            if approvals.agent_session_id != *agent {
+                return Err(Code::AuthorityMismatch);
+            }
+            for approval in &approvals.requests {
+                validate_approval(approval, &view, &scope, host.instance_nonce())?;
+            }
+            let mut pending_facts = None;
+            if let Some(binding) = selected.filter(|_| {
+                request.payload.native_turn_id.is_none()
+                    && result.decision_facts_truncated == Some(true)
+            }) {
+                let pending: Vec<_> = approvals
+                    .requests
+                    .iter()
+                    .filter(|a| {
+                        a.state == wire::ApprovalState::Pending
+                            && a.identity.native_turn_id == binding.turn
+                    })
+                    .map(|a| (a.approval_id.clone(), a.identity.call_ref.clone()))
+                    .collect();
+                if !pending.is_empty() {
+                    let owner = scope.clone();
+                    let session = request.payload.session_id.clone();
+                    let turn = binding.turn.clone();
+                    pending_facts = Some(
+                        db.call(move |repo| {
+                            Ok(super::decision_facts::read_for_pending(
+                                &repo.connection,
+                                &owner,
+                                &session,
+                                &turn,
+                                &pending,
+                            ))
+                        })
+                        .await
+                        .map_err(|_| Code::TemporarilyUnavailable)??,
+                    );
+                }
+            }
+            let mut observed_tools = None;
+            if let Some(binding) =
+                selected.filter(|_| request.payload.tools_read != Some(wire::ToolsReadMode::None))
+            {
+                let mut tools = host
+                    .market_tools(
+                        agent_id,
+                        Uuid::parse_str(&binding.turn).map_err(|_| Code::AuthorityMismatch)?,
+                        request.payload.tools_read,
+                    )
+                    .await
+                    .map_err(|_| Code::TemporarilyUnavailable)?;
+                validate_tools(&mut tools, &view, binding)?;
+                observed_tools = Some(tools);
+            }
+            Ok((approvals, observed_tools, pending_facts))
+        }
+        .await;
+        match remote {
+            Ok((approvals, tools, pending_facts)) => {
+                result.approvals = Some(approvals);
+                result.tools = tools;
+                if let Some((facts, truncated)) = pending_facts {
+                    result.decision_facts = Some(facts);
+                    result.decision_facts_truncated = Some(truncated);
+                }
+            }
+            Err(code) if request.payload.tools_read.is_some() => {
+                result.remote_issue = Some(code);
+            }
+            Err(code) => return Err(code),
         }
     }
     authorize(&manager, &scope, &request.context_id, &["task.read"])?;
@@ -324,15 +429,44 @@ async fn decide(
         },
     };
     private.validate().map_err(|_| Code::InvalidRequest)?;
-    let response: wire::ApprovalDecideResponse = control
-        .request(&private.request_id, &private)
-        .await
-        .map_err(|error| match error {
-            ControlError::Rejected(error) => error.code,
-            ControlError::Busy => Code::Busy,
-            ControlError::Closed | ControlError::OutcomeUnknown => Code::OperationUncertain,
-            ControlError::InvalidRequest => Code::InvalidRequest,
-        })?;
+    let requested = super::decision_facts::fact(
+        approval,
+        &request.payload.decision_id,
+        request.payload.decision,
+        wire::DecisionFactKind::Requested,
+    )?;
+    super::decision_facts::persist(&db, &scope, &request.payload.session_id, requested).await?;
+    // Writing evidence cannot extend the permission lease that authorizes delivery.
+    let fresh = authorize(&manager, &scope, &request.context_id, &required)?;
+    if fresh.native_process_epoch != original.native_process_epoch
+        || fresh.authorization_revision != original.authorization_revision
+        || read(&db, &scope, &request.payload.session_id).await? != view
+    {
+        return Err(Code::AuthorityMismatch);
+    }
+    let response: Result<wire::ApprovalDecideResponse, ControlError> =
+        control.request(&private.request_id, &private).await;
+    let response = match response {
+        Ok(response) => response,
+        Err(error) => {
+            if let Ok(fact) = super::decision_facts::fact(
+                approval,
+                &request.payload.decision_id,
+                request.payload.decision,
+                wire::DecisionFactKind::Unconfirmed,
+            ) {
+                let _ =
+                    super::decision_facts::persist(&db, &scope, &request.payload.session_id, fact)
+                        .await;
+            }
+            return Err(match error {
+                ControlError::Rejected(error) => error.code,
+                ControlError::Busy => Code::Busy,
+                ControlError::Closed | ControlError::OutcomeUnknown => Code::OperationUncertain,
+                ControlError::InvalidRequest => Code::InvalidRequest,
+            });
+        }
+    };
     validate_approval(&response.data, &view, &scope, host.instance_nonce())?;
     if response.data.approval_id != approval.approval_id
         || response.data.identity != approval.identity
@@ -341,6 +475,28 @@ async fn decide(
     {
         return Err(Code::OperationUncertain);
     }
+    let confirmed = matches!(
+        (response.data.decision, response.data.state),
+        (
+            Some(wire::Decision::ApproveOnce),
+            wire::ApprovalState::Approved
+        ) | (Some(wire::Decision::Reject), wire::ApprovalState::Rejected)
+            | (Some(wire::Decision::Cancel), wire::ApprovalState::Cancelled)
+    );
+    let kind = if confirmed {
+        wire::DecisionFactKind::Acknowledged
+    } else {
+        wire::DecisionFactKind::Unconfirmed
+    };
+    let fact = super::decision_facts::fact(
+        approval,
+        &request.payload.decision_id,
+        request.payload.decision,
+        kind,
+    )?;
+    super::decision_facts::persist(&db, &scope, &request.payload.session_id, fact)
+        .await
+        .map_err(|_| Code::OperationUncertain)?;
     authorize(&manager, &scope, &request.context_id, &required)?;
     Ok(response.data)
 }
@@ -479,6 +635,55 @@ mod tests {
         assert_eq!(view.turns[127].turn, id(301));
     }
     #[test]
+    fn native_market_result_correlation_uses_original_selection_without_live_authority() {
+        let reference = approval().identity.reference;
+        let snapshot =
+            selection_generated::freeze_selection(id(10), vec![reference.clone()]).unwrap();
+        let binding = TurnBinding {
+            thread: id(13),
+            turn: id(11),
+            host: Some(id(4)),
+            snapshot: snapshot.clone(),
+            display: vec![wire::SelectionDisplay {
+                service_id: "tushareMcp".into(),
+                reference: reference.clone(),
+                display_name: "原连接名称".into(),
+            }],
+        };
+        let view = LocalView {
+            agent: Some(id(3)),
+            thread: Some(id(13)),
+            managed: true,
+            display: vec![],
+            turns: vec![binding.clone()],
+            turns_truncated: false,
+        };
+        let mut tools: wire::ToolSnapshot = serde_json::from_value(serde_json::json!({
+            "agentSessionId":id(3),"nativeTurnId":id(11),"truncated":false,"items":[{
+                "nativeItemId":id(40),"nativeThreadId":id(13),"nativeTurnId":id(11),
+                "serverName":"yijie_market","toolName":"tushare_daily","state":"failed",
+                "resultText":"原生失败结果仍可读","truncated":false,"callRef":id(12),
+                "correlation":{"schemaVersion":1,"callRef":id(12),"serviceId":"tushareMcp","reference":reference,
+                    "nativeThreadId":id(13),"nativeTurnId":id(11),"turnOperationId":id(10),"selectionDigest":snapshot.selection_digest,
+                    "toolName":"tushare_daily","argsDigest":"b".repeat(64),"argsEncoding":"worker-json-v1",
+                    "decisionReceipt":{"approvalId":id(2),"decisionId":id(30),"decision":"approve_once"},"admissionConsumed":true}
+            }]
+        })).unwrap();
+        assert_eq!(validate_tools(&mut tools, &view, &binding), Ok(()));
+        assert!(tools.items[0].correlation.is_some());
+        // An old reference cannot be silently associated with another generation.
+        tools.items[0]
+            .correlation
+            .as_mut()
+            .unwrap()
+            .reference
+            .generation += 1;
+        assert_eq!(validate_tools(&mut tools, &view, &binding), Ok(()));
+        assert!(tools.items[0].correlation.is_none() && tools.items[0].call_ref.is_none());
+        assert_eq!(tools.items[0].state, "failed");
+        assert!(tools.items[0].result_text.is_some());
+    }
+    #[test]
     fn native_market_observe_approval_uses_actual_turn_and_original_selection() {
         let approval = approval();
         let view = LocalView {
@@ -512,7 +717,7 @@ mod tests {
         );
         let mut previous_host = view;
         previous_host.turns[0].host = Some(id(32));
-        let tools: wire::ToolSnapshot = serde_json::from_value(serde_json::json!({
+        let mut tools: wire::ToolSnapshot = serde_json::from_value(serde_json::json!({
             "agentSessionId":id(3),"nativeTurnId":id(11),"truncated":false,"items":[{
                 "nativeItemId":id(40),"nativeThreadId":id(13),"nativeTurnId":id(11),
                 "serverName":"yijie_market","toolName":"tushare_daily","state":"failed",
@@ -521,13 +726,13 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(
-            validate_tools(&tools, &previous_host, &previous_host.turns[0]),
+            validate_tools(&mut tools, &previous_host, &previous_host.turns[0]),
             Ok(())
         );
         let mut other_thread = tools.clone();
         other_thread.items[0].native_thread_id = id(41);
         assert_eq!(
-            validate_tools(&other_thread, &previous_host, &previous_host.turns[0]),
+            validate_tools(&mut other_thread, &previous_host, &previous_host.turns[0]),
             Err(Code::AuthorityMismatch)
         );
         assert_eq!(

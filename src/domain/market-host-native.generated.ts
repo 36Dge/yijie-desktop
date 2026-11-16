@@ -8,6 +8,10 @@ export type HttpsSchemasYijieAiMarketHostV1Native =
   | NativeError;
 export type CanonicalId = string;
 export type NativeId = string;
+/**
+ * none reads approvals/local facts only; events uses a bounded projection of real native notifications, seeding a missing snapshot from native history; history explicitly refreshes native history. Omission retains history behavior. No mode dispatches tools.
+ */
+export type ToolsReadMode = "none" | "events" | "history";
 export type Revision = number;
 /**
  * Original case-sensitive catalog serverName. Syntactic acceptance does not replace exact registry lookup.
@@ -19,6 +23,28 @@ export type SelectionDigest = string;
 export type ToolName = string;
 export type ArgsDigest = string;
 export type Decision = "approve_once" | "reject" | "cancel";
+/**
+ * Gateway-owned result _meta[yijie.market.call], not supplier metadata. Capture the current frozen call and accepted decision atomically with admission. Null decisionReceipt means no accepted owner decision observed, not that no prompt occurred. admissionConsumed is only permission consumption, never HTTP delivery or provider success. Native Item identity/status remain authoritative. No credentialRef, capabilityRef, bearer, raw arguments or authority context.
+ */
+export type GatewayCallReceipt = {
+  [k: string]: unknown;
+} & {
+  schemaVersion: 1;
+  callRef: CanonicalId;
+  serviceId: ServiceId;
+  reference: SelectionRef;
+  nativeThreadId: NativeId;
+  nativeTurnId: NativeId;
+  turnOperationId: CanonicalId;
+  selectionDigest: SelectionDigest;
+  toolName: ToolName;
+  argsDigest: ArgsDigest;
+  argsEncoding: "worker-json-v1";
+  decisionReceipt: GatewayDecisionReceipt | null;
+  admissionConsumed: boolean;
+};
+export type ResultTextSource = "content" | "structured";
+export type DecisionFactKind = "requested" | "acknowledged" | "unconfirmed";
 /**
  * Safe Host-specific errors plus the exact referenced provider error set. Provider error codes are not copied or independently widened.
  */
@@ -78,6 +104,7 @@ export interface NativeObserveRequest {
 export interface NativeObservePayload {
   sessionId: CanonicalId;
   nativeTurnId?: NativeId;
+  toolsRead?: ToolsReadMode;
 }
 export interface NativeObserveResponse {
   schemaVersion: 1;
@@ -86,7 +113,7 @@ export interface NativeObserveResponse {
   [k: string]: unknown;
 }
 /**
- * Safe scoped Native observation. Optional availableTurns is the latest 128 known native bindings in descending submission order, each with its original selectionDisplay; turnsTruncated reports older bindings omitted from the index. A known requested nativeTurnId is read with its own display snapshot, never the latest selection. Without a current Host, omit remote facts without starting/probing/reconstructing authority. With a current owned Host, historical tool reads validate scope/agent/thread/turn, not the original Host nonce. Approvals always require the current Host nonce. Current remote read failures stay typed errors. Recheck task.read and local view after awaits. Unmanaged sessions need no Host access. Old producers may omit the new index, and old readers may ignore it. No history read restores execution or approval.
+ * Safe scoped Native observation. Optional availableTurns is the latest 128 known native bindings in descending submission order, each with its original selectionDisplay; turnsTruncated reports older bindings omitted from the index. A known requested nativeTurnId is read with its own display snapshot, never the latest selection. Without a current Host, omit remote facts without starting/probing/reconstructing authority. With a current owned Host, historical tool reads validate scope/agent/thread/turn, not the original Host nonce. Approvals always require the current Host nonce. Current remote read failures stay typed errors. Recheck task.read and local view after awaits. Unmanaged sessions need no Host access. Old producers may omit the new index, and old readers may ignore it. No history read restores execution or approval. Optional decisionFacts are original selected-turn read-only Native evidence, available without Host. They do not populate actionable approvals. toolsRead=none omits tools and must not clear previously observed UI tool facts; events consumes notification-derived snapshots; history preserves explicit read/recovery behavior. With an explicit toolsRead mode, unavailable or invalid remote observations are omitted with remoteIssue while scoped local decisionFacts remain readable. This cannot make historical decisions actionable. Legacy omitted toolsRead retains its existing typed remote-error behavior. Active observations prioritize facts for exact currently pending approval/call identities when the history window is truncated. Historical facts otherwise follow append order; observedAtUnixMs is a captured wall-clock value, never an ordering or permission authority.
  */
 export interface NativeObservation {
   managed: boolean;
@@ -101,6 +128,12 @@ export interface NativeObservation {
    */
   availableTurns?: ObservedTurn[];
   turnsTruncated?: boolean;
+  /**
+   * @maxItems 128
+   */
+  decisionFacts?: DecisionFact[];
+  decisionFactsTruncated?: boolean;
+  remoteIssue?: ErrorCode;
   [k: string]: unknown;
 }
 /**
@@ -219,7 +252,7 @@ export interface ToolSnapshot {
   [k: string]: unknown;
 }
 /**
- * Minimal observation from actual native MCP Tool Item facts. Optional service/callRef require explicit trusted correlation; never guess matching Item by latest item, same tool or args. resultText is safe bounded text from actual native output, never raw platform credentials/transport/config. Approval acceptance is not result completion. failed is an unsuccessful native tool observation, not proof that a provider request was sent, not sent or executed. Fixed Gateway error text may distinguish known pre-dispatch rejection from unverified outcome; do not infer this distinction from a generic code or guess callRef linkage.
+ * Minimal observation from actual native MCP Tool Item facts. Optional service/callRef require explicit trusted correlation; never guess matching Item by latest item, same tool or args. resultText is safe bounded text from actual native output, never raw platform credentials/transport/config. Approval acceptance is not result completion. failed is an unsuccessful native tool observation, not proof that a provider request was sent, not sent or executed. Fixed Gateway error text may distinguish known pre-dispatch rejection from unverified outcome; do not infer this distinction from a generic code or guess callRef linkage. Optional correlation is the bounded Gateway-owned native result metadata. callRef must equal correlation.callRef; thread/turn/tool must match the containing Item and Native must verify the original selection/reference. Unknown/invalid metadata is omitted without losing native facts. service retains its old ProviderBinding type; correlation never contains credentialRef. Read-only decision and admission facts cannot authorize execution or imply provider success. Result text is a common bounded/redacted projection of native content and structuredContent, shared by native notifications and history. Structured-only results use resultText with resultTextSource=structured; different structured JSON is retained in structuredResultText. Identical JSON copies are not duplicated. Combined display bytes stay within maxResultTextBytes; truncated marks actual omitted/truncated content, never merely a second representation.
  */
 export interface ToolObservation {
   nativeItemId: NativeId;
@@ -233,6 +266,9 @@ export interface ToolObservation {
   resultText?: string;
   errorCode?: "tool_failed" | "cancelled" | "runtime_unavailable" | "unsupported_result";
   truncated: boolean;
+  correlation?: GatewayCallReceipt;
+  resultTextSource?: ResultTextSource;
+  structuredResultText?: string;
   [k: string]: unknown;
 }
 /**
@@ -244,6 +280,14 @@ export interface ServiceBinding {
   credentialRef: CanonicalId;
 }
 /**
+ * Read-only copy of the exact owner decision already accepted by decide_call. Never an approval capability.
+ */
+export interface GatewayDecisionReceipt {
+  approvalId: CanonicalId;
+  decisionId: CanonicalId;
+  decision: Decision;
+}
+/**
  * Read-only original turn identity and submitted display snapshot. Never an approval or execution grant.
  */
 export interface ObservedTurn {
@@ -253,6 +297,27 @@ export interface ObservedTurn {
    */
   selectionDisplay: SelectionDisplay[];
   [k: string]: unknown;
+}
+/**
+ * Append-only read-only Native decision evidence in the existing scoped conversation database. requested is durable user intent before delivery, acknowledged is an exact validated Host reply, unconfirmed is absence of a verified reply. None proves permit consumption, tool completion or business success. Contains no authority/capability/credential references or raw parameters; never queued, replayed or used to restore approval.
+ */
+export interface DecisionFact {
+  approvalId: CanonicalId;
+  decisionId: CanonicalId;
+  callRef: CanonicalId;
+  serviceId: ServiceId;
+  reference: SelectionRef;
+  nativeThreadId: NativeId;
+  nativeTurnId: NativeId;
+  turnOperationId: CanonicalId;
+  selectionDigest: SelectionDigest;
+  toolName: ToolName;
+  argsDigest: ArgsDigest;
+  decision: Decision;
+  kind: DecisionFactKind;
+  schemaVersion: 1;
+  argsEncoding: "worker-json-v1";
+  observedAtUnixMs: number;
 }
 export interface NativeApprovalDecideRequest {
   schemaVersion: 1;

@@ -11,6 +11,7 @@ import {fileURLToPath} from "node:url";
 import {verifyToolSearchBuildCandidate} from "./tool-search-build-candidate.mjs";
 import {verifyInteractionToolsBuildCandidate} from "./interaction-tools-build-candidate.mjs";
 import {verifyNativeToolsBuildCandidate} from "./native-tools-build-candidate.mjs";
+import {verifyMarketCallSurfaces} from "./check-market-call-surfaces.mjs";
 const desktop=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const contracts=path.resolve(desktop,"../yijie-contracts"),host=path.resolve(desktop,"../yijie-agent-host");
 const hash=b=>createHash("sha256").update(b).digest("hex");
@@ -64,11 +65,7 @@ export function kimiCallSurfaces(env=process.env){
  return {mode,market,experts,media};
 }
 function checkSurfaces(desktopRoot,contractsRoot,selection,env){
- for(const family of ["market-selection","market-host","experts"]){
-  const lock=JSON.parse(readFileSync(path.join(desktopRoot,`contracts/${family}-v2.candidate.json`)));
-  assert.equal(lock.source_commit,"64ed36dfb2c4df7645d969e0eaf1b3f3bb0a50c4");
- }
- for(const consumer of ["desktop","agent-host"])execFileSync(process.execPath,["scripts/sync-model-call-surfaces-v2.mjs",`--consumer=${consumer}`,"--check"],{cwd:contractsRoot,stdio:"pipe"});
+ verifyMarketCallSurfaces(desktopRoot,contractsRoot,path.resolve(contractsRoot,"../yijie-agent-host"),env);
  if(selection.market){
   for(const [family,consumers] of [["market-connectors",["desktop","agent-host","connectors"]],["market-provider",["desktop","agent-host","connectors"]],["market-broker",["agent-host","connectors"]]])for(const consumer of consumers)execFileSync(process.execPath,[`scripts/sync-${family}.mjs`,`--consumer=${consumer}`,"--check"],{cwd:contractsRoot,stdio:"pipe"});
   execFileSync(process.execPath,["scripts/feat164-market-catalog.mjs","--check"],{cwd:desktopRoot,stdio:"pipe"});
