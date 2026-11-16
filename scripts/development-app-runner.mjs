@@ -120,6 +120,10 @@ async function main() {
     await rename(temporary, receipt);
   }
   assert.equal(await digest(executable), binaryHash);
+  if(environment.YIJIE_DEVELOPMENT_BUILD_ONLY === "true") {
+    process.stdout.write("DAILY BUILD COMPLETE: normal App artifacts verified; App, queues and models were not started.\n");
+    return;
+  }
   process.stdout.write(`Development App verified: ${binaryHash}; ${reuse ? "reused" : "bundled"}; Vite HMR retained.\n`);
   await run(executable, process.argv.slice(3), environment);
 }

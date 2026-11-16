@@ -97,6 +97,7 @@ fn projected_catalog(native_enabled: bool) -> Vec<wire::CatalogEntry> {
     catalog()
         .catalog
         .iter()
+        .filter(|entry|entry.service_id!=crate::builtin_web::wire::RETIRED_SERVICE_ID)
         .cloned()
         .map(|mut entry| {
             entry.authorization_available =
@@ -200,7 +201,7 @@ fn apply(
             encode(&wire::Snapshot {
                 catalog_revision: product.catalog_revision,
                 catalog: projected_catalog(enabled()),
-                installations: store::list(db, scope, &product.catalog)?,
+                installations: store::list(db, scope, &product.catalog)?.into_iter().filter(|item|item.service_id!=crate::builtin_web::wire::RETIRED_SERVICE_ID).collect(),
                 capabilities: caps,
                 execution_available: false,
             })

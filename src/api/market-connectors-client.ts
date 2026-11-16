@@ -2,12 +2,18 @@ import { invoke } from "@tauri-apps/api/core";
 import schema from "../../contracts/market-connectors.schema.json";
 import catalog from "../../contracts/market-catalog.json";
 import { MARKET_CONNECTOR_IPC, type ErrorCode, type Installation, type IpcRequestMap, type IpcResponseMap, type SelectionRef, type MutationResult, type Operation } from "../domain/market-connectors.generated";
+import { RETIRED_SERVICE_ID } from "../domain/builtin-web.generated";
 import * as validators from "./generated/market-connectors-validator.gen";
 
 type Command = keyof IpcRequestMap;
 type Validator = (value: unknown) => boolean;
 type JsonSchema = { $ref?: string; type?: string; properties?: Record<string, JsonSchema>; items?: JsonSchema };
 const definitions = schema.$defs as unknown as Record<string, JsonSchema>;
+// Match Native's current picker projection; the full catalog remains available
+// to historical records and receipts.
+const currentServices = new Set(catalog.catalog
+  .filter(entry => entry.serviceId !== RETIRED_SERVICE_ID)
+  .map(entry => entry.serviceId));
 export const marketConnectorsEnabled =
   import.meta.env.VITE_YIJIE_ENV === "local" &&
   import.meta.env.VITE_YIJIE_LOCAL_PROFILE === "demo_fast" &&
@@ -102,7 +108,8 @@ export function createMarketConnectorClient(
       const result = await call("market_connectors_snapshot_v1", context, {});
       const services = new Set(result.catalog.map(entry => entry.serviceId));
       const installations = new Set(result.installations.map(item => item.installationId));
-      if (result.catalog.length !== catalog.catalog.length || services.size !== catalog.catalog.length || installations.size !== result.installations.length ||
+      if (result.catalog.length !== currentServices.size || services.size !== currentServices.size ||
+          [...services].some(service => !currentServices.has(service)) || installations.size !== result.installations.length ||
           new Set(result.installations.map(item => item.serviceId)).size !== result.installations.length ||
           result.installations.some(item => !services.has(item.serviceId) || item.status === "removed" ||
             (item.effectiveEnabled && (!item.desiredEnabled || item.connectionStatus !== "ready" || item.configurationStatus !== "configured" ||

@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { activityItemTitle } from "../../domain/conversation-activity-summary";
 import { browserChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
 import ChatCopyAction from "./ChatCopyAction.vue";
+import WebRetrievalResult from "./WebRetrievalResult.vue";
 import type { ConversationNativeToolExecution } from "../../domain/conversation-view";
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
 import ChatTimelineItemShell, { type ChatTimelineDisclosureChange } from "./ChatTimelineItemShell.vue";
@@ -12,6 +13,7 @@ const emit = defineEmits<{ "disclosure-change": [change: ChatTimelineDisclosureC
 const native = computed(() => props.execution.native.item);
 const nativeOperation = computed(() => ["fileChange", "subAgentActivity"].includes(native.value.type));
 const mcp = computed(() => native.value.mcp);
+const builtinWeb = computed(() => mcp.value?.server === "yijie_web" && ["kimi_web_search", "kimi_web_search_pro", "kimi_web_fetch"].includes(mcp.value.tool ?? ""));
 const identity = computed(() => mcp.value?.server && mcp.value.tool ? `${mcp.value.server} / ${mcp.value.tool}` : "工具身份信息不完整");
 const status = computed(() => {
   if (native.value.type === "subAgentActivity") return props.item.busy ? "处理中" : "已记录";
@@ -62,7 +64,7 @@ const diagnosticLabels = {
         <p v-if="native.availability !== 'available'" role="note">部分记录未完整展示。</p>
       </template>
       <template v-else>
-      <strong>{{ native.toolDisplay?.sourceLabel || identity }}</strong>
+      <strong>{{ builtinWeb ? '易界网页检索' : native.toolDisplay?.sourceLabel || identity }}</strong>
       <p v-if="mcp?.server === 'sorftime'" class="native-tool__source">这是旧版 Sorftime 工具记录，仅供查看。新调用请从连接器页面配置并在聊天中选择 Sorftime。</p>
       <p class="native-tool__source">{{ execution.native.source === 'native_observed' ? '已观察到的原生记录' : '原生历史读取' }}</p>
       <p v-if="item.activityLabel" role="note">{{ item.activityLabel }}</p>
@@ -72,7 +74,8 @@ const diagnosticLabels = {
         <p v-if="resultMessage" role="note">{{ resultMessage }}</p>
         <div v-for="block in mcp?.texts ?? []" :key="`${native.id}:mcp:${block.index}`" :data-native-content-index="block.index">
           <ChatCopyAction v-if="block.text !== ''" :adapter="browserChatClipboardAdapter" :text="block.text" />
-          <pre v-if="block.text !== ''">{{ block.text }}</pre>
+          <WebRetrievalResult v-if="builtinWeb && block.text !== ''" :tool="mcp?.tool ?? ''" :text="block.text" />
+          <pre v-else-if="block.text !== ''">{{ block.text }}</pre>
           <p v-else class="native-tool__source">服务返回了一个空文本块。</p>
         </div>
       </section>

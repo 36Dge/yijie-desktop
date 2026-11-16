@@ -9,9 +9,9 @@ use uuid::Uuid;
 type Error = wire::ErrorCode;
 type Result<T> = std::result::Result<T, Error>;
 const MAX_REVISION: i64 = 9_007_199_254_740_991;
+#[cfg(test)]
 #[path = "store_builtin.rs"]
 mod builtin;
-pub(super) use builtin::prepare_kimi_default;
 
 fn sql<T>(r: rusqlite::Result<T>) -> Result<T> {
     r.map_err(|_| Error::TemporarilyUnavailable)

@@ -126,9 +126,10 @@ fn market_replay_service(profile: &str, service: Option<&str>) {
         .freeze_market_submission(request.clone(), 1, ExecutionAdmission::test())
         .unwrap();
     assert_ne!(first.submission_operation_id, first.turn_operation_id);
+    let execution_selection=f.repo().fresh_web_selection(&request.selection).unwrap();
     assert_eq!(
         first.selection_digest,
-        wire::selection_digest(&first.turn_operation_id, &request.selection).unwrap()
+        wire::selection_digest(&first.turn_operation_id, &execution_selection).unwrap()
     );
     assert_ne!(
         first.selection_digest,
@@ -177,6 +178,34 @@ fn market_replay_service(profile: &str, service: Option<&str>) {
     );
     assert_eq!(f.repo().market_submission(request, 3).unwrap(), first);
     assert_eq!(counts(f.repo()), before);
+}
+
+#[test]
+fn feat175_new_selection_retires_kimi_and_replays_original_input(){
+    let mut f=Fixture::new();let mut request=f.request();
+    let index=super::super::catalog().catalog.iter().position(|e|e.service_id=="kimi-web").unwrap();
+    request.selection=vec![f.selection(index)];
+    let receipt=f.repo().freeze_market_submission(request.clone(),1,ExecutionAdmission::test()).unwrap();
+    let saved:(String,String)=f.repo().connection.query_row("SELECT snapshot_json,request_digest FROM chat_market_submissions WHERE submission_operation_id=?1",[&request.operation_id],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+    let snapshot:wire::SelectionSnapshot=serde_json::from_str(&saved.0).unwrap();assert!(snapshot.selection.is_empty());
+    assert_eq!(f.repo().market_submission_replay(&request).unwrap(),Some(receipt.clone()));
+    // A normal installation state change cannot change the accepted request.
+    f.repo().connection.execute("UPDATE chat_connector_installations SET revision=revision+1,generation=generation+1,installed=0,desired_enabled=0 WHERE service_id='kimi-web'",[]).unwrap();
+    assert_eq!(f.repo().freeze_market_submission(request.clone(),1,ExecutionAdmission::test()).unwrap(),receipt);
+    let after:(String,String)=f.repo().connection.query_row("SELECT snapshot_json,request_digest FROM chat_market_submissions WHERE submission_operation_id=?1",[&request.operation_id],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();assert_eq!(saved,after);
+}
+
+#[test]
+fn feat175_existing_frozen_kimi_selection_remains_unchanged(){
+    let mut f=Fixture::new();let mut request=f.request();
+    let index=super::super::catalog().catalog.iter().position(|e|e.service_id=="kimi-web").unwrap();let legacy=vec![f.selection(index)];
+    // Construct an ordinary pre-migration receipt with canonical v1 encoders.
+    let mut receipt=f.repo().freeze_market_submission(request.clone(),1,ExecutionAdmission::test()).unwrap();
+    request.selection=legacy.clone();let old=wire::freeze_selection(receipt.turn_operation_id.clone(),legacy).unwrap();receipt.selection_digest=old.selection_digest.clone();
+    let digest=f.repo().market_digest(&request).unwrap();let snapshot=serde_json::to_string(&old).unwrap();let response=serde_json::to_string(&receipt).unwrap();
+    f.repo().connection.execute("UPDATE chat_market_submissions SET request_digest=?1,snapshot_json=?2,receipt_json=?3 WHERE submission_operation_id=?4",params![digest,snapshot,response,request.operation_id]).unwrap();
+    assert_eq!(f.repo().market_submission_replay(&request).unwrap(),Some(receipt));
+    let retained:String=f.repo().connection.query_row("SELECT snapshot_json FROM chat_market_submissions WHERE submission_operation_id=?1",[&request.operation_id],|r|r.get(0)).unwrap();assert_eq!(retained,snapshot);
 }
 
 #[test]

@@ -69,7 +69,12 @@ def workflow_ready(root=ROOT):
 
 def workflow_session(action):
     controller = ROOT.parent / "yijie-infra/scripts/workflow-session.py"
+    web = ROOT.parent / "yijie-infra/scripts/builtin-web-session.py"
+    if action == "stop":
+        subprocess.run([sys.executable,"-B",str(web),"stop"],cwd=web.parent.parent,check=True)
     subprocess.run([sys.executable, "-B", str(controller), action], cwd=controller.parent.parent, check=True)
+    if action == "ensure":
+        subprocess.run([sys.executable,"-B",str(web),"ensure"],cwd=web.parent.parent,check=True)
 
 
 def supported_go(root, env):
@@ -110,6 +115,7 @@ def environment(root, environ, tool_search_meter=False, document_meter=False, me
     video = environ.get("YIJIE_FEAT173_VIDEO_MCP", "true")
     primary.require(video in ("true", "false"), "Invalid builtin video selector.")
     result["YIJIE_FEAT173_VIDEO_MCP"] = video
+    result["YIJIE_WEB_LOCAL_CREDENTIAL_FILE"] = str(root.parent / "yijie-infra/environments/local/generated/builtin-web/native.json")
     documents = environ.get("YIJIE_FEAT171_DOCUMENT_RUNTIME", "false")
     primary.require(documents in ("true", "false"), "Invalid document runtime selector.")
     if documents == "true":
@@ -133,10 +139,12 @@ def environment(root, environ, tool_search_meter=False, document_meter=False, me
     return result
 
 
-def start(bundle_for_ui=False, tool_search_meter=False, document_meter=False, media_meter=False, skill_acceptance=None):
+def start(bundle_for_ui=False, tool_search_meter=False, document_meter=False, media_meter=False, skill_acceptance=None,build_only=False):
     primary.require(not (tool_search_meter or document_meter or media_meter) or bundle_for_ui, "Acceptance meter requires start-ui.")
     selected = check()
     env = environment(ROOT, os.environ, tool_search_meter=tool_search_meter, document_meter=document_meter, media_meter=media_meter)
+    if build_only:
+        env["YIJIE_DEVELOPMENT_BUILD_ONLY"]="true"
     if skill_acceptance is not None:
         primary.require(bundle_for_ui and re.fullmatch(r"[a-z0-9][a-z0-9-]{0,47}", skill_acceptance) is not None, "Skill acceptance requires start-ui and a simple run label.")
         primary.require(env.get("YIJIE_FEAT174_NATIVE_SKILLS") == "true", "Skill acceptance requires the native Skill candidate.")
@@ -177,7 +185,7 @@ def start(bundle_for_ui=False, tool_search_meter=False, document_meter=False, me
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["start", "start-ui", "check", "ready"], default="start", nargs="?")
+    parser.add_argument("action", choices=["start", "start-ui", "build", "check", "ready", "services-start", "services-stop"], default="start", nargs="?")
     parser.add_argument("--tool-search-meter", action="store_true",
                         help="Explicit FEAT-170 UI acceptance through the existing fixed loopback meter.")
     parser.add_argument("--document-meter", action="store_true",
@@ -192,9 +200,14 @@ def main():
         return 0
     if args.action == "ready":
         workflow_ready()
-        print("Existing authenticated workflow is ready.")
+        web=ROOT.parent / "yijie-infra/scripts/builtin-web-session.py"
+        subprocess.run([sys.executable,"-B",str(web),"ready"],cwd=web.parent.parent,check=True)
+        print("Existing authenticated workflow and builtin web are ready.")
         return 0
-    return start(bundle_for_ui=args.action == "start-ui", tool_search_meter=args.tool_search_meter, document_meter=args.document_meter, media_meter=args.media_meter, skill_acceptance=args.skill_acceptance)
+    if args.action in ("services-start","services-stop"):
+        workflow_session("ensure" if args.action=="services-start" else "stop")
+        return 0
+    return start(bundle_for_ui=args.action == "start-ui", tool_search_meter=args.tool_search_meter, document_meter=args.document_meter, media_meter=args.media_meter, skill_acceptance=args.skill_acceptance,build_only=args.action=="build")
 
 
 if __name__ == "__main__":

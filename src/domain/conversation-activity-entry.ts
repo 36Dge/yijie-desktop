@@ -35,12 +35,13 @@ const brokerWebTitles = new Map([
 ]);
 function knownBrokerWebTitle(item: Item): string | undefined {
   const mcp = activityNativeItem(item)?.mcp;
+  if(mcp?.server === "yijie_web") return new Map([["kimi_web_search", "采集网页资料"], ["kimi_web_search_pro", "研究网页资料"], ["kimi_web_fetch", "读取指定网页"]]).get(mcp.tool ?? "");
   return mcp?.server === "yijie_market" ? brokerWebTitles.get(mcp.tool ?? "") : undefined;
 }
 export function activityToolSourceLabel(item: Item): string | undefined {
   const native = activityNativeItem(item);
   const source = native?.toolDisplay?.sourceLabel;
-  return knownBrokerWebTitle(item) && (!source || source === native?.mcp?.server) ? "Kimi 网页检索" : source;
+  return knownBrokerWebTitle(item) && (!source || source === native?.mcp?.server) ? (native?.mcp?.server === "yijie_web" ? "易界网页检索" : "Kimi 网页检索") : source;
 }
 export function activityToolTitle(item: Item): string {
   const native = activityNativeItem(item);

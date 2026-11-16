@@ -65,7 +65,7 @@ final class DevelopmentEntry: NSObject, NSApplicationDelegate, NSWindowDelegate 
             seenNative = true
             // Attach to a client started from a terminal, using the same service
             // controller. The existing client is never relaunched or replaced.
-            runPython(script: root.deletingLastPathComponent().appendingPathComponent("yijie-infra/scripts/workflow-session.py"), arguments: ["ensure"]) { code in
+            runPython(script: root.appendingPathComponent("scripts/development-client.py"), arguments: ["services-start"]) { code in
                 self.starting = false
                 if code != 0 { self.fail("服务检查未通过，请查看启动日志。") }
                 else { self.showClient() }
@@ -164,7 +164,7 @@ final class DevelopmentEntry: NSObject, NSApplicationDelegate, NSWindowDelegate 
             // children to finish; the controller independently rejects live Host.
             stopping = true
             status("正在结束本地服务…")
-            runPython(script: root.deletingLastPathComponent().appendingPathComponent("yijie-infra/scripts/workflow-session.py"), arguments: ["stop"]) { code in
+            runPython(script: root.appendingPathComponent("scripts/development-client.py"), arguments: ["services-stop"]) { code in
                 if code == 0 { self.finish() }
                 else { self.fail("本地服务仍需正常退出，请查看启动日志。") }
             }

@@ -1015,6 +1015,8 @@ impl SidecarSupervisor {
                 .kill_on_drop(false)
                 .env("YIJIE_MARKET_CONNECTORS_ENABLED", "true")
                 .env("YIJIE_MARKET_WORKER_MANIFEST", manifest);
+            if let Ok(origin)=std::env::var("YIJIE_DESKTOP_API_ORIGIN"){command.env("YIJIE_WEB_API_ORIGIN",origin);}
+            if std::env::var("YIJIE_BUILTIN_WEB_ENABLED").ok().as_deref()==Some("false"){command.env("YIJIE_BUILTIN_WEB_ENABLED","false");}
             if self.market_management_only() {
                 if config.minimax_provider_enabled || config.minimax_api_key_file.is_some() {
                     return Err(ChatError::InvalidConfiguration);

@@ -2,6 +2,7 @@ mod config;
 mod error;
 mod keychain;
 mod local_whitelist;
+pub(crate) mod local_service;
 mod loopback;
 mod oidc;
 mod runtime;

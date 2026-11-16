@@ -7,6 +7,8 @@ unset YIJIE_FEAT144_SORFTIME_ACCOUNT_SK YIJIE_FEAT144_SORFTIME_ENABLED YIJIE_FEA
 # This launcher never reads or places K_NA itself in an environment variable.
 workflow_requested="${YIJIE_WORKFLOW_ENABLED:-}"
 workflow_credential_file="${YIJIE_WORKFLOW_CREDENTIAL_FILE:-}"
+web_credential_file="${YIJIE_WEB_LOCAL_CREDENTIAL_FILE:-}"
+unset YIJIE_WEB_LOCAL_CREDENTIAL_FILE
 experts_requested="${YIJIE_EXPERTS_ENABLED:-}"
 unset YIJIE_EXPERTS_ENABLED VITE_YIJIE_EXPERTS_ENABLED
 unset YIJIE_WORKFLOW_ENABLED YIJIE_WORKFLOW_CREDENTIAL_FILE YIJIE_WORKFLOW_COZE_CREDENTIAL_FILE
@@ -348,6 +350,10 @@ if [[ "$workflow_requested" == "true" ]]; then
   IFS=: read -r workflow_file_uid workflow_file_mode workflow_file_links workflow_file_size <<< "$workflow_file_info"
   [[ "$workflow_file_uid" == "$(id -u)" && ( "$workflow_file_mode" == "400" || "$workflow_file_mode" == "600" ) && "$workflow_file_links" == "1" && "$workflow_file_size" -gt 0 && "$workflow_file_size" -le 1024 ]] || fail "workflow credential file must be owner-only and bounded"
   workflow_environment=(YIJIE_WORKFLOW_ENABLED=true "YIJIE_WORKFLOW_CREDENTIAL_FILE=$workflow_credential_file")
+  if [[ -n "$web_credential_file" ]]; then
+    [[ "$web_credential_file" == /* ]] || fail "absolute native web credential path required"
+    workflow_environment+=("YIJIE_WEB_LOCAL_CREDENTIAL_FILE=$web_credential_file")
+  fi
   fi
   workflow_tauri_config=(--config src-tauri/tauri.workflow-local.conf.json)
   unset workflow_file_info workflow_file_uid workflow_file_mode workflow_file_links workflow_file_size

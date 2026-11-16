@@ -59,6 +59,7 @@ export async function runWorkflowDev() {
   delete nativeEnvironment.YIJIE_WORKFLOW_COZE_CREDENTIAL_FILE;
   delete nativeEnvironment.VITE_YIJIE_WORKFLOW_CREDENTIAL_FILE;
   delete nativeEnvironment.VITE_YIJIE_WORKFLOW_COZE_CREDENTIAL_FILE;
+  delete process.env.YIJIE_WEB_LOCAL_CREDENTIAL_FILE;
   const arguments_ = developmentArguments(nativeEnvironment);
   await stageDevelopmentResources(root, nativeEnvironment, arguments_);
   const state = { schema_version: 1, mode: nativeEnvironment.YIJIE_DEVELOPMENT_CLIENT === "true" ? "fixed-development-v1" : "canonical-workflow-dev", launcher_pid: process.pid, cli_pid: null, origin: "http://localhost:1420", phase: "preparing", started_at: new Date().toISOString() };

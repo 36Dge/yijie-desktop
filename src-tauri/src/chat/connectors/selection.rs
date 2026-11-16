@@ -2,6 +2,8 @@
 //! New delivery requires live Native-owned provider evidence; durable replay
 //! reads the original receipt without renewing that authority.
 use super::{generated as management, selection_generated as wire};
+#[path="selection_retirement.rs"]
+mod retirement;
 use crate::chat::{
     database::{ChatRepository, ChatScope, ConversationEnqueueContext, DraftContentBlock},
     error::ChatError,
@@ -163,6 +165,7 @@ fn require_execution_provider() -> Result<ExecutionAdmission, ChatError> {
 }
 
 impl ChatRepository {
+    pub(crate) fn fresh_web_selection(&self,refs:&[management::SelectionRef])->Result<Vec<management::SelectionRef>,ChatError>{retirement::fresh(&self.connection,&self.scope,refs)}
     fn expert_digest(
         &self,
         payload: &expert_wire::NativeSubmitPayload,
@@ -310,7 +313,8 @@ impl ChatRepository {
         if !table(&self.connection)? {
             return Err(ChatError::OrchestrationUnavailable);
         }
-        let payload = normalize(&payload)?;
+        let mut payload = normalize(&payload)?;
+        let original_payload=payload.clone();
         let request_digest = if let Some((request, _)) = expert {
             self.expert_digest(request)?
         } else {
@@ -320,6 +324,7 @@ impl ChatRepository {
             return Ok(receipt);
         }
         require_unused_operation(&self.connection, &payload.operation_id)?;
+        payload.selection=retirement::fresh(&self.connection,&self.scope,&payload.selection)?;
         if let Some((request, resolved)) = expert {
             expert_store::admit_submission(&self.connection, &self.scope, request, resolved)
                 .map_err(expert_storage_error)?;
@@ -381,9 +386,11 @@ impl ChatRepository {
             crate::chat::migrations::migrate_to_target(&mut self.connection, crate::chat::migrations::MARKET_INITIAL_HOST_TURN_SCHEMA_VERSION)?;
         }
         let now = super::now().map_err(|_| ChatError::DatabaseUnavailable)?;
+        let retired=payload.selection!=original_payload.selection;
+        if retired{crate::chat::migrations::migrate_to_target(&mut self.connection,crate::chat::migrations::BUILTIN_WEB_SELECTION_SCHEMA_VERSION)?;}
         let tx = self.connection.transaction().map_err(db_error)?;
         // Recheck under the same transaction as the existing outbox writer.
-        if let Some(receipt) = replay(&tx, &self.scope, &payload, &request_digest)? {
+        if let Some(receipt) = replay(&tx, &self.scope, &original_payload, &request_digest)? {
             return Ok(receipt);
         }
         require_unused_operation(&tx, &payload.operation_id)?;
@@ -445,6 +452,7 @@ impl ChatRepository {
         };
         receipt.validate().map_err(invalid)?;
         tx.execute("INSERT INTO chat_market_submissions(submission_operation_id,session_id,local_turn_id,turn_operation_id,format_version,request_digest,snapshot_json,display_json,receipt_json,created_at,authorization_revision,permission_mode,native_process_epoch) VALUES(?1,?2,?3,?4,1,?5,?6,?7,?8,?9,?10,?11,?12)",params![receipt.submission_operation_id,receipt.session_id,receipt.local_turn_id,receipt.turn_operation_id,request_digest,serde_json::to_string(&snapshot).map_err(invalid)?,serde_json::to_string(&display).map_err(invalid)?,serde_json::to_string(&receipt).map_err(invalid)?,now,i64::try_from(authorization_revision).map_err(invalid)?,permission_mode,admission.native_process_epoch]).map_err(db_error)?;
+        if retired{tx.execute("INSERT INTO chat_builtin_web_selection_origins(submission_operation_id,normalization_version,original_selection_json) VALUES(?1,1,?2)",params![receipt.submission_operation_id,serde_json::to_string(&original_payload.selection).map_err(invalid)?]).map_err(db_error)?;}
         if initial_host_turn {
             tx.execute("INSERT INTO chat_market_initial_host_turns(operation_id,session_id,format_version,local_model_revision) VALUES(?1,?2,1,?3)",params![receipt.submission_operation_id,receipt.session_id,payload.intent.expected_revision]).map_err(db_error)?;
         }
@@ -490,7 +498,7 @@ fn replay(
             if receipt.submission_operation_id != payload.operation_id
                 || snapshot.turn_operation_id != receipt.turn_operation_id
                 || snapshot.selection_digest != receipt.selection_digest
-                || snapshot.selection != payload.selection
+                || retirement::original(db,&payload.operation_id)?.unwrap_or_else(||snapshot.selection.clone()) != payload.selection
             {
                 return Err(ChatError::DatabaseUnavailable);
             }
@@ -683,12 +691,14 @@ pub(crate) async fn chat_expert_submit_v1(
             ),
             None => None,
         };
+        let wanted=request.payload.submission.selection.clone();
+        let fresh_selection=database.call(move|repo|repo.fresh_web_selection(&wanted)).await.map_err(|_|Code::SelectionStale)?;
         let provider = super::provider::read_admission(
             &database,
             &host,
             &scope,
             native_scope,
-            &request.payload.submission.selection,
+            &fresh_selection,
         )
         .await
         .map_err(|_| Code::SelectionStale)?;
@@ -842,12 +852,14 @@ pub(crate) async fn chat_market_submit_v1(
         let provider_scope = authority
             .market_dispatch_authority(&scope, revision, create, selected, current_time)
             .map_err(auth_error)?;
+        let wanted=request.payload.selection.clone();
+        let fresh_selection=database.call(move|repo|repo.fresh_web_selection(&wanted)).await.map_err(|_|wire::ErrorCode::SelectionStale)?;
         let provider = super::provider::read_admission(
             &database,
             &host,
             &scope,
             provider_scope,
-            &request.payload.selection,
+            &fresh_selection,
         )
         .await
         .map_err(|_| wire::ErrorCode::ExecutionUnavailable)?;

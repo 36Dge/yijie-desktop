@@ -17,6 +17,18 @@ function fixture(terminal=false) {
 }
 
 describe("native Tool display",()=>{
+  it("reuses the retrieval presentation for builtin native MCP results",async()=>{
+    const text=JSON.stringify({results:[{title:"公开资料",url:"https://example.com/docs",snippet:"普通检索材料"}],truncated:false});
+    const raw=traceItem("builtin-web","mcpToolCall",{status:"completed",toolLabel:"yijie_web / kimi_web_search",mcp:{server:"yijie_web",tool:"kimi_web_search",resultKind:"text",texts:[{index:0,text}],diagnostics:[]}});
+    const item=traceTurn([raw]).items[0]!;
+    if(item.execution?.kind!=="tool" || !("native" in item.execution))throw new Error("missing native execution");
+    const wrapper=mount(ChatNativeToolItem,{props:{item,execution:item.execution}});
+    const toggle=wrapper.get("button.chat-timeline-item-shell__disclosure");
+    if(toggle.attributes("aria-expanded")!=="true")await toggle.trigger("click");
+    expect(wrapper.text()).toContain("采集网页资料");expect(wrapper.text()).toContain("公开资料");
+    expect(wrapper.get("[aria-label='网页检索材料']").text()).toContain("普通检索材料");
+    expect(activityToolSourceLabel(item)).toBe("易界网页检索");wrapper.unmount();
+  });
   it("shows native file changes and child activity without inventing an MCP result or child completion", async()=>{
     for (const raw of [
       traceItem("patch169", "fileChange", {status:"completed",toolLabel:"修改文件",text:"新增 note.txt",outputText:"+ordinary note"}),

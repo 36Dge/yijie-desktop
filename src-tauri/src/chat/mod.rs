@@ -1029,7 +1029,13 @@ impl ChatRuntime {
                 };
                 let bridge = HostBridge::from_connection(connection)
                     .map_err(|_| ChatError::SidecarUnavailable)?
-                    .with_market_control(market_control);
+                    .with_market_control(market_control.clone());
+                if let (Some(auth),Some(pipe),Some(authority))=(&self.schedule_authority,market_control,&self.authorization){
+                    let identity=authority.market_identity(bridge.instance_nonce().to_owned());
+                    if let Ok(tenant)=uuid::Uuid::parse_str(&identity.tenant_id){
+                        crate::builtin_web::start(auth.clone(),pipe,identity.host_instance_id,identity.native_process_epoch,tenant).await;
+                    }
+                }
                 self.lifecycle.host(bridge.instance_nonce());
                 let bridge = bridge.with_lifecycle(self.lifecycle.clone());
                 *self.host_bridge.lock().await = Some(Arc::new(bridge));
@@ -1096,6 +1102,7 @@ impl ChatRuntime {
                 }
             }
         }
+        self.wait_builtin_web_shutdown().await?;
         *self.host_bridge.lock().await = None;
         let mut slot = self.worker.lock().await;
         if let Some(worker) = slot.as_ref() {
@@ -1105,6 +1112,21 @@ impl ChatRuntime {
             worker.checkpoint_for_exit().await?;
         }
         slot.take();
+        Ok(())
+    }
+
+    async fn wait_builtin_web_shutdown(&self) -> Result<(), ChatError> {
+        let host = self
+            .host_bridge
+            .lock()
+            .await
+            .as_ref()
+            .map(|bridge| bridge.instance_nonce().to_owned());
+        if let Some(host) = host {
+            if !crate::builtin_web::wait_stopped(&host).await {
+                return Err(ChatError::CleanupIncomplete);
+            }
+        }
         Ok(())
     }
 
@@ -1118,6 +1140,7 @@ impl ChatRuntime {
                     .ok_or(ChatError::InvalidConfiguration)?
                     .stop()
                     .await?;
+                self.wait_builtin_web_shutdown().await?;
                 *self.host_bridge.lock().await = None;
                 Ok(state)
             }

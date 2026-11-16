@@ -139,6 +139,68 @@ pub enum AuthStatus {
 }
 
 impl NativeAuthRuntime {
+    pub(crate) async fn mint_builtin_web(
+        &self,
+        tenant: uuid::Uuid,
+        binding: uuid::Uuid,
+    ) -> Option<crate::builtin_web::Delegation> {
+        use crate::builtin_web::MintResponse;
+        if matches!(&self.mode, RuntimeMode::DemoFast) {
+            let path =
+                std::env::var(crate::builtin_web::wire::LOCAL_CREDENTIAL_ENVIRONMENT).ok()?;
+            let credential =
+                super::local_service::read_credentials(std::path::Path::new(&path)).ok()?;
+            let transport = super::transport::OperationTransport::local_builtin_web().ok()?;
+            return match transport
+                .mint_builtin_web(tenant, binding, &credential.token, Some(&credential.epoch))
+                .await
+                .ok()?
+            {
+                MintResponse::Granted(value) => Some(value),
+                _ => None,
+            };
+        }
+        let RuntimeMode::Ready(service) = &self.mode else {
+            return None;
+        };
+        let first = service.access_token(None).await.ok()?;
+        match service
+            .transport
+            .mint_builtin_web(tenant, binding, &first, None)
+            .await
+            .ok()?
+        {
+            MintResponse::Granted(value) => Some(value),
+            MintResponse::SessionExpired => {
+                let token = service.access_token(Some(&first)).await.ok()?;
+                match service
+                    .transport
+                    .mint_builtin_web(tenant, binding, &token, None)
+                    .await
+                    .ok()?
+                {
+                    MintResponse::Granted(value) => Some(value),
+                    MintResponse::SessionExpired => {
+                        let _ = service.clear_rejected_session(&token).await;
+                        None
+                    }
+                    _ => None,
+                }
+            }
+            MintResponse::Unavailable => None,
+        }
+    }
+    pub(crate) async fn revoke_builtin_web(&self, grant: &crate::builtin_web::Delegation) {
+        if matches!(&self.mode, RuntimeMode::DemoFast) {
+            if let Ok(transport) = super::transport::OperationTransport::local_builtin_web() {
+                let _ = transport.revoke_builtin_web(grant).await;
+            }
+            return;
+        }
+        if let RuntimeMode::Ready(service) = &self.mode {
+            let _ = service.transport.revoke_builtin_web(grant).await;
+        }
+    }
     pub(crate) fn from_environment_with_test_profile(
         profile: Option<std::sync::Arc<Feat126SecureStorageProfile>>,
         secure_storage_invalid: bool,

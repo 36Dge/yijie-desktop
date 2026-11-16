@@ -380,7 +380,7 @@ fn feat157_snapshot_and_mutation_follow_the_generated_wire_contract() {
     let response =
         serde_json::json!({"schemaVersion":1,"requestId":Uuid::now_v7().to_string(),"data":data});
     let validated: wire::SnapshotResponse = serde_json::from_value(response).unwrap();
-    assert_eq!(validated.data.catalog.len(), 61);
+    assert_eq!(validated.data.catalog.len(), 60);
     assert!(!validated.data.execution_available);
     let installed = apply(
         &mut db,
@@ -396,6 +396,18 @@ fn feat157_snapshot_and_mutation_follow_the_generated_wire_contract() {
         validated.data.operation.status,
         wire::OperationStatus::Succeeded
     );
+}
+
+#[test]
+fn feat175_catalog_retires_picker_entry_but_keeps_local_history(){
+    let mut db=database();let owner=scope();
+    let entry=catalog().catalog.iter().find(|e|e.service_id=="kimi-web").unwrap();
+    let installed=store::install(&mut db,&owner,entry,catalog().catalog_revision,install_request("kimi-web"),100).unwrap();
+    let capabilities=wire::CONNECTOR_CAPABILITIES.map(str::to_owned).into_iter().collect();
+    let snapshot:wire::Snapshot=serde_json::from_value(apply(&mut db,&owner,Action::Snapshot,&capabilities,101).unwrap()).unwrap();
+    assert!(snapshot.catalog.iter().all(|e|e.service_id!="kimi-web"));
+    assert!(snapshot.installations.iter().all(|e|e.service_id!="kimi-web"));
+    assert!(store::list(&db,&owner,&catalog().catalog).unwrap().iter().any(|i|i.installation_id==installed.installation.installation_id));
 }
 
 #[test]

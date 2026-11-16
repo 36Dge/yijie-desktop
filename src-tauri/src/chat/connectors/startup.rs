@@ -29,7 +29,7 @@ pub(super) fn actions(
 ) -> Result<Vec<wire::SetEnabledPayload>, Error> {
     let mut actions = Vec::new();
     for item in items {
-        if item.status != wire::InstallationStatus::Installed || item.active_operation.is_some() {
+        if item.service_id==crate::builtin_web::wire::RETIRED_SERVICE_ID || item.status != wire::InstallationStatus::Installed || item.active_operation.is_some() {
             continue;
         }
         let ready_to_probe = item.service_id == wire::BUILTIN_MODEL_SERVICE_ID
@@ -95,13 +95,6 @@ pub(super) async fn initialize(
                         "connector.manage",
                         now().map_err(|_| crate::chat::ChatError::DatabaseUnavailable)?,
                         |_| {
-                            if crate::chat::models::enabled() {
-                                store::prepare_kimi_default(
-                                    &mut repo.connection,
-                                    &query_scope,
-                                    now().unwrap_or(-1),
-                                )?;
-                            }
                             actions(
                                 &repo.connection,
                                 &query_scope,

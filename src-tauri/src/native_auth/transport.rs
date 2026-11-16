@@ -120,6 +120,101 @@ enum Operation {
 }
 
 impl OperationTransport {
+    pub(crate) fn local_builtin_web() -> Result<Self, NativeAuthError> {
+        if std::env::var("YIJIE_ENV").as_deref() != Ok("local")
+            || std::env::var("YIJIE_LOCAL_PROFILE").as_deref() != Ok("demo_fast")
+        {
+            return Err(NativeAuthError::InvalidConfiguration);
+        }
+        Ok(Self {
+            api_origin: Url::parse(crate::builtin_web::wire::LOCAL_API_ORIGIN)
+                .map_err(|_| NativeAuthError::InvalidConfiguration)?,
+            http: reqwest::Client::builder()
+                .no_proxy()
+                .redirect(Policy::none())
+                .retry(reqwest::retry::never())
+                .timeout(Duration::from_secs(5))
+                .build()
+                .map_err(|_| NativeAuthError::InvalidConfiguration)?,
+        })
+    }
+    pub(crate) async fn mint_builtin_web(
+        &self,
+        tenant: Uuid,
+        binding: Uuid,
+        token: &SecretValue,
+        epoch: Option<&str>,
+    ) -> Result<crate::builtin_web::MintResponse, NativeAuthError> {
+        use crate::builtin_web::{valid, Delegation, MintResponse};
+        let url = self
+            .api_origin
+            .join("v1/web-retrieval/delegations")
+            .map_err(|_| NativeAuthError::InvalidConfiguration)?;
+        let body = serde_json::to_vec(&serde_json::json!({"native_binding_reference":binding}))
+            .map_err(|_| NativeAuthError::InvalidConfiguration)?;
+        let mut request = self
+            .http
+            .post(url)
+            .bearer_auth(token.expose())
+            .header(CONTENT_TYPE, "application/json")
+            .header(ACCEPT, "application/json")
+            .header(TENANT_HEADER, tenant.to_string())
+            .timeout(Duration::from_secs(5))
+            .body(body);
+        if let Some(epoch) = epoch {
+            request = request.header(crate::builtin_web::wire::LOCAL_EPOCH_HEADER, epoch)
+        }
+        let mut response = request
+            .send()
+            .await
+            .map_err(|_| NativeAuthError::TransportFailed)?;
+        let status = response.status().as_u16();
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| NativeAuthError::TransportFailed)?
+        {
+            if bytes.len() + chunk.len() > 8192 {
+                return Err(NativeAuthError::ResponseRejected);
+            };
+            bytes.extend_from_slice(&chunk)
+        }
+        let value: Value =
+            serde_json::from_slice(&bytes).map_err(|_| NativeAuthError::ResponseRejected)?;
+        if status == 200 && valid("Delegation", &value) {
+            return Ok(MintResponse::Granted(Delegation(value)));
+        }
+        if status == 401 && valid("APIError", &value) && value["attempt_dispatched"] == false {
+            return Ok(MintResponse::SessionExpired);
+        }
+        Ok(MintResponse::Unavailable)
+    }
+    pub(crate) async fn revoke_builtin_web(
+        &self,
+        grant: &crate::builtin_web::Delegation,
+    ) -> Result<(), NativeAuthError> {
+        let id = grant.0["binding_id"]
+            .as_str()
+            .ok_or(NativeAuthError::ResponseRejected)?;
+        let id = Uuid::parse_str(id).map_err(|_| NativeAuthError::ResponseRejected)?;
+        let url = self
+            .api_origin
+            .join(&format!("v1/web-retrieval/bindings/{id}/revoke"))
+            .map_err(|_| NativeAuthError::InvalidConfiguration)?;
+        self.http
+            .post(url)
+            .bearer_auth(
+                grant.0["bearer"]
+                    .as_str()
+                    .ok_or(NativeAuthError::ResponseRejected)?,
+            )
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await
+            .map_err(|_| NativeAuthError::TransportFailed)?;
+        Ok(())
+    }
     pub fn new(config: &NativeAuthConfig) -> Result<Self, NativeAuthError> {
         let http = config
             .harden_http_client(

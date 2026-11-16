@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import product from "../../contracts/market-catalog.json";
 import { createMarketConnectorClient } from "./market-connectors-client";
+import { RETIRED_SERVICE_ID } from "../domain/builtin-web.generated";
 import type { MutationResult } from "../domain/market-connectors.generated";
 const context = "15700000-0000-4000-8000-000000000001";
 const installation = "15700000-0000-4000-8000-000000000002";
 const operation = "15700000-0000-4000-8000-000000000003";
-const snapshot = () => ({ ...structuredClone(product), installations: [], capabilities: ["connector.read"], executionAvailable: false });
+const snapshot = () => ({ ...structuredClone(product), catalog: structuredClone(product.catalog).filter(entry => entry.serviceId !== RETIRED_SERVICE_ID), installations: [], capabilities: ["connector.read"], executionAvailable: false });
 function client(data: unknown) {
   return createMarketConnectorClient(async (_, args) => {
     const request = args.request as { requestId: string };
@@ -28,11 +29,11 @@ describe("market connector source-driven IPC", () => {
     await api.reopen(context, operation, 3);
     expect(calls).toEqual([{ command: "market_connectors_operation_reopen_v1", payload: { operationId: operation, expectedRevision: 3 } }]);
   });
-  it("reads the exact non-secret 61-service catalog without enabling execution", async () => {
+  it("reads the Native catalog after builtin web retirement without enabling execution", async () => {
     const result = await client(snapshot()).snapshot(context);
     expect(result.catalogRevision).toBe(11);
-    expect(result.catalog).toHaveLength(61);
-    expect(result.catalog.find(entry => entry.serviceId === "kimi-web")).toMatchObject({ displayName: "Kimi 网页检索", authMode: "api_key" });
+    expect(result.catalog).toHaveLength(60);
+    expect(result.catalog.find(entry => entry.serviceId === "kimi-web")).toBeUndefined();
     expect(result.installations).toEqual([]);
     expect(result.catalog.some(entry => ["taobao-flash-sale-retail", "doukou-doctor"].includes(entry.serviceId))).toBe(false);
     expect(result.executionAvailable).toBe(false);
@@ -48,6 +49,14 @@ describe("market connector source-driven IPC", () => {
   it("keeps incomplete or duplicate catalogs unavailable", async () => {
     const input = snapshot();
     input.catalog[1] = structuredClone(input.catalog[0]!);
+    await expect(client(input).snapshot(context)).rejects.toMatchObject({ code: "unsupported_capability" });
+    const incomplete = snapshot();
+    incomplete.catalog.pop();
+    await expect(client(incomplete).snapshot(context)).rejects.toMatchObject({ code: "unsupported_capability" });
+  });
+  it("does not restore the retired connector through a stale catalog", async () => {
+    const input = snapshot();
+    input.catalog = structuredClone(product.catalog);
     await expect(client(input).snapshot(context)).rejects.toMatchObject({ code: "unsupported_capability" });
   });
   it("does not reinterpret an unknown future state as available", async () => {

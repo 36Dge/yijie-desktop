@@ -1,4 +1,5 @@
 pub mod chat;
+mod builtin_web;
 mod document_application;
 #[cfg(feature = "feat126-s10-driver")]
 mod feat126_s10_driver;
