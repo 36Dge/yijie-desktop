@@ -126,6 +126,20 @@ impl NativeDisplayBuffer {
         &self.context
     }
 
+    /// Turn completion does not complete its independently reported MCP Items.
+    /// This is a subscription lifetime check, never execution/approval authority.
+    pub fn has_pending_market_items(&self) -> bool {
+        self.view.items.iter().any(|entry| {
+            entry.last_method == "item/started"
+                && entry.item.kind == "mcpToolCall"
+                && entry
+                    .item
+                    .mcp
+                    .as_ref()
+                    .is_some_and(|mcp| mcp.server.as_deref() == Some("yijie_market"))
+        })
+    }
+
     pub fn mark_unavailable(&mut self, code: &str) {
         self.view.availability = "partial".into();
         self.view.diagnostic = Some(code.into());
@@ -144,6 +158,7 @@ impl NativeDisplayBuffer {
             return Err(ChatError::OrchestrationUnavailable);
         }
         let n = &event.payload.native;
+        let previous_diagnostic = self.view.diagnostic.clone();
         if n.thread_id != event.codex_thread_id {
             return Err(ChatError::OrchestrationUnavailable);
         }
@@ -175,7 +190,10 @@ impl NativeDisplayBuffer {
             .as_deref()
             .is_some_and(|id| id != self.view.runtime_turn_id)
         {
-            return Ok(true);
+            // Consume the session transport cursor without publishing another
+            // turn's traffic as an update to this view. New transport issues
+            // remain observable, but ordinary foreign events cause no SQL/IPC.
+            return Ok(self.view.diagnostic != previous_diagnostic);
         }
         if n.source == "projection_notice" {
             // Command chunks are deliberately withheld until the complete output
@@ -520,6 +538,65 @@ mod tests {
             n[k] = v.clone()
         }
         serde_json::from_value(serde_json::json!({"schema_version":13,"event_id":Uuid::from_u128(100+sequence as u128),"stream_id":Uuid::from_u128(99),"sequence":sequence,"occurred_at":"2026-09-08T00:00:00Z","task_id":c.task_id,"agent_session_id":c.agent_session_id,"codex_thread_id":c.codex_thread_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":n}})).unwrap()
+    }
+    #[test]
+    fn market_late_items_keep_original_turn_and_wait_for_each_started_call() {
+        let mut buffer = NativeDisplayBuffer::new(context(), None).unwrap();
+        let item = |id, server, status| serde_json::json!({"item":{"id":id,"type":"mcpToolCall","status":status,"availability":"available","mcp":{"server":server,"tool":"sample","resultKind":"omitted","texts":[],"diagnostics":[]}}});
+        buffer
+            .observe(&event(
+                1,
+                "item/started",
+                item("other", "other_server", "inProgress"),
+            ))
+            .unwrap();
+        assert!(!buffer.has_pending_market_items());
+        for (sequence, id) in [(2, "one"), (3, "two")] {
+            buffer
+                .observe(&event(
+                    sequence,
+                    "item/started",
+                    item(id, "yijie_market", "inProgress"),
+                ))
+                .unwrap();
+        }
+        buffer.observe(&event(4, "turn/completed", serde_json::json!({"turn":{"id":context().runtime_turn_id,"status":"interrupted","items":[],"itemsComplete":false}}))).unwrap();
+        assert!(buffer.has_pending_market_items());
+        let mut foreign = event(
+            5,
+            "item/completed",
+            item("one", "yijie_market", "completed"),
+        );
+        foreign.payload.native.turn_id = Some(Uuid::now_v7().to_string());
+        assert!(
+            !buffer.observe(&foreign).unwrap(),
+            "foreign traffic cannot publish the old view"
+        );
+        assert_eq!(buffer.view.cursor.as_ref().unwrap().sequence, "5");
+        assert_eq!(buffer.view.items[1].last_method, "item/started");
+        buffer
+            .observe(&event(
+                6,
+                "item/completed",
+                item("one", "yijie_market", "failed"),
+            ))
+            .unwrap();
+        assert!(buffer.has_pending_market_items());
+        buffer
+            .observe(&event(
+                7,
+                "item/completed",
+                item("two", "yijie_market", "failed"),
+            ))
+            .unwrap();
+        assert!(!buffer.has_pending_market_items());
+        assert!(buffer.view.terminal_observed);
+        assert_eq!(buffer.view.status.as_deref(), Some("interrupted"));
+        assert_eq!(buffer.view.items[1].item.status.as_deref(), Some("failed"));
+        assert_eq!(
+            buffer.view.runtime_turn_id,
+            context().runtime_turn_id.to_string()
+        );
     }
     #[test]
     fn native_output_policy_notice_keeps_subsequent_lifecycle_authoritative() {

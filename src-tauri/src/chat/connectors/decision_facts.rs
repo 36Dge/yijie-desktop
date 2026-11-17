@@ -5,6 +5,15 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 type Code = wire::ErrorCode;
 
+fn observed_at_unix_ms() -> Result<i64, Code> {
+    // Installation timestamps use seconds; DecisionFact explicitly uses ms.
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
+        .ok_or(Code::TemporarilyUnavailable)
+}
+
 pub(super) fn fact(
     approval: &wire::MarketApproval,
     decision_id: &str,
@@ -28,7 +37,7 @@ pub(super) fn fact(
         args_encoding: identity.args_encoding.clone(),
         decision,
         kind,
-        observed_at_unix_ms: super::now().map_err(|_| Code::TemporarilyUnavailable)?,
+        observed_at_unix_ms: observed_at_unix_ms()?,
     };
     value.validate().map_err(|_| Code::InvalidRequest)?;
     Ok(value)
@@ -235,6 +244,15 @@ mod tests {
         keychain::{DatabaseKey, ReceiptKey},
     };
     use uuid::Uuid;
+
+    #[test]
+    fn decision_fact_timestamp_uses_milliseconds_not_installation_seconds() {
+        let before_seconds = super::super::now().unwrap();
+        let timestamp = observed_at_unix_ms().unwrap();
+        let after_seconds = super::super::now().unwrap();
+        assert!(timestamp >= before_seconds * 1000);
+        assert!(timestamp < (after_seconds + 1) * 1000);
+    }
 
     #[test]
     fn market_decision_facts_survive_normal_reopen_without_replaying_or_changing_outbox() {

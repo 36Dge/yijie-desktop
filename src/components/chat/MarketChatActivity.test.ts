@@ -6,14 +6,23 @@ import MarketChatActivity from "./MarketChatActivity.vue";
 describe("market review and result presentation", () => {
   it("uses append order after clock correction and preserves stronger acknowledgement evidence", async () => {
     const observation = marketObservation(); observation.approvals!.requests = []; observation.tools!.items = [];
-    const latest = marketDecisionFact("unconfirmed"); latest.observedAtUnixMs = 1000;
-    const older = marketDecisionFact("requested"); older.observedAtUnixMs = 2000;
+    const latest = marketDecisionFact("unconfirmed"); latest.observedAtUnixMs = 1_794_800_001_000;
+    const older = marketDecisionFact("requested"); older.observedAtUnixMs = 1_794_800_002_000;
     observation.decisionFacts = [latest, older];
     const wrapper = mount(MarketChatActivity, { props: { observation, connected: false, refreshing: false, deciding: null, error: null, actionable: () => false } });
-    expect(wrapper.get('[aria-label="只读决定记录"] .market-activity__meta').text()).toContain(new Date(1000).toLocaleString('zh-CN'));
-    const acknowledged = marketDecisionFact("acknowledged"); acknowledged.observedAtUnixMs = 500;
+    expect(wrapper.get('[aria-label="只读决定记录"] .market-activity__meta').text()).toContain(new Date(latest.observedAtUnixMs).toLocaleString('zh-CN'));
+    const acknowledged = marketDecisionFact("acknowledged"); acknowledged.observedAtUnixMs = 1_794_800_000_500;
     await wrapper.setProps({ observation: { ...observation, decisionFacts: [latest, acknowledged, older] } });
     expect(wrapper.get('[aria-label="只读决定记录"]').text()).toContain("已确认允许一次");
+    expect(wrapper.emitted("decision")).toBeUndefined(); wrapper.unmount();
+  });
+  it("flags legacy second-valued timestamps without rewriting or authorizing the fact", () => {
+    const observation = marketObservation(); observation.approvals!.requests = []; observation.tools!.items = [];
+    const fact = marketDecisionFact(); fact.observedAtUnixMs = 1_794_886_903;
+    observation.decisionFacts = [fact];
+    const wrapper = mount(MarketChatActivity, { props: { observation, connected: false, refreshing: false, deciding: null, error: null, actionable: () => false } });
+    expect(wrapper.get('[aria-label="只读决定记录"]').text()).toContain("旧记录时间单位异常");
+    expect(fact.observedAtUnixMs).toBe(1_794_886_903);
     expect(wrapper.emitted("decision")).toBeUndefined(); wrapper.unmount();
   });
   it("shows structured-only and distinct JSON without claiming omitted data", () => {

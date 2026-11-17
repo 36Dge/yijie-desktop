@@ -767,6 +767,11 @@ mod tests {
 /// Explicit normal acceptance namespace from the canonical development entry.
 /// It is a label, never a path, and is shared by Native chat and Skill roots.
 pub(crate) fn acceptance_app_data(base: PathBuf) -> Result<PathBuf, SkillRootsError> {
+    if let Some(label)=crate::chat::connectors::local_acceptance::label().map_err(|_|SkillRootsError::PathUnavailable)? {
+        let base=canonical_app_data_directory(&base)?;
+        let runs=ensure_private_child_directory(&base,"market-local-acceptance")?;
+        return ensure_private_child_directory(&runs,&label);
+    }
     let label=std::env::var("YIJIE_FEAT174_ACCEPTANCE").unwrap_or_default();
     if label.is_empty(){return Ok(base);}
     if std::env::var("YIJIE_DEVELOPMENT_CLIENT").as_deref()!=Ok("true") || !super::market_v2::enabled() || label.len()>48 || !label.bytes().all(|b|b.is_ascii_lowercase()||b.is_ascii_digit()||b==b'-') || !label.as_bytes().first().is_some_and(|b|b.is_ascii_lowercase()||b.is_ascii_digit()) {return Err(SkillRootsError::PathUnavailable);}

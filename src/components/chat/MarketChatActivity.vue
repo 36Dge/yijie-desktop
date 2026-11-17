@@ -23,6 +23,11 @@ const names = computed(() => new Map(props.observation?.selectionDisplay.map(ite
 const displayed = computed(() => props.toolObservation === undefined ? props.observation : props.toolObservation);
 const decisionLabels = { approve_once: "已允许一次", reject: "已拒绝", cancel: "已取消本次" };
 const decisionIntents = { approve_once: "允许一次", reject: "拒绝", cancel: "取消本次" };
+function decisionTime(timestamp: number): string {
+  // Early candidates wrote seconds in the ms field. These facts cannot predate
+  // the product (or 2001). Flag the date; never rewrite or guess audit values.
+  return timestamp < 1_000_000_000_000 ? "旧记录时间单位异常" : new Date(timestamp).toLocaleString("zh-CN");
+}
 const unlinkedDecisions = computed(() => {
   const facts = new Map<string, DecisionFact>();
   for (const fact of displayed.value?.decisionFacts ?? []) {
@@ -80,7 +85,7 @@ function callSourceName(turnId: string, identity: Pick<DecisionFact, "serviceId"
     <p v-if="selectedTurnId && displayed?.tools && !displayed.tools.items.length && !historyRefreshing" class="market-activity__meta">此轮没有连接器工具调用记录。</p>
     <article v-for="fact in unlinkedDecisions" :key="`${fact.callRef}:${fact.decisionId}`" class="market-activity__card" aria-label="只读决定记录">
       <strong>{{ callSourceName(fact.nativeTurnId, fact) }}</strong>
-      <p class="market-activity__meta">{{ fact.toolName }} · {{ new Date(fact.observedAtUnixMs).toLocaleString('zh-CN') }}</p>
+      <p class="market-activity__meta">{{ fact.toolName }} · {{ decisionTime(fact.observedAtUnixMs) }}</p>
       <p>{{ fact.kind === 'acknowledged' ? '已确认' : '已请求' }}{{ decisionIntents[fact.decision] }}</p>
       <p v-if="fact.kind !== 'acknowledged'" class="market-activity__meta">决定送达未确认。</p>
       <p class="market-activity__meta">当前展示尚无关联的工具结果；这条记录不能证明外部操作已执行或成功。</p>

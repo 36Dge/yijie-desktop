@@ -73,6 +73,7 @@ function statusFor(entry: CatalogEntry, installation: Installation | undefined, 
 }
 
 function configurationLabel(entry: CatalogEntry): string {
+  if (entry.serviceId === "market-local-verification") return "仅使用本机普通协议端返回的验收样本，无需账号密钥；每次调用仍需批准。";
   if (entry.serviceId === "kimi-web") return "自动使用客户端已有的 Kimi 模型凭据，无需单独配置。准备过程不联网；搜索和网页读取可能计费，调用前仍需批准。";
   const unavailable = entry.availability === "blocked" || entry.availability === "unverified";
   switch (entry.authMode) {

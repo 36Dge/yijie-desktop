@@ -41,6 +41,7 @@ import {
 import "./styles/variables.css";
 
 const route = useRoute();
+const marketAcceptance = import.meta.env.VITE_YIJIE_MARKET_LOCAL_ACCEPTANCE;
 const router = useRouter();
 const permissionStore = usePermissionStore();
 const chatStore = useChatStore();
@@ -280,6 +281,7 @@ onBeforeUnmount(() => {
           <ScheduledUpdates v-if="localChatUiEnabled" />
           <ChatDeletionUpdates v-if="localChatUiEnabled" />
           <YjAppShell>
+            <p v-if="marketAcceptance" role="status" class="market-acceptance-notice">本地连接器验收 · 独立数据 · {{ marketAcceptance }}</p>
             <RouterView v-slot="{ Component }">
               <KeepAlive v-if="canRenderCurrentRoute" :include="workflowShowcaseUiEnabled ? ['WorkflowPage'] : []" :max="1">
                 <component :is="Component" />

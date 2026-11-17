@@ -1003,6 +1003,11 @@ impl SidecarSupervisor {
             command.env("YIJIE_FEAT173_VIDEO_MCP", video_selector);
         }
         if self.market_authority.is_some() {
+            if let Some(label)=super::connectors::local_acceptance::label().map_err(|_|ChatError::InvalidConfiguration)? {
+                let suffix=PathBuf::from(".local/market-local-acceptance").join(&label).join("host-home");
+                if !config.host_home.ends_with(suffix) {return Err(ChatError::InvalidConfiguration)}
+                command.env("YIJIE_MARKET_LOCAL_ACCEPTANCE",label).env("YIJIE_DEVELOPMENT_CLIENT","true").env("YIJIE_BUILTIN_WEB_ENABLED","false");
+            }
             let manifest = std::env::var("YIJIE_MARKET_WORKER_MANIFEST")
                 .ok()
                 .map(PathBuf::from)
@@ -1048,6 +1053,16 @@ impl SidecarSupervisor {
                 ),
                 ("PATH", "/usr/bin:/bin".to_owned()),
             ]);
+        }
+        if super::connectors::local_acceptance::enabled() {
+            let mut options=std::fs::OpenOptions::new();options.create(true).append(true);
+            #[cfg(unix)] {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+            }
+            let file=options.open(config.host_home.join("local-market-startup.log")).map_err(|_|ChatError::SidecarUnavailable)?;
+            if file.metadata().map_err(|_|ChatError::SidecarUnavailable)?.len()>1<<20 {return Err(ChatError::SidecarUnavailable)}
+            command.stderr(Stdio::from(file));
         }
         let spawned = command.spawn();
         // Drop Command's transient environment copy promptly, before polling.

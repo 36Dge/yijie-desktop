@@ -140,10 +140,21 @@ def environment(root, environ, tool_search_meter=False, document_meter=False, me
     return result
 
 
-def start(bundle_for_ui=False, tool_search_meter=False, document_meter=False, media_meter=False, skill_acceptance=None,build_only=False):
+def start(bundle_for_ui=False, tool_search_meter=False, document_meter=False, media_meter=False, skill_acceptance=None,build_only=False,market_acceptance=None,real_model=False):
     primary.require(not (tool_search_meter or document_meter or media_meter) or bundle_for_ui, "Acceptance meter requires start-ui.")
     selected = check()
+    if market_acceptance is not None:
+        primary.require(bundle_for_ui and skill_acceptance is None and re.fullmatch(r"[a-z0-9][a-z0-9-]{0,47}",market_acceptance) is not None,"Market acceptance requires an isolated start-ui label.")
+        primary.require(not (tool_search_meter or document_meter or media_meter),"Market acceptance owns its model peer selector.")
+        tool_search_meter = not real_model
+    else:
+        primary.require(not real_model,"Real model selector belongs only to market acceptance.")
     env = environment(ROOT, os.environ, tool_search_meter=tool_search_meter, document_meter=document_meter, media_meter=media_meter)
+    if market_acceptance is not None:
+        acceptance=ROOT/".local/market-local-acceptance"/market_acceptance
+        for name in ("host-home","codex-home"):
+            directory=acceptance/name;directory.mkdir(parents=True,mode=0o700,exist_ok=True);primary.directory(directory)
+        env.update(YIJIE_MARKET_LOCAL_ACCEPTANCE=market_acceptance,VITE_YIJIE_MARKET_LOCAL_ACCEPTANCE=market_acceptance,YIJIE_BUILTIN_WEB_ENABLED="false")
     if build_only:
         env["YIJIE_DEVELOPMENT_BUILD_ONLY"]="true"
     if skill_acceptance is not None:
@@ -199,6 +210,8 @@ def main():
                         help="Approved FEAT-171 UI acceptance through the fixed budget meter.")
     parser.add_argument("--media-meter", action="store_true", help="Approved FEAT-172 media acceptance through the fixed request-count meter.")
     parser.add_argument("--skill-acceptance", metavar="RUN_LABEL", help="Normal Skill UI acceptance in separate Native/Host/Runtime data; never resets daily data.")
+    parser.add_argument("--market-acceptance",metavar="RUN_LABEL",help="Explicit local connector acceptance with isolated Native/Host/Runtime data.")
+    parser.add_argument("--real-model",action="store_true",help="Use an explicitly authorized real model only in market acceptance; default uses the fixed local protocol peer.")
     args = parser.parse_args()
     primary.require(not (args.tool_search_meter or args.document_meter or args.media_meter) or args.action == "start-ui", "Acceptance meter requires start-ui.")
     if args.action == "check":
@@ -214,7 +227,7 @@ def main():
     if args.action in ("services-start","services-stop"):
         workflow_session("ensure" if args.action=="services-start" else "stop")
         return 0
-    return start(bundle_for_ui=args.action == "start-ui", tool_search_meter=args.tool_search_meter, document_meter=args.document_meter, media_meter=args.media_meter, skill_acceptance=args.skill_acceptance,build_only=args.action=="build")
+    return start(bundle_for_ui=args.action == "start-ui", tool_search_meter=args.tool_search_meter, document_meter=args.document_meter, media_meter=args.media_meter, skill_acceptance=args.skill_acceptance,build_only=args.action=="build",market_acceptance=args.market_acceptance,real_model=args.real_model)
 
 
 if __name__ == "__main__":

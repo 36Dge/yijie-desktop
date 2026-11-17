@@ -16,6 +16,88 @@ function setup(client: MarketHostNativeClient, events = false, active = false) {
 function client(): MarketHostNativeClient { return { observe: vi.fn(async () => marketObservation()), decide: vi.fn(), submit: vi.fn() }; }
 afterEach(() => { wrappers.splice(0).forEach(w => w.unmount()); });
 describe("market approval observation", () => {
+  it("clears an older completed tool when a lightweight read binds a new turn", async () => {
+    const api = client(), old = marketObservation(); old.approvals!.requests = [];
+    old.tools!.items[0]!.state = "completed";
+    old.availableTurns = [{ nativeTurnId: id(11), selectionDisplay: [] }];
+    vi.mocked(api.observe).mockResolvedValue(old);
+    const { flow } = setup(api, true); await flushPromises();
+    const next = { ...old, tools: undefined, availableTurns: [{ nativeTurnId: id(40), selectionDisplay: [] }, ...old.availableTurns!] };
+    vi.mocked(api.observe).mockResolvedValue(next); await flow.refresh("none");
+    expect(flow.tools.value).toEqual([]); expect(api.decide).not.toHaveBeenCalled();
+  });
+  it("refreshes a selected original turn from late native events without replacing live approvals", async () => {
+    const api = client(), live = marketObservation();
+    live.availableTurns = [{ nativeTurnId: id(40), selectionDisplay: [] }];
+    const history = structuredClone(live); history.tools!.nativeTurnId = id(40);
+    history.tools!.items[0]!.nativeTurnId = id(40); history.approvals!.requests = [];
+    let currentHistory = history;
+    vi.mocked(api.observe).mockImplementation(async (_c, _s, turn) => turn ? currentHistory : live);
+    const { flow, nativeRevision } = setup(api, true); await flushPromises();
+    await flow.selectTurn(id(40));
+    currentHistory = structuredClone(history); currentHistory.tools!.items[0]!.state = "failed";
+    nativeRevision.value = "old-turn-completed"; await flushPromises();
+    expect(api.observe).toHaveBeenCalledWith(id(20), id(21), id(40), "events");
+    expect(flow.toolObservation.value?.tools?.items[0]?.state).toBe("failed");
+    expect(flow.approvals.value).toEqual(live.approvals!.requests);
+    expect(api.decide).not.toHaveBeenCalled(); expect(api.submit).not.toHaveBeenCalled();
+  });
+  it("coalesces selected-turn event reads and ignores a response after a new selection", async () => {
+    const api = client(), live = marketObservation();
+    live.availableTurns = [40, 41].map(value => ({ nativeTurnId: id(value), selectionDisplay: [] }));
+    const old = structuredClone(live); old.tools!.nativeTurnId = id(40); old.tools!.items = [];
+    const newer = structuredClone(live); newer.tools!.nativeTurnId = id(41); newer.tools!.items = [];
+    let resolve!: (value: typeof old) => void;
+    const delayed = new Promise<typeof old>(r => { resolve = r; });
+    let oldReads = 0;
+    vi.mocked(api.observe).mockImplementation(async (_c, _s, turn, mode) => {
+      if (turn === id(40) && mode === "events") { oldReads++; return delayed; }
+      return turn === id(40) ? old : turn === id(41) ? newer : live;
+    });
+    const { flow, nativeRevision } = setup(api, true); await flushPromises(); await flow.selectTurn(id(40));
+    nativeRevision.value = "old-result-1"; await flushPromises();
+    nativeRevision.value = "old-result-2"; await flushPromises();
+    expect(oldReads).toBe(1);
+    await flow.selectTurn(id(41)); resolve(old); await flushPromises();
+    expect(flow.selectedTurnId.value).toBe(id(41));
+    expect(flow.toolObservation.value?.tools?.nativeTurnId).toBe(id(41));
+    expect(api.observe).toHaveBeenCalledWith(id(20), id(21), id(41), "events");
+    expect(api.decide).not.toHaveBeenCalled();
+  });
+  it("finishes a selected readonly result while an independent live approval is decided", async () => {
+    const api = client(), live = marketObservation();
+    live.availableTurns = [{ nativeTurnId: id(40), selectionDisplay: [] }];
+    const history = structuredClone(live); history.tools!.nativeTurnId = id(40);
+    history.tools!.items[0]!.nativeTurnId = id(40); history.tools!.items[0]!.state = "failed";
+    let resolve!: (value: typeof history) => void;
+    const delayed = new Promise<typeof history>(r => { resolve = r; });
+    vi.mocked(api.observe).mockImplementation(async (_c, _s, turn, mode) => turn ? mode === "events" ? delayed : history : live);
+    vi.mocked(api.decide).mockImplementation(async (_c, payload) => ({ ...live.approvals!.requests[0]!, state: "rejected", decision: "reject", decisionId: payload.decisionId, revision: 2 }));
+    const { flow, nativeRevision } = setup(api, true); await flushPromises(); await flow.selectTurn(id(40));
+    nativeRevision.value = "late-old-result"; await flushPromises();
+    const decision = flow.decide(id(2), "reject"); await flushPromises();
+    resolve(history); await decision; await flushPromises();
+    expect(flow.historyRefreshing.value).toBe(false);
+    expect(flow.toolObservation.value?.tools?.nativeTurnId).toBe(id(40));
+    expect(api.decide).toHaveBeenCalledTimes(1);
+  });
+  it("reconciles an unfinished terminal snapshot once from native history without idle polling", async () => {
+    vi.useFakeTimers();
+    try {
+      const api = client(), started = marketObservation(); started.approvals!.requests = [];
+      vi.mocked(api.observe).mockResolvedValue(started);
+      const { flow, running } = setup(api, true, true); await flushPromises();
+      const terminal = structuredClone(started); terminal.tools!.items[0]!.state = "failed";
+      terminal.tools!.items[0]!.resultText = "原生取消回执：结果未确认，不重试。";
+      vi.mocked(api.observe).mockImplementation(async (_context, _session, _turn, mode) => mode === "history" ? terminal : started);
+      running.value = false; await flushPromises();
+      expect(vi.mocked(api.observe).mock.calls.map(call => call[3])).toEqual(["history", "events", "history"]);
+      expect(flow.tools.value[0]?.state).toBe("failed");
+      const count = vi.mocked(api.observe).mock.calls.length;
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(api.observe).toHaveBeenCalledTimes(count); expect(api.decide).not.toHaveBeenCalled();
+    } finally { wrappers.splice(0).forEach(w => w.unmount()); vi.useRealTimers(); }
+  });
   it("drains an invalidation queued after the read settles but before its cleanup", async () => {
     const api = client(); let resolve!: (value: ReturnType<typeof marketObservation>) => void;
     const response = new Promise<ReturnType<typeof marketObservation>>(r => { resolve = r; });

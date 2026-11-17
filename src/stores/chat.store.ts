@@ -1873,8 +1873,14 @@ export function createChatStoreDefinition(
       const submission = localSubmissions.value[event.view.turnId];
       if (submission && submission.status !== "submitted") localSubmissions.value = {...localSubmissions.value, [event.view.turnId]: {...submission, status: "submitted"}};
       displayNativeViews();
-      if (event.view.terminalObserved || event.view.statusSource === "runtime_read") void resyncSelected();
-      else if (event.view.status === "inProgress") {
+      const statusChanged = !previous || previous.status !== event.view.status
+        || previous.statusSource !== event.view.statusSource || previous.terminalObserved !== event.view.terminalObserved;
+      const diagnosticChanged = previous?.diagnostic !== event.view.diagnostic;
+      // A late Item already arrives in the native view. Re-reading the whole
+      // thread on each Item of an ended turn duplicates that observation.
+      if ((event.view.terminalObserved && (statusChanged || diagnosticChanged))
+        || (event.view.statusSource === "runtime_read" && statusChanged)) void resyncSelected();
+      else if (!event.view.terminalObserved && event.view.status === "inProgress") {
         phase.value = "streaming";
         nativeLiveTurnId.value = event.view.turnId;
       }

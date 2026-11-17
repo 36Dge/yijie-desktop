@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import schema from "../../contracts/market-connectors.schema.json";
 import catalog from "../../contracts/market-catalog.json";
+import acceptance from "../../contracts/market-local-acceptance.json";
 import { MARKET_CONNECTOR_IPC, type ErrorCode, type Installation, type IpcRequestMap, type IpcResponseMap, type SelectionRef, type MutationResult, type Operation } from "../domain/market-connectors.generated";
 import { RETIRED_SERVICE_ID } from "../domain/builtin-web.generated";
 import * as validators from "./generated/market-connectors-validator.gen";
@@ -11,7 +12,7 @@ type JsonSchema = { $ref?: string; type?: string; properties?: Record<string, Js
 const definitions = schema.$defs as unknown as Record<string, JsonSchema>;
 // Match Native's current picker projection; the full catalog remains available
 // to historical records and receipts.
-const currentServices = new Set(catalog.catalog
+const currentServices = new Set((import.meta.env.VITE_YIJIE_MARKET_LOCAL_ACCEPTANCE ? [acceptance.catalogEntry] : catalog.catalog)
   .filter(entry => entry.serviceId !== RETIRED_SERVICE_ID)
   .map(entry => entry.serviceId));
 export const marketConnectorsEnabled =

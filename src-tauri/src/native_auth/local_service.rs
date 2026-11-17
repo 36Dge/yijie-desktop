@@ -9,13 +9,12 @@ pub(crate) struct Credentials {
 #[cfg(unix)]
 pub(crate) fn read_credentials(path: &Path) -> Result<Credentials, ()> {
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
-    let fail = || ();
     let mut file = std::fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
         .open(path)
-        .map_err(|_| fail())?;
-    let before = file.metadata().map_err(|_| fail())?;
+        .map_err(|_| ())?;
+    let before = file.metadata().map_err(|_| ())?;
     if !before.is_file()
         || before.uid() != unsafe { libc::geteuid() }
         || before.nlink() != 1
@@ -23,14 +22,14 @@ pub(crate) fn read_credentials(path: &Path) -> Result<Credentials, ()> {
         || before.len() == 0
         || before.len() > 1024
     {
-        return Err(fail());
+        return Err(());
     }
     let mut bytes = Zeroizing::new(Vec::with_capacity(before.len() as usize));
     file.by_ref()
         .take(1025)
         .read_to_end(&mut bytes)
-        .map_err(|_| fail())?;
-    let after = file.metadata().map_err(|_| fail())?;
+        .map_err(|_| ())?;
+    let after = file.metadata().map_err(|_| ())?;
     if bytes.len() as u64 != before.len()
         || before.len() != after.len()
         || before.mtime() != after.mtime()
@@ -38,32 +37,31 @@ pub(crate) fn read_credentials(path: &Path) -> Result<Credentials, ()> {
         || before.ctime() != after.ctime()
         || before.ctime_nsec() != after.ctime_nsec()
     {
-        return Err(fail());
+        return Err(());
     }
     parse_credentials(&bytes)
 }
 
 #[cfg(not(unix))]
 pub(crate) fn read_credentials(_path: &Path) -> Result<Credentials, ()> {
-    Err(error(ErrorCode::ServiceUnavailable))
+    Err(())
 }
 
 pub(crate) fn parse_credentials(bytes: &[u8]) -> Result<Credentials, ()> {
-    let fail = || ();
     let mut object = serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(bytes)
-        .map_err(|_| fail())?;
+        .map_err(|_| ())?;
     // Move the known secret into zeroizing storage before any metadata validation branch.
     let token = match object.remove("token") {
         Some(serde_json::Value::String(value)) => SecretValue::new(value),
-        _ => return Err(fail()),
+        _ => return Err(()),
     };
     // Deployment authority: yijie-api/config/workflow-local-runtime.schema.json.
     if object.len() != 2 || object.remove("schema_version").and_then(|v| v.as_i64()) != Some(1) {
-        return Err(fail());
+        return Err(());
     }
     let epoch = match object.remove("run_epoch") {
         Some(serde_json::Value::String(value)) => value,
-        _ => return Err(fail()),
+        _ => return Err(()),
     };
     if uuid::Uuid::parse_str(&epoch).map_or(true, |id| id.hyphenated().to_string() != epoch)
         || uuid::Uuid::parse_str(&epoch).map_or(true, |id| id.is_nil())
@@ -73,7 +71,7 @@ pub(crate) fn parse_credentials(bytes: &[u8]) -> Result<Credentials, ()> {
             .bytes()
             .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
     {
-        return Err(fail());
+        return Err(());
     }
     Ok(Credentials { epoch, token })
 }

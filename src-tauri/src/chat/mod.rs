@@ -1020,7 +1020,11 @@ impl ChatRuntime {
                     .sidecar
                     .as_ref()
                     .ok_or(ChatError::InvalidConfiguration)?;
-                let state = supervisor.start().await?;
+                let state = supervisor.start().await.inspect_err(|error| {
+                    if connectors::local_acceptance::enabled() {
+                        eprintln!("Local market acceptance startup code={}",error.code());
+                    }
+                })?;
                 let (connection, market_control) = if connectors::enabled() {
                     let (connection, control) = supervisor.market_connection().await?;
                     (connection, Some(control))

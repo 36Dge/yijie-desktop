@@ -30,6 +30,7 @@ PROFILE = {
     "YIJIE_FEAT169_INTERACTION_TOOLS": "true", "YIJIE_FEAT170_TOOL_SEARCH": "true",
     "YIJIE_FEAT174_NATIVE_SKILLS": "true", "YIJIE_FEAT171_DOCUMENT_RUNTIME": "false",
     "YIJIE_FEAT173_VIDEO_MCP": "true",
+    "YIJIE_MARKET_LOCAL_ACCEPTANCE": "",
 }
 
 
@@ -199,6 +200,7 @@ def workflow_sources_current(root):
 
 
 def refresh_sources(root, environment):
+    run(root, environment, "yijie-contracts", "node", "scripts/sync-market-local-acceptance.mjs", "--check")
     # These modes compare every generated output first and may change ONLY source
     # identity metadata. Actual Runtime/source/schema drift cannot be relabelled.
     families = ["runtime-kimi-k31-pro", "runtime-native-tools"]

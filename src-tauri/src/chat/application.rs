@@ -44,6 +44,23 @@ const OUTBOX_LEASE_SECONDS: i64 = 30;
 const RETRY_DELAY_SECONDS: i64 = 5;
 const PROGRESS_FLUSH_EVENT_COUNT: usize = 16;
 const PROGRESS_FLUSH_INTERVAL: Duration = Duration::from_millis(50);
+// The owned MCP call timeout is 60s. Retain its existing event subscription for
+// at most that window plus notification delivery slack after a turn terminal.
+// This deadline grants no execution time, approval, retry, or history poll.
+const MARKET_TERMINAL_DRAIN: Duration = Duration::from_secs(65);
+
+fn market_terminal_deadline(
+    terminal: bool,
+    pending: bool,
+    deadline: &mut Option<tokio::time::Instant>,
+    now: tokio::time::Instant,
+) -> Option<tokio::time::Instant> {
+    if !terminal {
+        return None;
+    }
+    let until = *deadline.get_or_insert(now + MARKET_TERMINAL_DRAIN);
+    (pending && now < until).then_some(until)
+}
 
 #[derive(Clone)]
 pub struct ConversationApplication {
@@ -3038,14 +3055,26 @@ impl ConversationApplication {
     ) -> Result<(), ChatError> {
         type Observation<'a> =
             std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), ChatError>> + Send + 'a>>;
-        let mut observations: Vec<(Uuid, Observation<'_>)> = Vec::new();
+        let mut observations: Vec<(Uuid, Uuid, Observation<'_>)> = Vec::new();
         let mut dispatch = Box::pin(self.dispatch_while_observing(sink));
         loop {
             for session_id in pending_sessions.drain(..) {
-                if !observations.iter().any(|(id, _)| *id == session_id) {
+                let context = match self.database.active_turn_context(session_id).await {
+                    Ok(context) => context,
+                    Err(ChatError::NotFound) => continue,
+                    Err(error) => {
+                        let _ = dispatch.await;
+                        return Err(error);
+                    }
+                };
+                if !observations
+                    .iter()
+                    .any(|(id, turn, _)| *id == session_id && *turn == context.turn_id)
+                {
                     observations.push((
                         session_id,
-                        Box::pin(self.stream_native_conversation(session_id, sink, false)),
+                        context.turn_id,
+                        Box::pin(self.stream_native_turn(context, sink, false)),
                     ));
                 }
             }
@@ -3060,7 +3089,7 @@ impl ConversationApplication {
                 continue;
             }
             let completed = std::future::poll_fn(|cx| {
-                for (index, (_, observation)) in observations.iter_mut().enumerate() {
+                for (index, (_, _, observation)) in observations.iter_mut().enumerate() {
                     if let std::task::Poll::Ready(result) = observation.as_mut().poll(cx) {
                         return std::task::Poll::Ready((index, result));
                     }
@@ -3121,8 +3150,19 @@ impl ConversationApplication {
         sink: &dyn TurnProjectionSink,
         dispatch_background: bool,
     ) -> Result<(), ChatError> {
-        use super::native_conversation::NativeDisplayBuffer;
         let context = self.database.active_turn_context(session_id).await?;
+        self.stream_native_turn(context, sink, dispatch_background)
+            .await
+    }
+
+    async fn stream_native_turn(
+        &self,
+        context: ActiveTurnContext,
+        sink: &dyn TurnProjectionSink,
+        dispatch_background: bool,
+    ) -> Result<(), ChatError> {
+        use super::native_conversation::NativeDisplayBuffer;
+        let session_id = context.session_id;
         let saved = self
             .database
             .native_views(session_id, vec![context.turn_id])
@@ -3216,52 +3256,59 @@ impl ConversationApplication {
             }
         }
         verify_draft_observation().await?;
-        let mut stream = match host
-            .open_native_event_stream(context.agent_session_id, cursor)
-            .await
-        {
-            Ok(stream) => stream,
-            Err(error)
-                if matches!(
-                    error.code(),
-                    Some(HostErrorCode::EventStreamChanged | HostErrorCode::EventReplayUnavailable)
-                ) =>
+        let mut stream = Some(
+            match host
+                .open_native_event_stream(context.agent_session_id, cursor)
+                .await
             {
-                // Native history is a separate source, never merged by Item ID
-                // with the observed display copy. No turn submission is retried.
-                if error.code() == Some(HostErrorCode::EventStreamChanged) {
-                    if let Ok(snapshot) = host.read_native_thread(context.agent_session_id).await {
-                        let views = self
-                            .database
-                            .native_recovery_views(
-                                session_id,
-                                vec![context.turn_id],
-                                Some(Arc::new(snapshot)),
-                                true,
-                            )
-                            .await?;
-                        if let Some(view) = views
-                            .into_iter()
-                            .find(|v| v.turn_id == context.turn_id.to_string())
+                Ok(stream) => stream,
+                Err(error)
+                    if matches!(
+                        error.code(),
+                        Some(
+                            HostErrorCode::EventStreamChanged
+                                | HostErrorCode::EventReplayUnavailable
+                        )
+                    ) =>
+                {
+                    // Native history is a separate source, never merged by Item ID
+                    // with the observed display copy. No turn submission is retried.
+                    if error.code() == Some(HostErrorCode::EventStreamChanged) {
+                        if let Ok(snapshot) =
+                            host.read_native_thread(context.agent_session_id).await
                         {
-                            let ended = view.status_source.as_deref() == Some("runtime_read")
-                                && view.status.as_deref().is_some_and(|s| {
-                                    matches!(s, "completed" | "failed" | "interrupted")
-                                });
-                            sink.publish_native(view.clone())?;
-                            if ended {
-                                return Ok(());
+                            let views = self
+                                .database
+                                .native_recovery_views(
+                                    session_id,
+                                    vec![context.turn_id],
+                                    Some(Arc::new(snapshot)),
+                                    true,
+                                )
+                                .await?;
+                            if let Some(view) = views
+                                .into_iter()
+                                .find(|v| v.turn_id == context.turn_id.to_string())
+                            {
+                                let ended = view.status_source.as_deref() == Some("runtime_read")
+                                    && view.status.as_deref().is_some_and(|s| {
+                                        matches!(s, "completed" | "failed" | "interrupted")
+                                    });
+                                sink.publish_native(view.clone())?;
+                                if ended {
+                                    return Ok(());
+                                }
                             }
                         }
                     }
+                    buffer.mark_unavailable("stream_changed");
+                    host.open_native_event_stream(context.agent_session_id, None)
+                        .await
+                        .map_err(map_host_error)?
                 }
-                buffer.mark_unavailable("stream_changed");
-                host.open_native_event_stream(context.agent_session_id, None)
-                    .await
-                    .map_err(map_host_error)?
-            }
-            Err(error) => return Err(map_host_error(error)),
-        };
+                Err(error) => return Err(map_host_error(error)),
+            },
+        );
         // Artifact transport remains owned by FEAT-128. No ordinary v3 event
         // enters the native conversation display buffer or changes its result.
         let mut artifacts = if self.artifact_transfers.is_some() {
@@ -3289,6 +3336,7 @@ impl ConversationApplication {
         flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut dispatch = tokio::time::interval(PROGRESS_FLUSH_INTERVAL);
         dispatch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut market_deadline = None;
         loop {
             if self.stopping()
                 || matches!(
@@ -3304,7 +3352,18 @@ impl ConversationApplication {
                 }
                 return Ok(());
             }
-            if buffer.view.terminal_observed && artifact_delivery_done {
+            let drain_until = market_terminal_deadline(
+                buffer.view.terminal_observed,
+                buffer.has_pending_market_items(),
+                &mut market_deadline,
+                tokio::time::Instant::now(),
+            );
+            if buffer.view.terminal_observed && drain_until.is_none() {
+                // A disabled select branch still owns its response/socket.
+                // Release Native independently of the artifact stream.
+                stream = None;
+            }
+            if stream.is_none() && artifact_delivery_done {
                 return Ok(());
             }
             tokio::select! {
@@ -3320,9 +3379,20 @@ impl ConversationApplication {
                         }
                     }
                 }
-                value=stream.next_stream_event(),if !buffer.view.terminal_observed=>{
+                _=async {if let Some(until)=drain_until {tokio::time::sleep_until(until).await}},if stream.is_some() && drain_until.is_some()=>{}
+                value=async {match stream.as_mut(){Some(stream)=>stream.next_stream_event().await,None=>std::future::pending().await}},if stream.is_some()=>{
                     let event=match value {
                         Ok(Some(HostStreamEvent::Native(event)))=>event,
+                        Ok(None) if buffer.view.terminal_observed=>{
+                            // A normally closed, already-ended turn cannot cancel
+                            // another turn's observer or manufacture an MCP result.
+                            stream=None;
+                            if buffer.has_pending_market_items(){
+                                buffer.mark_unavailable("native_stream_unavailable");
+                                self.flush_native_buffer(&mut buffer,None,sink).await?;
+                            }
+                            continue;
+                        },
                         _=>{
                             buffer.mark_unavailable("native_stream_unavailable");
                             self.flush_native_buffer(&mut buffer,None,sink).await?;
@@ -3338,6 +3408,9 @@ impl ConversationApplication {
                         },
                         Ok(true)=>{}
                     }
+                    // Anchor before awaiting SQL/IPC, even when the pending-item
+                    // display is temporarily empty. Later events cannot renew it.
+                    let _=market_terminal_deadline(buffer.view.terminal_observed,buffer.has_pending_market_items(),&mut market_deadline,tokio::time::Instant::now());
                     dirty+=1;
                     // Native snapshots/plans/terminals are facts and commit immediately.
                     // Deltas only modify this disposable display copy, flushed at 50 ms/16 events.
@@ -3351,7 +3424,7 @@ impl ConversationApplication {
                 value=async {match artifacts.as_mut(){Some(stream)=>stream.next_stream_event().await,None=>std::future::pending().await}},if !artifact_delivery_done=>{
                     match value {
                         Ok(Some(HostStreamEvent::Ordinary(event)))=>{
-                            if event.turn_id==Some(context.runtime_turn_id)&&event.event_type=="turn.completed"{artifact_delivery_done=true}
+                            if event.turn_id==Some(context.runtime_turn_id)&&event.event_type=="turn.completed"{artifact_delivery_done=true;artifacts=None}
                         }
                         Ok(Some(HostStreamEvent::Artifact(envelope)))=>{
                             if envelope.turn_id!=context.runtime_turn_id||envelope.cursor.sequence<=artifact_sequence{continue}
@@ -3453,6 +3526,65 @@ fn unix_seconds() -> Result<i64, ChatError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn market_terminal_drain_is_bounded_and_duplicate_events_never_extend_it() {
+        let now = tokio::time::Instant::now();
+        let mut deadline = None;
+        assert_eq!(
+            market_terminal_deadline(false, true, &mut deadline, now),
+            None
+        );
+        assert_eq!(
+            market_terminal_deadline(true, false, &mut deadline, now),
+            None
+        );
+        assert_eq!(deadline, Some(now + MARKET_TERMINAL_DRAIN));
+        let until = now + MARKET_TERMINAL_DRAIN;
+        assert_eq!(
+            market_terminal_deadline(true, true, &mut deadline, now),
+            Some(until)
+        );
+        assert_eq!(
+            market_terminal_deadline(true, true, &mut deadline, now + Duration::from_secs(30)),
+            Some(until)
+        );
+        assert_eq!(
+            market_terminal_deadline(true, false, &mut deadline, now + Duration::from_secs(31)),
+            None
+        );
+        assert_eq!(
+            market_terminal_deadline(true, true, &mut deadline, until),
+            None
+        );
+        assert_eq!(deadline, Some(until));
+    }
+    #[test]
+    fn market_terminal_deadline_is_anchored_before_pending_items_or_io() {
+        let first_terminal = tokio::time::Instant::now();
+        let mut deadline = None;
+        assert_eq!(
+            market_terminal_deadline(true, false, &mut deadline, first_terminal),
+            None
+        );
+        assert_eq!(
+            market_terminal_deadline(
+                true,
+                true,
+                &mut deadline,
+                first_terminal + Duration::from_secs(40)
+            ),
+            Some(first_terminal + MARKET_TERMINAL_DRAIN)
+        );
+        assert_eq!(
+            market_terminal_deadline(
+                true,
+                true,
+                &mut deadline,
+                first_terminal + MARKET_TERMINAL_DRAIN
+            ),
+            None
+        );
+    }
     #[cfg(target_os = "macos")]
     use crate::chat::keychain::{DatabaseKey, DatabaseKeyStore, ReceiptKey, ReceiptKeyStore};
     #[cfg(target_os = "macos")]
@@ -5194,6 +5326,351 @@ mod tests {
             drop(database);
             fs::remove_dir_all(root).unwrap();
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn market_terminal_releases_native_and_artifact_streams_independently() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa6";
+        for mode in ["complete", "eof", "stop"] {
+            let (root, database, pending, _, _) =
+                prepare_v2_turn_outbox("market-stream-release").await;
+            database
+                .accept_native_turn(pending.turn_operation_id, Uuid::now_v7(), NONCE.into())
+                .await
+                .unwrap();
+            let context = database
+                .active_turn_context(pending.session_id)
+                .await
+                .unwrap();
+            let stream_id = Uuid::now_v7();
+            let frame = |sequence, method, value: serde_json::Value| {
+                let mut n = serde_json::json!({"source":"runtime_notification","method":method,"threadId":context.codex_thread_id,"turnId":context.runtime_turn_id,"availability":"available"});
+                for (key, value) in value.as_object().unwrap() {
+                    n[key] = value.clone();
+                }
+                let event = serde_json::json!({"schema_version":13,"event_id":Uuid::now_v7(),"stream_id":stream_id,"sequence":sequence,"occurred_at":"2026-11-17T06:00:00Z","task_id":context.task_id,"agent_session_id":context.agent_session_id,"codex_thread_id":context.codex_thread_id,"turn_id":context.runtime_turn_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":n}});
+                format!("id: {stream_id}:{sequence}\nevent: native.notification\ndata: {event}\n\n")
+            };
+            let item = |status| serde_json::json!({"item":{"id":"pending-local-tool","type":"mcpToolCall","status":status,"availability":"partial","mcp":{"server":"yijie_market","tool":"sample","resultKind":"omitted","texts":[],"diagnostics":[]}}});
+            let mut native_body = frame(
+                1,
+                "turn/started",
+                serde_json::json!({"turn":{"id":context.runtime_turn_id,"status":"inProgress","items":[],"itemsComplete":false}}),
+            ) + &frame(2, "item/started", item("inProgress"))
+                + &frame(
+                    3,
+                    "turn/completed",
+                    serde_json::json!({"turn":{"id":context.runtime_turn_id,"status":"interrupted","items":[],"itemsComplete":false}}),
+                );
+            if mode == "complete" {
+                native_body.push_str(&frame(4, "item/completed", item("failed")));
+            }
+            use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+            let token_directory = root.join("host");
+            fs::DirBuilder::new()
+                .mode(0o700)
+                .create(&token_directory)
+                .unwrap();
+            let token_path = token_directory.join("api-token");
+            {
+                use std::io::Write;
+                let mut file = fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(&token_path)
+                    .unwrap();
+                file.write_all(b"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")
+                    .unwrap();
+            }
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let server = tokio::spawn(async move {
+                async fn chunk(
+                    stream: &mut tokio::net::TcpStream,
+                    body: &str,
+                ) -> std::io::Result<()> {
+                    stream
+                        .write_all(format!("{:x}\r\n{}\r\n", body.len(), body).as_bytes())
+                        .await
+                }
+                let mut native = None;
+                let mut artifact = None;
+                while native.is_none() || artifact.is_none() {
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    let request = read_request(&mut stream).await;
+                    if request.starts_with("GET /readyz ") {
+                        stream
+                            .write_all(ready_response(NONCE).as_bytes())
+                            .await
+                            .unwrap();
+                        stream.shutdown().await.unwrap();
+                        continue;
+                    }
+                    let is_native = request.starts_with("GET /v13/");
+                    let version = request
+                        .split_whitespace()
+                        .nth(1)
+                        .unwrap()
+                        .split('/')
+                        .nth(1)
+                        .unwrap()
+                        .trim_start_matches('v');
+                    let id = if is_native { stream_id } else { Uuid::now_v7() };
+                    stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nX-Accel-Buffering: no\r\nX-Yijie-Event-Schema-Version: {version}\r\nX-Yijie-Event-Stream-ID: {id}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+                    chunk(&mut stream, ": heartbeat\n\n").await.unwrap();
+                    if is_native {
+                        native = Some(stream)
+                    } else {
+                        artifact = Some(stream)
+                    }
+                }
+                let mut native = native.unwrap();
+                let mut artifact = artifact.unwrap();
+                chunk(&mut native, &native_body).await.unwrap();
+                if mode == "eof" {
+                    native.write_all(b"0\r\n\r\n").await.unwrap();
+                }
+                let mut heartbeat = tokio::time::interval(Duration::from_millis(20));
+                let mut byte = [0u8; 1];
+                let closed=tokio::time::timeout(Duration::from_secs(2),async {
+                    loop {tokio::select! {
+                        value=native.read(&mut byte)=>return matches!(value,Ok(0)),
+                        _=heartbeat.tick()=>{let _=chunk(&mut artifact,": heartbeat\n\n").await;}
+                    }}
+                }).await.unwrap_or(false);
+                let artifact_closed = matches!(
+                    tokio::time::timeout(Duration::from_millis(40), artifact.read(&mut byte)).await,
+                    Ok(Ok(0))
+                );
+                // Finish both normal responses even if a regression retained a
+                // socket. No process signals or broken protocol are used.
+                let _ = artifact.write_all(b"0\r\n\r\n").await;
+                let _ = artifact.shutdown().await;
+                if mode != "eof" {
+                    let _ = native.write_all(b"0\r\n\r\n").await;
+                }
+                let _ = native.shutdown().await;
+                (closed, artifact_closed)
+            });
+            let host = Arc::new(
+                HostBridge::from_connection(HostConnection {
+                    port,
+                    token_path,
+                    instance_nonce: NONCE.into(),
+                })
+                .unwrap(),
+            );
+            let mut application = ConversationApplication::new(
+                database.clone(),
+                host.clone(),
+                Arc::new(FixedPublicTaskControlPlane::new([])),
+            );
+            application.artifact_transfers =
+                Some(ArtifactTransferService::new(host, database.clone()));
+            let (terminal_tx, terminal_rx) = tokio::sync::oneshot::channel();
+            struct Sink(std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>);
+            impl TurnProjectionSink for Sink {
+                fn publish(&self, _: LiveTurnProjection) -> Result<(), ChatError> {
+                    Ok(())
+                }
+                fn publish_native(
+                    &self,
+                    view: super::super::native_conversation_generated::NativeConversationView,
+                ) -> Result<(), ChatError> {
+                    if view.terminal_observed {
+                        if let Some(tx) = self.0.lock().unwrap().take() {
+                            let _ = tx.send(());
+                        }
+                    }
+                    Ok(())
+                }
+            }
+            let sink = Sink(std::sync::Mutex::new(Some(terminal_tx)));
+            let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+            let worker = application.clone();
+            let task = tokio::spawn(async move {
+                let result = worker.stream_native_turn(context, &sink, false).await;
+                let _ = done_tx.send(result);
+            });
+            let (stop, _receiver) = watch::channel(false);
+            let mut coordinator = ConversationCoordinator {
+                lifecycle: application.lifecycle.clone(),
+                stop,
+                stopping: application.coordinator_stopping.clone(),
+                task: Some(task),
+            };
+            terminal_rx.await.unwrap();
+            if mode == "stop" {
+                coordinator.request_stop();
+            }
+            let result = done_rx.await.unwrap();
+            coordinator.wait_stopped().await.unwrap();
+            let (closed, artifact_closed) = server.await.unwrap();
+            result.unwrap();
+            assert!(closed, "native stream remained open in {mode}");
+            assert_eq!(
+                artifact_closed,
+                mode == "stop",
+                "artifact ownership changed in {mode}"
+            );
+            let views = database
+                .native_views(pending.session_id, vec![pending.turn_id])
+                .await
+                .unwrap();
+            assert_eq!(views[0].status.as_deref(), Some("interrupted"));
+            assert_eq!(
+                views[0].items[0].last_method,
+                if mode == "complete" {
+                    "item/completed"
+                } else {
+                    "item/started"
+                }
+            );
+            drop(application);
+            drop(database);
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn market_terminal_sse_retains_late_item_without_replaying_execution() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa6";
+        let (root, database, pending, _, _) =
+            prepare_v2_turn_outbox("market-late-native-item").await;
+        database
+            .accept_native_turn(pending.turn_operation_id, Uuid::now_v7(), NONCE.into())
+            .await
+            .unwrap();
+        let context = database
+            .active_turn_context(pending.session_id)
+            .await
+            .unwrap();
+        let stream_id = Uuid::now_v7();
+        let frame = |sequence, method, value: serde_json::Value| {
+            let mut native = serde_json::json!({"source":"runtime_notification","method":method,"threadId":context.codex_thread_id,"turnId":context.runtime_turn_id,"availability":"available"});
+            for (key, value) in value.as_object().unwrap() {
+                native[key] = value.clone();
+            }
+            let event = serde_json::json!({"schema_version":13,"event_id":Uuid::now_v7(),"stream_id":stream_id,"sequence":sequence,"occurred_at":"2026-11-17T04:30:00Z","task_id":context.task_id,"agent_session_id":context.agent_session_id,"codex_thread_id":context.codex_thread_id,"turn_id":context.runtime_turn_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":native}});
+            format!("id: {stream_id}:{sequence}\nevent: native.notification\ndata: {event}\n\n")
+        };
+        let tool = |status: &str| serde_json::json!({"item":{"id":"ordinary-market-item","type":"mcpToolCall","status":status,"availability":"available","mcp":{"server":"yijie_market","tool":"sample","resultKind":if status=="failed" {"text"} else {"omitted"},"texts":if status=="failed" {serde_json::json!([{"index":0,"text":"普通取消结果：执行结果未确认。"}])} else {serde_json::json!([])},"diagnostics":[]}}});
+        let early = frame(
+            1,
+            "turn/started",
+            serde_json::json!({"turn":{"id":context.runtime_turn_id,"status":"inProgress","items":[],"itemsComplete":false}}),
+        ) + &frame(2, "item/started", tool("inProgress"))
+            + &frame(
+                3,
+                "turn/completed",
+                serde_json::json!({"turn":{"id":context.runtime_turn_id,"status":"interrupted","items":[],"itemsComplete":false}}),
+            );
+        let late = frame(4, "item/completed", tool("failed"));
+        let token_directory = root.join("host");
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&token_directory)
+            .unwrap();
+        let token_path = token_directory.join("api-token");
+        {
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&token_path)
+                .unwrap();
+            file.write_all(b"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")
+                .unwrap();
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (terminal_seen, terminal_ready) = tokio::sync::oneshot::channel();
+        struct Sink(std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>);
+        impl TurnProjectionSink for Sink {
+            fn publish(&self, _: LiveTurnProjection) -> Result<(), ChatError> {
+                Ok(())
+            }
+            fn publish_native(
+                &self,
+                view: super::super::native_conversation_generated::NativeConversationView,
+            ) -> Result<(), ChatError> {
+                if view.terminal_observed {
+                    if let Some(sender) = self.0.lock().unwrap().take() {
+                        let _ = sender.send(());
+                    }
+                }
+                Ok(())
+            }
+        }
+        let sink = Sink(std::sync::Mutex::new(Some(terminal_seen)));
+        let server = tokio::spawn(async move {
+            let (mut readiness, _) = listener.accept().await.unwrap();
+            assert!(read_request(&mut readiness)
+                .await
+                .starts_with("GET /readyz "));
+            readiness
+                .write_all(ready_response(NONCE).as_bytes())
+                .await
+                .unwrap();
+            readiness.shutdown().await.unwrap();
+            let (mut stream, _) = listener.accept().await.unwrap();
+            assert!(read_request(&mut stream)
+                .await
+                .starts_with("GET /v13/agent-sessions/"));
+            let headers = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nX-Accel-Buffering: no\r\nX-Yijie-Event-Schema-Version: 13\r\nX-Yijie-Event-Stream-ID: {stream_id}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",early.len()+late.len());
+            stream
+                .write_all(format!("{headers}{early}").as_bytes())
+                .await
+                .unwrap();
+            let observed_terminal = terminal_ready.await.is_ok();
+            // Normal protocol ordering: only send the Item after Native has
+            // published the turn terminal. No transport failure is injected.
+            let delivered = stream.write_all(late.as_bytes()).await.is_ok();
+            let _ = stream.shutdown().await;
+            (observed_terminal, delivered)
+        });
+        let application = ConversationApplication::new(
+            database.clone(),
+            Arc::new(
+                HostBridge::from_connection(HostConnection {
+                    port,
+                    token_path,
+                    instance_nonce: NONCE.into(),
+                })
+                .unwrap(),
+            ),
+            Arc::new(FixedPublicTaskControlPlane::new([])),
+        );
+        let result = application.stream_native_turn(context, &sink, false).await;
+        drop(sink);
+        let delivery = server.await.unwrap();
+        result.unwrap();
+        assert_eq!(delivery, (true, true));
+        let views = database
+            .native_views(pending.session_id, vec![pending.turn_id])
+            .await
+            .unwrap();
+        assert!(views[0].terminal_observed);
+        assert_eq!(views[0].status.as_deref(), Some("interrupted"));
+        assert_eq!(views[0].items[0].last_method, "item/completed");
+        assert_eq!(views[0].items[0].item.status.as_deref(), Some("failed"));
+        assert_eq!(views[0].cursor.as_ref().unwrap().sequence, "4");
+        assert_eq!(
+            database
+                .outbox_state(pending.turn_operation_id)
+                .await
+                .unwrap(),
+            super::super::database::OutboxState::Done
+        );
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(target_os = "macos")]

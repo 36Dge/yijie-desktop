@@ -59,7 +59,10 @@ export function useMarketChat(context: () => string | null, session: () => strin
         try {
           const next = await client.observe(contextId, sessionId, undefined, requestedMode);
           if (!current()) continue;
-          const tools = requestedMode === "none" && next.tools === undefined ? observation.value?.tools : next.tools;
+          const previousTools = observation.value?.tools;
+          const sameKnownTurn = next.availableTurns === undefined
+            || next.availableTurns[0]?.nativeTurnId === previousTools?.nativeTurnId;
+          const tools = requestedMode === "none" && next.tools === undefined && next.managed && sameKnownTurn ? previousTools : next.tools;
           observation.value = { ...next, ...(tools ? { tools } : {}) };
           connected.value = !next.remoteIssue && (!next.managed || next.approvals !== undefined);
           error.value = next.remoteIssue ? marketChatErrorMessage(new MarketChatError(next.remoteIssue)) : null;
@@ -79,6 +82,7 @@ export function useMarketChat(context: () => string | null, session: () => strin
           rememberUncertain(sessionId);
           if (uncertain.value.size) error.value = "批准结果待确认。已保留原决定，请刷新核对；当前不会再次发送决定。";
           if (recovering && connected.value && next.managed && requestedMode === "none" && next.tools === undefined) queuedRead = "history";
+          if (requestedMode === "events") await refreshSelectedEvents(current);
         } catch (failure) {
           if (!current()) continue;
           connected.value = false; error.value = marketChatErrorMessage(failure);
@@ -99,6 +103,24 @@ export function useMarketChat(context: () => string | null, session: () => strin
   function rememberUncertain(sessionId: string): void {
     if (uncertain.value.size) uncertainBySession.set(sessionId, uncertain.value);
     else uncertainBySession.delete(sessionId);
+  }
+  async function refreshSelectedEvents(stillCurrent: () => boolean): Promise<void> {
+    const contextId = context(), sessionId = session(), turnId = selectedTurnId.value;
+    if (!stillCurrent() || !contextId || !sessionId || !turnId) return;
+    const generation = epoch;
+    const revision = ++historyRevision;
+    const current = () => !disposed && generation === epoch && context() === contextId && session() === sessionId
+      && historyRevision === revision && selectedTurnId.value === turnId;
+    historyRefreshing.value = true;
+    try {
+      // Share the existing coalesced read queue. Historical tools never supply
+      // the live approval list, and a later selection invalidates this response.
+      const next = await client.observe(contextId, sessionId, turnId, "events");
+      if (!current()) return;
+      historyObservation.value = next;
+      historyError.value = next.tools ? null : "当前无法读取此轮的工具结果，已保留历史选择；可稍后刷新。";
+    } catch (failure) { if (current()) historyError.value = marketChatErrorMessage(failure); }
+    finally { if (current()) historyRefreshing.value = false; }
   }
   async function selectTurn(turnId: string | null): Promise<void> {
     const contextId = context(), sessionId = session(), generation = epoch;
@@ -150,7 +172,16 @@ export function useMarketChat(context: () => string | null, session: () => strin
   }, { immediate: true, flush: "sync" });
   watch(running, (active, previous) => {
     if (active && !previous) void refresh("none");
-    else if (!active && previous) void refresh(nativeRevision ? "events" : "history");
+    else if (!active && previous) {
+      const generation = epoch;
+      void refresh(nativeRevision ? "events" : "history").then(() => {
+        // Cancellation can end the stream before its last MCP event reaches
+        // the cache. Reconcile unfinished items once from native history;
+        // never turn this into idle polling or infer a terminal result.
+        if (nativeRevision && !disposed && generation === epoch && !running()
+          && tools.value.some(item => item.state === "in_progress")) void refresh("history");
+      });
+    }
   });
   if (nativeRevision) watch(nativeRevision, (value, previous) => {
     if (value !== undefined && value !== previous) void refresh("events");

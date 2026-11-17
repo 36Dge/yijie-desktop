@@ -2959,6 +2959,27 @@ describe("chat view-model store", () => {
     expect(store.canSend).toBe(false);
   });
 
+  it("uses late native item snapshots without rereading an already terminal thread", async () => {
+    const resyncSession = vi.fn<ChatClient["resyncSession"]>(async () => ({...projection(SESSION_A),history:artifactHistory()}));
+    let saved: NativeConversationViewEvent["view"] = {sessionId:SESSION_A,turnId:TURN_A,
+      runtimeThreadId:"runtime-thread",runtimeTurnId:"runtime-turn",source:"native_observed",revision:"1",
+      availability:"available",status:"inProgress",statusSource:"runtime_notification",terminalObserved:false,items:[]};
+    const {client, emitNative} = fakeClient({resyncSession,
+      loadNativeHistory:async()=>({views:[saved],submissions:[],remainingTurnIds:[],historyAvailability:"partial"})});
+    const store=createStore(client); await store.bind(TENANT); await store.selectSession(SESSION_A);
+    const send = () => emitNative({schemaVersion:6, contextId:CONTEXT, sessionId:SESSION_A,
+      subscriptionId:"019c1a00-0000-7000-8000-00000000000a",view:saved});
+    const initialReads = resyncSession.mock.calls.length;
+    saved={...saved,revision:"2",status:"interrupted",terminalObserved:true}; send();
+    await vi.waitFor(()=>expect(resyncSession).toHaveBeenCalledTimes(initialReads+1));
+    for(let i=0;i<32;i++) await Promise.resolve();
+    saved={...saved,revision:"3",items:[{ordinal:0,lastMethod:"item/completed",item:{id:"late-market-item",type:"mcpToolCall",status:"failed",availability:"partial",mcp:{server:"yijie_market",tool:"sample",resultKind:"omitted",texts:[],diagnostics:[]}}}]}; send();
+    for(let i=0;i<32;i++) await Promise.resolve();
+    expect(resyncSession).toHaveBeenCalledTimes(initialReads+1);
+    expect(store.marketNativeRevision).toContain('"late-market-item","item/completed","failed"');
+    expect(store.liveTurnStatus).toBe("interrupted");
+  });
+
   it("ignores an accepted submit response after selecting B without clearing B's draft", async () => {
     const delayedSubmit = new Deferred<Awaited<ReturnType<ChatClient["submitTurn"]>>>();
     let submitOperationId: string | null = null;

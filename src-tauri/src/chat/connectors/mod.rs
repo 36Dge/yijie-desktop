@@ -4,6 +4,7 @@ pub(crate) mod broker_generated;
 pub(crate) mod control;
 pub(crate) mod dispatch;
 pub(crate) mod initial_host_turn;
+pub(crate) mod local_acceptance;
 #[allow(dead_code)]
 pub(crate) mod submission_rejection_generated;
 #[allow(dead_code)]
@@ -51,10 +52,13 @@ struct Catalog {
 fn catalog() -> &'static Catalog {
     static CATALOG: OnceLock<Catalog> = OnceLock::new();
     CATALOG.get_or_init(|| {
-        let value: Catalog =
+        let mut value: Catalog =
             serde_json::from_str(include_str!("../../../../contracts/market-catalog.json"))
                 .expect("validated Connectors catalog");
         assert_eq!(value.catalog.len(), 61);
+        if local_acceptance::enabled() {
+            value.catalog = vec![serde_json::from_value(local_acceptance::profile()["catalogEntry"].clone()).expect("canonical local catalog entry")];
+        }
         value
     })
 }
@@ -73,7 +77,7 @@ fn supports_provider(service: &str) -> bool {
     })
 }
 fn keyless_provider(service: &str) -> bool {
-    service == "shopify"
+    (service == "shopify" || local_acceptance::enabled() && service == local_acceptance::service_id())
         && catalog()
             .catalog
             .iter()

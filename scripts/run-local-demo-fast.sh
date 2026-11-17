@@ -246,6 +246,13 @@ if [[ "$development_app" == "true" ]]; then
   python3 -B "$desktop_root/scripts/development-client.py" check
   daily_bound_host_home="$desktop_root/.local/demo-fast/host-home"
   daily_bound_codex_home="$desktop_root/.local/demo-fast/codex-home"
+  if [[ -n "${YIJIE_MARKET_LOCAL_ACCEPTANCE:-}" ]]; then
+    [[ "$development_ui_bundle" == true && -z "${YIJIE_FEAT174_ACCEPTANCE:-}" && "$YIJIE_MARKET_LOCAL_ACCEPTANCE" =~ ^[a-z0-9][a-z0-9-]{0,47}$ ]] || fail "invalid local market acceptance selector"
+    daily_bound_host_home="$desktop_root/.local/market-local-acceptance/$YIJIE_MARKET_LOCAL_ACCEPTANCE/host-home"
+    daily_bound_codex_home="$desktop_root/.local/market-local-acceptance/$YIJIE_MARKET_LOCAL_ACCEPTANCE/codex-home"
+    [[ -d "$daily_bound_host_home" && -d "$daily_bound_codex_home" && ! -L "$daily_bound_host_home" && ! -L "$daily_bound_codex_home" ]] || fail "local market acceptance roots unavailable"
+    export YIJIE_BUILTIN_WEB_ENABLED=false
+  fi
   if [[ -n "${YIJIE_FEAT174_ACCEPTANCE:-}" ]]; then
     [[ "$development_ui_bundle" == true && "$YIJIE_FEAT174_NATIVE_SKILLS" == true && "$YIJIE_FEAT174_ACCEPTANCE" =~ ^[a-z0-9][a-z0-9-]{0,47}$ ]] || fail "invalid Skill acceptance selector"
     daily_bound_host_home="$desktop_root/.local/skill-market-acceptance/$YIJIE_FEAT174_ACCEPTANCE/host-home"
