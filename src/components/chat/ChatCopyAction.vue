@@ -10,7 +10,7 @@ type CopyOutcome = "idle" | "pending" | "success" | "error";
 const props = withDefaults(defineProps<{
   adapter: ChatClipboardAdapter;
   text: string;
-  kind?: "text" | "code";
+  kind?: "text" | "code" | "user-message";
   compact?: boolean;
 }>(), {
   kind: "text",
@@ -85,7 +85,8 @@ async function copy(): Promise<void> {
     class="chat-copy-action"
     :class="`chat-copy-action--${outcome}`"
   >
-    <ChatActionButton v-if="compact" label="复制" :tooltip="feedback || '复制'"
+    <ChatActionButton v-if="compact || kind === 'user-message'"
+      :label="compact ? '复制' : actionLabel" :tooltip="compact && feedback ? feedback : undefined"
       :icon="outcome === 'success' ? 'checkmark' : icon" :error="outcome === 'error'"
       :busy="outcome === 'pending'" :disabled="unavailable" preserve-selection @click="copy" />
     <YjTooltip v-else :text="actionLabel"><button

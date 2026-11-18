@@ -22,6 +22,7 @@ import type { ChatTimelineDisclosureChange } from "./ChatTimelineItemShell.vue";
 const props = withDefaults(defineProps<{
   timeline: ConversationTimelineViewModel;
   turnTimingLabels?: Readonly<Record<string, string | null>>;
+  deliveredArtifactTurnIds?: ReadonlySet<string>;
   skillCatalog?: readonly SelectedChatSkill[];
   connectorNamesByTurn?: Readonly<Record<string, readonly string[]>>;
   canDecideApprovals?: boolean;
@@ -29,6 +30,7 @@ const props = withDefaults(defineProps<{
   approvalTransients?: Readonly<Record<string, ChatApprovalTransientState | undefined>>;
 }>(), {
   turnTimingLabels: () => ({}),
+  deliveredArtifactTurnIds: () => new Set<string>(),
   skillCatalog: () => Object.freeze([]),
   connectorNamesByTurn: () => Object.freeze({}),
   canDecideApprovals: false,
@@ -184,6 +186,7 @@ function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): strin
           :skill-catalog="skillCatalog"
           :position="index + 1"
           :timing-label="turnTimingLabels[turn.turnId] ?? null"
+          :has-delivered-artifact="deliveredArtifactTurnIds.has(turn.turnId)"
           :connector-names="turn.source === 'native_observed' || turn.source === 'native_rebuilt' ? connectorNamesByTurn[turn.turnId] ?? [] : []"
           :can-decide-approvals="canDecideApprovals"
           :approval-authority-revision="approvalAuthorityRevision"
@@ -343,10 +346,6 @@ function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): strin
 
 .chat-timeline__turn {
   min-width: 0;
-}
-
-.chat-timeline__turn + .chat-timeline__turn {
-  border-top: var(--yj-border-width) solid var(--yj-color-border-subtle);
 }
 
 @media (max-width: 40rem) {

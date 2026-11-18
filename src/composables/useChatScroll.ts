@@ -1,8 +1,10 @@
-import { computed, nextTick, onBeforeUnmount, ref, watch, type Ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, provide, ref, watch, type InjectionKey, type Ref } from "vue";
 import {
   CHAT_BOTTOM_BUTTON_THRESHOLD_PX,
   CHAT_FOLLOW_THRESHOLD_PX,
 } from "../domain/chat-ui";
+
+export const holdChatAutoFollowKey: InjectionKey<() => () => void> = Symbol("holdChatAutoFollow");
 
 function distanceFromBottom(element: HTMLElement): number {
   return Math.max(0, element.scrollHeight - element.scrollTop - element.clientHeight);
@@ -15,12 +17,38 @@ export function useChatScroll(scrollElement: Ref<HTMLElement | null>) {
   let mediaQuery: MediaQueryList | null = null;
 
   let frame: number | null = null;
+  const followHolds = new Set<symbol>();
   let reading = false;
   let navigating = false;
   let previousTop = 0;
   let touchY: number | null = null;
+  let submittedAnchor: HTMLElement | null = null;
+  let previousMinHeight = "";
+  function releaseSubmittedAnchor() {
+    if (submittedAnchor) submittedAnchor.style.minHeight = previousMinHeight;
+    submittedAnchor = null;
+  }
+  function sizeSubmittedAnchor() {
+    const element = scrollElement.value;
+    if (!element || !submittedAnchor || !element.contains(submittedAnchor)) return;
+    const style = getComputedStyle(element);
+    const inset = (Number.parseFloat(style.scrollPaddingTop) || 0) + (Number.parseFloat(style.scrollPaddingBottom) || 0);
+    submittedAnchor.style.minHeight = `${Math.max(0, element.clientHeight - inset)}px`;
+  }
   function cancelFrame() { if (frame !== null) cancelAnimationFrame(frame); frame = null; }
   function pauseFollowing() { navigating = false; reading = true; following.value = false; cancelFrame(); }
+  provide(holdChatAutoFollowKey, () => {
+    const element = scrollElement.value;
+    const hold = Symbol();
+    followHolds.add(hold);
+    cancelFrame();
+    return () => {
+      if (!followHolds.delete(hold) || followHolds.size || !element || element !== scrollElement.value) return;
+      previousTop = element.scrollTop;
+      update();
+      if (bottomDistance.value > CHAT_FOLLOW_THRESHOLD_PX) pauseFollowing();
+    };
+  });
   function selectionActive() {
     const selection = document.getSelection();
     return !!selection && !selection.isCollapsed && !!scrollElement.value &&
@@ -30,6 +58,7 @@ export function useChatScroll(scrollElement: Ref<HTMLElement | null>) {
     const element = scrollElement.value;
     if (!element) return;
     bottomDistance.value = distanceFromBottom(element);
+    if (followHolds.size) return;
     const moved = Math.abs(element.scrollTop - previousTop) > 0.5;
     if (element.scrollTop < previousTop - 0.5) { reading = true; navigating = false; }
     previousTop = element.scrollTop;
@@ -61,9 +90,9 @@ export function useChatScroll(scrollElement: Ref<HTMLElement | null>) {
   }
 
   async function followNewContent(): Promise<void> {
-    if (!following.value) return;
+    if (!following.value || followHolds.size) return;
     await nextTick();
-    if (!following.value || selectionActive() || frame !== null) return;
+    if (!following.value || followHolds.size || selectionActive() || frame !== null) return;
     frame = requestAnimationFrame(() => {
       frame = null;
       const element = scrollElement.value;
@@ -76,7 +105,7 @@ export function useChatScroll(scrollElement: Ref<HTMLElement | null>) {
     });
   }
 
-  function scrollToAnchor(anchor: HTMLElement): void {
+  function scrollToAnchor(anchor: HTMLElement, focus = true): void {
     const element = scrollElement.value;
     if (!element || !element.contains(anchor)) return;
     pauseFollowing();
@@ -93,7 +122,20 @@ export function useChatScroll(scrollElement: Ref<HTMLElement | null>) {
     element.scrollTop = Math.max(0, Math.min(targetTop, element.scrollHeight - element.clientHeight));
     previousTop = element.scrollTop;
     bottomDistance.value = distanceFromBottom(element);
-    anchor.focus({ preventScroll: true });
+    if (focus) anchor.focus({ preventScroll: true });
+  }
+
+  function scrollToSubmittedTurn(anchor: HTMLElement): void {
+    const element = scrollElement.value;
+    if (!element || !element.contains(anchor)) return;
+    if (submittedAnchor !== anchor) {
+      releaseSubmittedAnchor();
+      submittedAnchor = anchor;
+      previousMinHeight = anchor.style.minHeight;
+    }
+    sizeSubmittedAnchor();
+    scrollToAnchor(anchor, false);
+    reading = false; navigating = false; following.value = true;
   }
 
   async function preservePositionWhile(action: () => Promise<void>): Promise<void> {
@@ -120,6 +162,7 @@ export function useChatScroll(scrollElement: Ref<HTMLElement | null>) {
   function selectionChanged() { if (selectionActive()) cancelFrame(); else progress(); }
   watch(scrollElement, (element, old, onCleanup) => {
     if (element === old) return;
+    releaseSubmittedAnchor();
     cancelFrame(); previousTop = element?.scrollTop ?? 0; reading = false; navigating = false; following.value = true;
     if (!element) return;
     element.addEventListener("chat-content-progress", progress);
@@ -128,7 +171,10 @@ export function useChatScroll(scrollElement: Ref<HTMLElement | null>) {
     element.addEventListener("touchstart", touchStart, { passive: true });
     element.addEventListener("touchmove", touchMove, { passive: true });
     document.addEventListener("selectionchange", selectionChanged);
+    const resize = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => { sizeSubmittedAnchor(); progress(); });
+    resize?.observe(element);
     onCleanup(() => {
+      resize?.disconnect();
       element.removeEventListener("chat-content-progress", progress);
       element.removeEventListener("wheel", wheel);
       element.removeEventListener("keydown", key);
@@ -140,6 +186,7 @@ export function useChatScroll(scrollElement: Ref<HTMLElement | null>) {
 
   onBeforeUnmount(() => {
     cancelFrame();
+    releaseSubmittedAnchor();
     mediaQuery = null;
   });
 
@@ -150,6 +197,7 @@ export function useChatScroll(scrollElement: Ref<HTMLElement | null>) {
     update,
     scrollToBottom,
     scrollToAnchor,
+    scrollToSubmittedTurn,
     followNewContent,
     preservePositionWhile,
   };

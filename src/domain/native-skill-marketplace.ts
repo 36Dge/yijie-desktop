@@ -35,6 +35,9 @@ export function nativeSkillFailureMessage(code: string): string {
     case "runtime_unavailable": return "安装状态尚未同步，服务恢复后请刷新。";
     case "compatibility_mode": return "技能已回退到兼容模式，可以继续使用；恢复原生模式后可继续管理。";
     case "import_format_invalid": return "请选择 ZIP 技能包或名为 SKILL.md 的文件。";
+    case "import_multiple_files": return "每次只能选择一个文件，请重新拖入一个技能包或 SKILL.md。";
+    case "import_file_unavailable": case "import_file_changed": return "无法读取这个文件，请重新选择。";
+    case "skill_import_cancelled": return "本次安装已取消。可重新选择文件后安装。";
     case "import_too_large": return "技能包最多 64 MB，单个 SKILL.md 最多 1 MB。";
     case "import_multiple_skills": return "每次导入一个技能，请拆分后重新选择。";
     case "import_entrypoint_missing": return "技能包中没有找到 SKILL.md，请检查后重新选择。";

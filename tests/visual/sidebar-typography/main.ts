@@ -84,6 +84,15 @@ createApp(defineComponent({setup() {
     { sessionId: "running", title: "路线整理 · 正在输出", latestTurnStatus: "streaming", pinnedAt: null },
     { sessionId: "interrupted", title: "另一条未完成的任务", latestTurnStatus: "interrupted", pinnedAt: null },
   ].map((session, index) => ({ ...session, projectId: null, titleSource: "user", lastActivityAt: 4 - index, projectAvailable: true }));
+  if (new URLSearchParams(location.search).get("workspace-actions") === "1") {
+    chatStore.context = { ...chatStore.context!, allowedActions: ["read_sessions", "read_projects", "create_session", "use_project", "pin_project", "remove_project"] };
+    chatStore.projects = [
+      { projectId: "019c1a00-0000-7000-8000-000000000701", safeName: "易界 temp", available: true, pinnedAt: null, lastUsedAt: 3 },
+      { projectId: "019c1a00-0000-7000-8000-000000000702", safeName: "一条很长的工作空间名称用于检查按钮排列", available: true, pinnedAt: null, lastUsedAt: 2 },
+      { projectId: "019c1a00-0000-7000-8000-000000000703", safeName: "暂不可用的工作空间", available: false, pinnedAt: null, lastUsedAt: 1 },
+    ];
+    chatStore.sessions = chatStore.sessions.map((session, index) => ({ ...session, projectId: chatStore.projects[index % 2]!.projectId }));
+  }
   watch(streaming, value => {
     chatStore.sessions = chatStore.sessions.map(session => session.sessionId === "preview"
       ? { ...session, latestTurnStatus: value ? "streaming" : "completed" }

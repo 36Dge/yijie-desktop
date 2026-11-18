@@ -44,13 +44,14 @@ export const useChatComposerDraftStore = defineStore("chat-composer-drafts", () 
   function expert(target: ChatComposerDraftKey): ExpertDisplay | null { return experts.value[target] ?? null; }
   function setExpert(target: ChatComposerDraftKey, value: ExpertDisplay | null): void { const next = { ...experts.value }; if (value) next[target] = Object.freeze({ ...value }); else { delete next[target]; clearExpertPrompt(target); } experts.value = next; }
   const workspaceId = ref<string | null>(null);
+  const newWorkspaceTask = shallowRef<{ contextId: string; projectId: string } | null>(null);
   const newProfile = ref<ProfileId>(defaultModelProfile);
   const planProfile = ref<ProfileId>(defaultModelProfile);
   let tenant: string | null = null;
 
   function clear(): void {
     expertPrompts.clear();
-    texts.value = createChatComposerDrafts(); selections.value = {}; experts.value = {}; skills.value = {}; workspaceId.value = null;
+    texts.value = createChatComposerDrafts(); selections.value = {}; experts.value = {}; skills.value = {}; workspaceId.value = null; newWorkspaceTask.value = null;
     newProfile.value = defaultModelProfile; planProfile.value = defaultModelProfile;
   }
   function selection(target: ChatComposerDraftKey): readonly SelectionDisplay[] { return selections.value[target] ?? []; }
@@ -75,5 +76,5 @@ export const useChatComposerDraftStore = defineStore("chat-composer-drafts", () 
     else if (phase === "ready" && !permission.hasCapability("connector.use")) selections.value = {};
   }, { immediate: true, flush: "sync" });
 
-  return { texts, experts, expert, setExpert, prefillExpertPrompt, clearExpertPrompt, selections, skills, skillSelection, setSkills, clearSkills, workspaceId, newProfile, planProfile, selection, setSelection, clearSelection, clearTarget, preparePlanDraft, clear };
+  return { texts, experts, expert, setExpert, prefillExpertPrompt, clearExpertPrompt, selections, skills, skillSelection, setSkills, clearSkills, workspaceId, newWorkspaceTask, newProfile, planProfile, selection, setSelection, clearSelection, clearTarget, preparePlanDraft, clear };
 });

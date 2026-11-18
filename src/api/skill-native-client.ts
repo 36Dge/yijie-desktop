@@ -32,8 +32,21 @@ export type SkillNativeFailureKind =
   | "operation-failed"
   | "incompatible";
 
+export type SkillImportDrag =
+  | { type: "over"; position: { x: number; y: number } }
+  | { type: "leave" }
+  | { type: "drop"; position: { x: number; y: number }; dropId: string };
+
+export interface SkillImportSelection { id: string; name: string }
+export interface SkillImportConfirmation { dialogId: string; selectionId: string }
+
 export interface SkillNativeClient {
-  importSkill?(): Promise<SkillCatalogSnapshot | null>;
+  importDialog?: {
+    open(dialogId: string, onDrag: (event: SkillImportDrag) => void): Promise<void>;
+    prepare(dialogId: string, dropId?: string): Promise<SkillImportSelection | null>;
+    close(dialogId: string): Promise<void>;
+  };
+  importSkill?(confirmation?: SkillImportConfirmation): Promise<SkillCatalogSnapshot | null>;
   cancelOperation?(id: string): Promise<SkillCatalogSnapshot>;
   subscribeOperations?(handler: (operation: PendingOperation) => void): () => void;
   list(signal?: AbortSignal): Promise<SkillCatalogSnapshot>;

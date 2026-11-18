@@ -7,7 +7,9 @@ import { buildChatSidebarHistory, type ChatHistoryProjectGroup } from "../../dom
 import { useChatStore } from "../../stores/chat.store";
 import { useSidebarStore } from "../../stores/sidebar.store";
 import { useChatReadingStore } from "../../stores/chat-reading.store";
+import { useChatComposerDraftStore } from "../../stores/chat-composer-drafts.store";
 import YjIcon from "../yijie/YjIcon.vue";
+import YjTooltip from "../yijie/YjTooltip.vue";
 import ChatSidebarSessionRow from "./ChatSidebarSessionRow.vue";
 
 const props = defineProps<{
@@ -17,6 +19,7 @@ const props = defineProps<{
 const chatStore = useChatStore();
 const sidebarStore = useSidebarStore();
 const readingStore = useChatReadingStore();
+const composerDrafts = useChatComposerDraftStore();
 const router = useRouter();
 const expandedProjectIds = ref<ReadonlySet<string>>(new Set());
 const renameSession = ref<ChatSession | null>(null);
@@ -107,6 +110,28 @@ function toggleProject(projectId: string): void {
   if (next.has(projectId)) next.delete(projectId);
   else next.add(projectId);
   expandedProjectIds.value = next;
+}
+
+async function startProjectTask(projectId: string): Promise<void> {
+  const contextId = chatStore.context?.contextId;
+  const available = () => chatStore.hasAction("create_session") && chatStore.hasAction("use_project")
+    && chatStore.projects.some(project => project.projectId === projectId && project.available);
+  if (!contextId || actionPending.value || !available()) return;
+  actionPending.value = true;
+  actionError.value = null;
+  try {
+    const result = await router.push("/chat");
+    if ((result && !isNavigationFailure(result, NavigationFailureType.duplicated)) || router.currentRoute.value.fullPath !== "/chat") return;
+    if (chatStore.context?.contextId !== contextId || !available()) return;
+    await chatStore.clearSelectedSession();
+    if (router.currentRoute.value.fullPath !== "/chat" || chatStore.selectedSessionId !== null || chatStore.context?.contextId !== contextId || !available()) return;
+    expandedProjectIds.value = new Set([...expandedProjectIds.value, projectId]);
+    composerDrafts.newWorkspaceTask = { contextId, projectId };
+  } catch {
+    actionError.value = "新任务暂时无法打开，请稍后重试";
+  } finally {
+    actionPending.value = false;
+  }
 }
 
 function projectMenuOptions(project: ChatHistoryProjectGroup): DropdownOption[] {
@@ -336,19 +361,30 @@ async function confirmRemoveProject(): Promise<void> {
             @clickoutside="projectMenuId = null"
             @select="handleProjectAction(group, String($event))"
           />
-          <button
-            v-if="projectMenuOptions(group).length > 0"
-            class="chat-tree__more"
-            type="button"
-            :aria-label="`项目 ${group.label} 的操作菜单`"
-            aria-haspopup="menu"
-            :aria-expanded="projectMenuId === group.projectId"
-            :disabled="actionPending"
-            @click.stop="openProjectMenu(group, $event)"
-            @keydown="projectKeydown(group, $event)"
-          >
-            <YjIcon name="more" size="sm" />
-          </button>
+          <div class="chat-tree__project-actions" :class="{ 'chat-tree__project-actions--open': projectMenuId === group.projectId }">
+            <button
+              v-if="projectMenuOptions(group).length > 0"
+              class="chat-tree__more"
+              type="button"
+              :aria-label="`项目 ${group.label} 的操作菜单`"
+              aria-haspopup="menu"
+              :aria-expanded="projectMenuId === group.projectId"
+              :disabled="actionPending"
+              @click.stop="openProjectMenu(group, $event)"
+              @keydown="projectKeydown(group, $event)"
+            >
+              <YjIcon name="more" size="sm" tone="muted" :stroke-width="1.5" />
+            </button>
+            <YjTooltip v-if="group.project && chatStore.hasAction('create_session') && chatStore.hasAction('use_project')" text="新建任务" placement="top" to="body">
+              <button
+                class="chat-tree__new-task"
+                type="button"
+                :aria-label="`在工作空间 ${group.label} 中新建任务`"
+                :disabled="actionPending || treeLoading || !group.project.available"
+                @click.stop="startProjectTask(group.projectId)"
+              ><YjIcon name="newTask" size="xs" tone="muted" :stroke-width="1.5" /></button>
+            </YjTooltip>
+          </div>
         </div>
 
         <ul v-if="expandedProjectIds.has(group.projectId)" class="chat-tree__sessions">
@@ -492,11 +528,12 @@ async function confirmRemoveProject(): Promise<void> {
   text-align: left;
 }
 
-.chat-tree__more {
+.chat-tree__more,
+.chat-tree__new-task {
   display: inline-flex;
-  width: var(--yj-space-8);
-  height: var(--yj-space-8);
-  flex: 0 0 var(--yj-space-8);
+  width: var(--yj-space-6);
+  height: var(--yj-space-6);
+  flex: 0 0 var(--yj-space-6);
   align-items: center;
   justify-content: center;
   padding: 0;
@@ -506,16 +543,31 @@ async function confirmRemoveProject(): Promise<void> {
   background: transparent;
 }
 
-.chat-tree__more { margin-left: auto; opacity: 0; }
-.chat-tree__project-row:hover .chat-tree__more,
-.chat-tree__more:focus-visible { opacity: 1; }
+.chat-tree__project-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--yj-space-1);
+  margin-inline-end: var(--yj-space-2);
+  opacity: 0;
+  pointer-events: none;
+}
+.chat-tree__project-row:hover .chat-tree__project-actions,
+.chat-tree__project-row:focus-within .chat-tree__project-actions,
+.chat-tree__project-actions--open { opacity: 1; pointer-events: auto; }
+.chat-tree__new-task:disabled { cursor: not-allowed; }
+.chat-tree__new-task:disabled :deep(.yj-icon) { color: var(--yj-color-text-disabled); }
+@media (hover: none) { .chat-tree__project-actions { opacity: 1; pointer-events: auto; } }
 
 .chat-tree__project-toggle:hover,
-.chat-tree__more:hover { color: var(--yj-color-text-primary); background: var(--yj-color-bg-card); }
+.chat-tree__more:hover,
+.chat-tree__new-task:not(:disabled):hover { color: var(--yj-color-text-primary); background: var(--yj-color-bg-card); }
 .chat-tree__project-toggle:focus-visible,
 .chat-tree__more:focus-visible,
 .chat-tree__load-more:focus-visible,
 .chat-tree__dialog-button:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-space-1); }
+.chat-tree__new-task:focus,
+.chat-tree__new-task:focus-visible { outline: none; box-shadow: none; }
 
 .chat-tree__project-name {
   min-width: 0;

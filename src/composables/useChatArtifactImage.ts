@@ -3,7 +3,8 @@ import { useArtifactMediaCache, type ArtifactMediaEntry } from "./chat-artifact-
 import { chatArtifactNativeClient, ChatArtifactNativeClientError, type ChatArtifactNativeClient } from "../api/chat-artifact-native-client";
 import type { ArtifactNativeErrorCode } from "../domain/chat-artifact-native";
 import type { ArtifactProjection } from "../domain/chat-artifact";
-import { artifactImageStatus, artifactImageTitle } from "../domain/chat-artifact-image";
+import { artifactImageStatus } from "../domain/chat-artifact-image";
+import { mediaDisplayName } from "../domain/chat-media-presentation";
 
 type Failure = Readonly<{ message: string; retryable: boolean }>;
 
@@ -39,14 +40,14 @@ function actionFailure(code: ArtifactNativeErrorCode, action: "复制" | "下载
 }
 
 export function useChatArtifactImage(
-  props: Readonly<{ artifact: ArtifactProjection; contextId: string; client?: ChatArtifactNativeClient }>,
+  props: Readonly<{ artifact: ArtifactProjection; contextId: string; userRequest?: string; client?: ChatArtifactNativeClient }>,
   notify: (message: string, tone: "success" | "error") => void,
 ) {
   const cache = useArtifactMediaCache();
   const entry = shallowRef<ArtifactMediaEntry | null>(null);
   const eligible = computed(() => props.artifact.kind === "image" && props.artifact.status === "ready" && cache.canRead(props.contextId));
   const generating = computed(() => ["announced", "generating", "processing", "transferring"].includes(props.artifact.status));
-  const title = computed(() => artifactImageTitle(props.artifact.displayName));
+  const title = computed(() => mediaDisplayName(props.artifact, props.userRequest));
   const status = computed(() => artifactImageStatus(props.artifact));
   const alt = computed(() => props.artifact.provenance === "synthetic" ? `本地合成演示图片：${title.value}` : title.value);
   const source = computed(() => entry.value?.image.value ?? null);

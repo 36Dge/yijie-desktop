@@ -4,6 +4,15 @@ import { conversationActivityPresentation, traceCurrentStatus } from "./conversa
 import { activityItemTitle, summarizeActivity } from "./conversation-activity-summary";
 
 describe("execution trace reading contract", () => {
+  it("hides only generic waiting after delivery without inventing a terminal turn", () => {
+    const live = traceTurn([traceItem("opening", "agentMessage", { text: "开始处理。", phase: "commentary" })], true);
+    const before = JSON.stringify(live);
+    expect(traceCurrentStatus(live)).toBe("等待模型继续输出");
+    expect(traceCurrentStatus(live, true)).toBeNull();
+    expect(JSON.stringify(live)).toBe(before);
+    expect(traceCurrentStatus({ ...live, domainStatus: "waiting_approval" }, true)).toBe("等待你的确认");
+  });
+
   it("groups 32 searches, 32 reasoning records and 8 commands into 40 calls", () => {
     const records = Array.from({length: 32}, (_, i) => [traceItem(`s${i}`, "webSearch", {webSearch: {action: "search", queries: ["Suzhou 2026"]}}), traceItem(`r${i}`, "reasoning", {summary: ["Process record"]}), ...(i % 4 === 0 ? [traceItem(`c${i}`, "commandExecution", {status: "completed", exitCode: 0})] : [])]).flat();
     const turn = traceTurn(records);

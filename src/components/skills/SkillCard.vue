@@ -264,7 +264,7 @@ function requestUninstall(event: MouseEvent): void {
   display: -webkit-box;
   min-height: calc(var(--yj-line-height-body) * 2);
   overflow: hidden;
-  color: var(--yj-color-text-body);
+  color: var(--yj-color-text-secondary);
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
   -webkit-box-orient: vertical;

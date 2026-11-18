@@ -5,6 +5,7 @@ import ChatArtifactList from "../../../src/components/chat/ChatArtifactList.vue"
 import ChatAnswerActions from "../../../src/components/chat/ChatAnswerActions.vue";
 import { createNaiveThemeOverrides } from "../../../src/design/theme/naive-theme";
 import { uiZoomCssValue, uiZoomedViewportCss, uiZoomedWindowMinimumCss } from "../../../src/domain/ui-zoom";
+import { useChatScroll } from "../../../src/composables/useChatScroll";
 import type { ArtifactProjection } from "../../../src/domain/chat-artifact";
 import type { ChatArtifactNativeClient } from "../../../src/api/chat-artifact-native-client";
 import "../../../src/styles/variables.css";
@@ -16,8 +17,23 @@ import "../../../src/styles/chat-control-menu.css";
 const samples = { landscape: [2048, 1152], portrait: [1152, 2048], square: [1536, 1536], panorama: [2560, 640], small: [128, 128] } as const;
 const shape = ref<keyof typeof samples>("landscape");
 const dark = ref(false), zoom = ref(100), narrow = ref(false), multiple = ref(false), longTitle = ref(false);
+const genericNames = new URLSearchParams(location.search).get("generic-names") === "1";
+const userRequest = "一幅清晨山林风景，水彩插画";
+const scrollScene = ref(false), readingTop = ref(0);
+const replyAbove = ref(false);
+function locateImage() { if (root.value) root.value.scrollTop = root.value.scrollHeight - root.value.clientHeight; }
+async function openWithReply() {
+  root.value?.querySelector<HTMLButtonElement>('[data-testid="artifact-image-preview"]')?.click();
+  await nextTick(); replyAbove.value = true;
+}
 const status = ref<ArtifactProjection["status"]>("ready");
 const root = ref<HTMLElement | null>(null), report = ref("");
+const { update, followNewContent } = useChatScroll(computed(() => scrollScene.value ? root.value : null));
+watch(replyAbove, () => { void followNewContent(); }, { flush: "post" });
+function reportScroll() {
+  readingTop.value = root.value?.scrollTop ?? 0;
+  update();
+}
 const calls = ref({ open: 0, release: 0, copy: 0, save: 0 });
 const urls = new Map<string, string>();
 for (const [name, [width, height]] of Object.entries(samples)) {
@@ -29,7 +45,7 @@ const artifactId = (name: string) => `019c1a00-0000-7000-8000-00000000040${names
 const artifacts = computed<ArtifactProjection[]>(() => (multiple.value ? names.slice(0, 3) : [shape.value]).map(name => ({
   sessionId: "019c1a00-0000-7000-8000-000000000411", turnId: "019c1a00-0000-7000-8000-000000000412", artifactId: artifactId(name),
   kind: "image", provenance: "synthetic", status: status.value, ordinal: names.indexOf(name), progressStage: null, progressPercent: null,
-  displayName: longTitle.value ? `${name}-带有完整构图说明和长名称的普通合成图片-用于验证标题换行不会改变图片定位.svg` : `${name}-普通合成图片.svg`, mediaType: "image/svg+xml", sizeBytes: 512, localCommittedAt: 1_000, expiresAt: 9999999999, hasPoster: false, errorCode: null, retryable: true,
+  displayName: longTitle.value ? `${name}-带有完整构图说明和长名称的普通合成图片-用于验证标题换行不会改变图片定位.svg` : genericNames ? "generated-image" : `${name}-普通合成图片.svg`, mediaType: "image/svg+xml", sizeBytes: 512, localCommittedAt: 1_000, expiresAt: 9999999999, hasPoster: false, errorCode: null, retryable: true,
 })));
 const client: ChatArtifactNativeClient = {
   async openImagePreview(_context, identity) { calls.value.open++; const name = names.find(name => artifactId(name) === identity.artifactId)!; return { status: "opened", previewUrl: urls.get(name)! }; },
@@ -58,7 +74,8 @@ async function checkLayout() {
     if (!width || !height || !image || !button) return { ok: false, reason: "图片尚未就绪" };
     const img = image.getBoundingClientRect(), frame = figure.querySelector(".artifact-image__frame")!.getBoundingClientRect(), preview = figure.querySelector(".artifact-image__preview")!.getBoundingClientRect(), more = button.getBoundingClientRect();
     const same = (a: number, b: number) => Math.abs(a - b) <= 1;
-    return { ok: same(frame.width, img.width) && same(frame.height, img.height) && same(preview.width, img.width) && same(img.right - more.right, 8 * scale) && same(more.top - img.top, 8 * scale) && more.bottom <= img.bottom && img.width <= 440 * scale + 1 && img.height <= 440 * scale + 1 && Math.abs(img.width / img.height - width / height) < 0.005,
+    const column = figure.getBoundingClientRect();
+    return { ok: frame.left >= column.left - 1 && frame.right <= column.right + 1 && same(frame.width, img.width) && same(frame.height, img.height) && same(preview.width, img.width) && same(img.right - more.right, 8 * scale) && same(more.top - img.top, 8 * scale) && more.bottom <= img.bottom && img.width <= 440 * scale + 1 && img.height <= 440 * scale + 1 && Math.abs(img.width / img.height - width / height) < 0.005,
       name: image.getAttribute("alt") ?? image.getAttribute("aria-label"), image: [img.width, img.height], frame: [frame.width, frame.height], rightInset: img.right - more.right, topInset: more.top - img.top, scale };
   });
   report.value = JSON.stringify({ ok: measurements.length > 0 && measurements.every(row => row.ok), measurements }, null, 2);
@@ -71,12 +88,17 @@ async function checkLayout() {
       <label>界面缩放 <select v-model.number="zoom" aria-label="界面缩放"><option v-for="value in [80,100,120,160,200]" :key="value">{{ value }}</option></select></label>
       <label>状态 <select v-model="status" aria-label="图片状态"><option v-for="value in ['ready','announced','generating','transferring','failed','cancelled','expired']" :key="value">{{ value }}</option></select></label>
       <button @click="longTitle = !longTitle">切换长标题</button><button @click="dark = !dark">切换亮暗主题</button><button @click="narrow = !narrow">切换窄列</button><button @click="multiple = !multiple">切换多图</button><button @click="checkLayout">检查布局</button>
+      <button @click="scrollScene = !scrollScene">切换对话滚动场景</button><button v-if="scrollScene" @click="locateImage">定位图片</button>
+      <button v-if="scrollScene" @click="openWithReply">打开图片并追加普通回复</button>
     </nav>
-    <main ref="root" class="audit-column" :class="{ 'is-narrow': narrow }">
+    <main ref="root" class="audit-column" :class="{ 'is-narrow': narrow, 'is-scroll-scene': scrollScene }" @scroll="reportScroll">
+      <div v-if="scrollScene" class="audit-earlier-messages">更早的普通对话内容</div>
       <p>普通合成图片，用于验证真实组件几何与交互；不发起生图或原生写入。</p>
-      <ChatArtifactList :artifacts="artifacts" context-id="019c1a00-0000-7000-8000-000000000413" :native-client="client" />
+      <p v-if="replyAbove" class="audit-late-reply">图片已经交付。这是查看图片期间正常追加的模型回复，用于检查关闭查看器后是否仍停留在原来的图片位置。</p>
+      <ChatArtifactList :artifacts="artifacts" :user-request="userRequest" context-id="019c1a00-0000-7000-8000-000000000413" :native-client="client" />
       <ChatAnswerActions identity="audit-answer" text="普通本地验证" :adapter="{writeText: async () => {}}" />
     </main>
+    <output v-if="scrollScene" class="audit-report" aria-label="对话滚动位置">{{ readingTop }}</output>
     <pre class="audit-report" aria-label="布局检查结果">{{ report }}</pre><output class="audit-report" aria-label="调用计数">{{ calls }}</output>
   </NMessageProvider></NConfigProvider>
 </template>
@@ -85,5 +107,8 @@ async function checkLayout() {
 .audit-controls label { display: inline-flex; gap: var(--yj-space-1); }
 .audit-column { width: min(760px, calc(100% - 48px)); margin: var(--yj-space-6) auto; }
 .audit-column.is-narrow { width: min(320px, calc(100% - 48px)); }
+.audit-column.is-scroll-scene { height: 500px; padding-bottom: 80px; overflow: auto; overflow-anchor: none; }
+.audit-earlier-messages { height: 650px; }
+.audit-late-reply { min-height: 140px; }
 .audit-report { display: block; white-space: pre-wrap; overflow-wrap: anywhere; padding: var(--yj-space-4); margin: 0; }
 </style>

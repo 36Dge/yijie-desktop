@@ -3,6 +3,7 @@ import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed } from "vue";
 import { isSidebarFile } from "../../domain/conversation-file-preview";
 import { chatFilePresentation } from "../../domain/chat-file-presentation";
+import { artifactImageStatus } from "../../domain/chat-artifact-image";
 import { NProgress, NTag } from "naive-ui";
 import type { ChatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
 import type { ChatArtifactNativeClient } from "../../api/chat-artifact-native-client";
@@ -18,6 +19,7 @@ import YjIcon from "../yijie/YjIcon.vue";
 const props = defineProps<{
   artifact: ArtifactProjection;
   contextId: string;
+  userRequest?: string;
   openFile?: (artifact: ArtifactProjection) => void;
   nativeClient?: ChatArtifactNativeClient;
   videoNativeClient?: ChatArtifactVideoNativeClient;
@@ -60,12 +62,7 @@ const failureGuidance = computed(() => {
     return "视频暂未完成交付。请先查看原产物或查询原视频任务；重新生成会创建新任务，不会恢复本次交付。";
   }
   if (props.artifact.kind === "image" && props.artifact.provenance === "provider") {
-    switch (props.artifact.errorCode) {
-      case "limit_exceeded": return "图片生成或暂存额度受限。请检查方舟模型的用量上限，稍后可重新提交。";
-      case "unsupported_provider": return "图片服务鉴权或账户额度不可用，请核对方舟凭据、模型开通状态和余额。";
-      case "integrity_failed": return "图片服务的结果未通过校验，无法展示。";
-      case "resource_unavailable": return "暂时无法取得图片；原请求可能已受理，重新生成将发起新请求。";
-    }
+    return artifactImageStatus(props.artifact);
   }
   return props.artifact.retryable
     ? `${kindPresentation.value.label}生成失败，可在输入框重新提交需求。`
@@ -92,12 +89,14 @@ const progressLabel = computed(() => `${displayName.value}处理进度`);
   <ChatArtifactImage
     v-if="artifact.kind === 'image'"
     :artifact="artifact"
+    :user-request="userRequest"
     :context-id="contextId"
     :client="nativeClient"
   />
   <ChatArtifactVideo
     v-else-if="artifact.kind === 'video' && artifact.status === 'ready'"
     :artifact="artifact"
+    :user-request="userRequest"
     :context-id="contextId"
     :client="videoNativeClient"
   />
@@ -106,7 +105,8 @@ const progressLabel = computed(() => `${displayName.value}处理进度`);
     class="artifact-shell"
     :class="`artifact-shell--${artifact.status}`"
     :aria-busy="busy ? 'true' : 'false'"
-    :aria-labelledby="titleId"
+    :aria-labelledby="artifact.kind === 'video' ? undefined : titleId"
+    :aria-label="artifact.kind === 'video' ? '视频' : undefined"
     tabindex="0"
   >
     <header class="artifact-shell__header">
@@ -115,7 +115,7 @@ const progressLabel = computed(() => `${displayName.value}处理进度`);
       </span>
       <span class="artifact-shell__identity">
         <YjTooltip v-if="sidebarFile" :text="displayName"><button  :id="titleId" type="button" class="artifact-shell__name artifact-shell__open"  @click="openFile?.(artifact)">{{ displayName }}</button></YjTooltip>
-        <strong v-else :id="titleId" class="artifact-shell__name">{{ displayName }}</strong>
+        <strong v-else-if="artifact.kind !== 'video'" :id="titleId" class="artifact-shell__name">{{ displayName }}</strong>
         <span class="artifact-shell__kind">{{ kindPresentation.label }}<template v-if="sizeLabel"> · {{ sizeLabel }}</template></span>
       </span>
       <NTag size="small" :bordered="false">{{ provenanceLabel }}</NTag>

@@ -190,11 +190,13 @@ describe("FEAT-129 AC-009 automated acceptance", () => {
 
     const loading = wrapper.get('[role="status"][aria-busy="true"]');
     expect(loading.text()).toContain("正在读取内置清单并扫描本地 Skill");
+    expect(wrapper.find(".skill-marketplace__count").exists()).toBe(false);
     expect(wrapper.findAll(".n-skeleton")).not.toHaveLength(0);
 
     resolveInitialScan?.(emptySnapshot());
     await flushPromises();
     expect(wrapper.get(".yj-empty").text()).toContain("当前客户端没有可展示的 Skill");
+    expect(wrapper.get(".skill-marketplace__count").text()).toBe("0 个技能");
 
     nativeMock.scan.mockResolvedValueOnce(snapshot());
     await wrapper.get(".yj-empty button").trigger("click");

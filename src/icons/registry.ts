@@ -1,5 +1,5 @@
 import type { Component } from "vue";
-import { ThumbsDownFilled, ThumbsUpFilled } from "./answer-feedback-icons";
+import { AnswerCopy, AnswerThumbsDown, AnswerThumbsUp, ThumbsDownFilled, ThumbsUpFilled } from "./answer-feedback-icons";
 import { ModelDeepSeek, ModelGlm, ModelKimi, ModelMiniMax } from "./model-icons";
 import { DocumentCode, DocumentGeneric, DocumentMarkdown, DocumentPdf, DocumentPresentation, DocumentSpreadsheet, DocumentText, DocumentWord } from "./document-icons";
 import {
@@ -156,6 +156,9 @@ export const iconRegistry = {
   enterFullscreen: Maximize2,
   exitFullscreen: Minimize2,
   copy: Copy,
+  answerCopy: AnswerCopy,
+  answerThumbsUp: AnswerThumbsUp,
+  answerThumbsDown: AnswerThumbsDown,
   thumbsUp: ThumbsUp,
   thumbsDown: ThumbsDown,
   thumbsUpFilled: ThumbsUpFilled,

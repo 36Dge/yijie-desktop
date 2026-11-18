@@ -12,7 +12,7 @@ import { messageFileWorkspaceKey, messageFileLocationKey, messageLinkTargetKey, 
 const props = withDefaults(defineProps<{
   blocks?: readonly ConversationTimelineContentBlock[];
   mode?: "rich" | "plain";
-  typography?: "answer" | "compact";
+  typography?: "answer" | "user" | "compact";
   streaming?: boolean;
   animate?: boolean;
   linkTarget?: MessageLinkTarget;
@@ -62,7 +62,7 @@ function visibleRows<T extends readonly { startOffset: number }[]>(rows: readonl
 </script>
 
 <template>
-  <div ref="root" class="chat-safe-content yj-selectable-text" :class="{ 'chat-safe-content--attachments': hasAttachments, 'chat-safe-content--input-images': inputImages.length > 0, 'chat-safe-content--input-documents': inputDocuments.length > 0, 'chat-safe-content--answer': typography === 'answer' && mode === 'rich' }">
+  <div ref="root" class="chat-safe-content yj-selectable-text" :class="{ 'chat-safe-content--attachments': hasAttachments, 'chat-safe-content--input-images': inputImages.length > 0, 'chat-safe-content--input-documents': inputDocuments.length > 0, 'chat-safe-content--user': typography === 'user', 'chat-safe-content--answer': typography === 'answer' && mode === 'rich' }">
     <div v-if="inputImages.length" class="chat-safe-content__image-stack" :class="{ 'chat-safe-content__image-stack--multiple': inputImages.length > 1 }" role="group" :aria-label="`${inputImages.length} 张图片`">
       <div v-for="node in inputImages" :key="node.key" class="chat-safe-content__image-card">
         <slot v-if="node.kind === 'attachment_reference'" name="attachment-reference" :block="node.block"><span>{{ node.block.name }}</span></slot>
@@ -221,6 +221,7 @@ function visibleRows<T extends readonly { startOffset: number }[]>(rows: readonl
   min-width: 0;
   gap: var(--yj-space-3);
   color: var(--yj-color-text-primary);
+  font-family: var(--yj-font-family-chat);
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
   overflow-wrap: anywhere;
@@ -391,28 +392,34 @@ h3.chat-safe-content__heading {
   color: var(--yj-color-text-body);
 }
 
-/* Reading rhythm belongs to answers, not user messages or process controls.
- * Recursion receives the same variant so lists and quotes retain the rhythm. */
+/* Fixed-size tokens keep nested lists and quotes from compounding em sizes. */
+.chat-safe-content--user,
 .chat-safe-content--answer {
-  gap: 0;
+  font-size: var(--yj-font-size-chat-body);
   line-height: var(--yj-line-height-chat-answer);
 }
+.chat-safe-content--answer { gap: 0; }
 .chat-safe-content--answer > * + * { margin-block-start: var(--yj-chat-paragraph-gap); }
 .chat-safe-content--answer > .chat-safe-content__heading:not(:first-child) { margin-block-start: var(--yj-chat-section-gap); }
 .chat-safe-content--answer > .chat-safe-content__heading + .chat-safe-content__heading { margin-block-start: var(--yj-chat-paragraph-gap); }
 .chat-safe-content--answer > .chat-safe-content__heading + :not(.chat-safe-content__heading),
 .chat-safe-content--answer > .chat-safe-content__paragraph + .chat-safe-content__list { margin-block-start: var(--yj-chat-heading-content-gap); }
-.chat-safe-content--answer > .chat-safe-content__heading { line-height: var(--yj-line-height-chat-answer-heading); }
+.chat-safe-content--answer > .chat-safe-content__heading {
+  font-size: var(--yj-font-size-chat-body);
+  line-height: var(--yj-line-height-chat-answer-heading);
+}
 .chat-safe-content--answer > h1.chat-safe-content__heading { font-size: var(--yj-font-size-chat-answer-title); }
+.chat-safe-content--answer > h2.chat-safe-content__heading,
+.chat-safe-content--answer > h3.chat-safe-content__heading { font-size: var(--yj-font-size-chat-answer-heading); }
 .chat-safe-content--answer strong { font-weight: var(--yj-font-weight-semibold); }
 .chat-safe-content--answer > .chat-safe-content__list > .chat-safe-content__list-item--loose + li,
 .chat-safe-content--answer > .chat-safe-content__list > li + .chat-safe-content__list-item--loose { margin-block-start: var(--yj-space-1); }
 .chat-safe-content--answer .chat-safe-content__inline-code,
-.chat-safe-content--answer pre { font-family: var(--yj-font-family-mono); }
+.chat-safe-content--answer pre { font-family: var(--yj-font-family-chat-mono); }
 .chat-safe-content--answer pre { font-size: var(--yj-font-size-code); line-height: var(--yj-line-height-code); }
 .chat-safe-content--answer pre code { font: inherit; }
 .chat-safe-content--answer th,
-.chat-safe-content--answer td { font-size: var(--yj-font-size-body); line-height: var(--yj-line-height-body); }
+.chat-safe-content--answer td { font-size: var(--yj-font-size-chat-body); line-height: var(--yj-line-height-chat-answer); }
 </style>
 
 <style scoped>

@@ -23,8 +23,18 @@ type ConversationTurnStatus,
 } from "../../domain/conversation-view";
 import ChatTimelineItemShell from "./ChatTimelineItemShell.vue";
 import ChatTurnGroup from "./ChatTurnGroup.vue";
+import { traceItem, traceTurn } from "../../domain/conversation-activity-fixtures";
 
 enableAutoUnmount(afterEach);
+
+it("removes the generic waiting row once an artifact is delivered while retaining the live turn", async () => {
+  const turn = traceTurn([traceItem("opening", "agentMessage", { phase: "commentary", text: "正在准备图片。" })], true);
+  const wrapper = mount(ChatTurnGroup, { props: { turn, position: 1 } });
+  expect(wrapper.text()).toContain("等待模型继续输出");
+  await wrapper.setProps({ hasDeliveredArtifact: true });
+  expect(wrapper.text()).not.toContain("等待模型继续输出");
+  expect(wrapper.props("turn").domainStatus).toBe("in_progress");
+});
 
 const THREAD_ID = "thread-demo";
 const TURN_ID = "turn-demo";

@@ -5,7 +5,9 @@ import { NDialogProvider, NMessageProvider } from "naive-ui";
 import { defineComponent, reactive, ref } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useExpertsStore } from "../../stores/experts.store";
+import { parseNativeSkillCatalog } from "../../domain/native-skill-marketplace";
 import { expertEntry, expertSnapshot, expertTestId } from "../../test/expert-fixture";
+import { nativeCatalogFixture, nativeSkillFixture } from "../../test/native-skill-fixture";
 import ExpertMarketPanel from "../../components/experts/ExpertMarketPanel.vue";
 import ExtensionsPage from "./ExtensionsPage.vue";
 
@@ -41,28 +43,74 @@ function render() {
 }
 
 describe("extensions page tab continuity", () => {
-  it("keeps the same keyboard tab nodes, expert search and independent panel positions", async () => {
+  it("keeps keyboard focus, search terms and scroll positions independent across tabs", async () => {
     const page = render(); await flushPromises();
     const tabs = page.findAll<HTMLButtonElement>('[role="tab"]');
     expect(tabs.map(item => item.text())).toEqual(["专家", "技能"]);
     expect(tabs[0]!.attributes("aria-selected")).toBe("true");
     await tabs[1]!.trigger("click"); await flushPromises();
     const skillsPanel = page.get<HTMLElement>('[aria-label="技能目录"]');
+    await page.get('input[aria-label="搜索技能"]').setValue("技能关键词");
     skillsPanel.element.scrollTop = 160;
     tabs[1]!.element.focus(); await tabs[1]!.trigger("keydown", { key: "ArrowLeft" }); await flushPromises();
     expect(document.activeElement).toBe(tabs[0]!.element);
     expect(page.findAll('[role="tab"]')[0]!.element).toBe(tabs[0]!.element);
     const expertPanel = page.get<HTMLElement>('[aria-label="专家列表"]');
     expertPanel.element.scrollTop = 80;
+    expect(page.get<HTMLInputElement>('input[aria-label="搜索专家"]').element.value).toBe("");
     await page.get('input[aria-label="搜索专家"]').setValue("未匹配的正常搜索");
     expect(page.text()).toContain("未找到匹配专家");
     await tabs[0]!.trigger("keydown", { key: "ArrowRight" }); await flushPromises();
     expect(document.activeElement).toBe(tabs[1]!.element);
+    expect(page.get<HTMLInputElement>('input[aria-label="搜索技能"]').element.value).toBe("技能关键词");
     expect(skillsPanel.element.scrollTop).toBe(160);
     await tabs[1]!.trigger("keydown", { key: "Home" }); await flushPromises();
     expect(document.activeElement).toBe(tabs[0]!.element);
     expect((page.get('input[aria-label="搜索专家"]').element as HTMLInputElement).value).toBe("未匹配的正常搜索");
     expect(expertPanel.element.scrollTop).toBe(80);
+  });
+
+  it("filters built-in and imported skills by name, description or category and restores the catalog on clear", async () => {
+    const catalog = nativeCatalogFixture({ ...nativeSkillFixture, display_name: "订单核对" });
+    catalog.skills.push(...["销售谈判专家", "供应商评估"].map((display_name, index) => ({
+      ...nativeSkillFixture,
+      id: `builtin-${index}`,
+      origin: "builtin" as const,
+      category: "sourcing-selection",
+      display_name,
+      description: index === 0 ? "准备 B2B 沟通草案" : "分析采购风险",
+      runtime_name: "",
+      installation_state: "not_installed" as const,
+      enabled: false,
+      runtime_visible: false,
+    })));
+    native.scan.mockResolvedValue(parseNativeSkillCatalog(catalog));
+    navigation.route.query = { tab: "skills" };
+    const page = render(); await flushPromises();
+    const search = page.get<HTMLInputElement>('input[aria-label="搜索技能"]');
+    const panel = page.get('[aria-label="技能目录"]');
+    const names = () => panel.findAll(".skill-card__title").map(card => card.text());
+
+    expect(panel.get(".skill-marketplace__count").text()).toBe("3 个技能");
+    await search.setValue("  b2b  ");
+    expect(names()).toEqual(["销售谈判专家"]);
+    expect(panel.get(".skill-marketplace__count").text()).toBe("1 个技能");
+    expect(panel.get(".yj-section__count").text()).toBe("1");
+    await search.setValue("货源与选品");
+    expect(names()).toEqual(["销售谈判专家", "供应商评估"]);
+    expect(panel.get(".yj-section__count").text()).toBe("2");
+    await search.setValue("订单");
+    expect(names()).toEqual(["订单核对"]);
+    expect(panel.get(".yj-section__title").text()).toBe("我的技能");
+    await search.setValue("没有这个技能");
+    expect(panel.text()).toContain("未找到匹配技能");
+    expect(panel.get(".skill-marketplace__count").text()).toBe("0 个技能");
+    expect(panel.find(".yj-section").exists()).toBe(false);
+    await search.setValue("");
+    expect(names()).toEqual(["销售谈判专家", "供应商评估", "订单核对"]);
+    expect(panel.get(".skill-marketplace__count").text()).toBe("3 个技能");
+    expect(panel.findAll(".yj-section")).toHaveLength(6);
+    expect(native.scan).toHaveBeenCalledTimes(1);
   });
 
   it("closes details when switching away and returns to the default expert tab on a fresh visit", async () => {

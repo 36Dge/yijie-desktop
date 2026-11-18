@@ -3,6 +3,7 @@ import { computed, ref, useId, watch } from "vue";
 import { NDropdown, type DropdownOption } from "naive-ui";
 import type { ChatSession } from "../../domain/chat-ipc";
 import YjIcon from "../yijie/YjIcon.vue";
+import ChatSidebarSessionTitle from "./ChatSidebarSessionTitle.vue";
 
 const props = defineProps<{
   session: ChatSession;
@@ -28,6 +29,12 @@ const trigger = ref<HTMLButtonElement | null>(null);
 const menuVisible = ref(false);
 const menuX = ref(0);
 const menuY = ref(0);
+const titleHovered = ref(false);
+const titleFocused = ref(false);
+
+function focusTitle(event: FocusEvent): void {
+  titleFocused.value = (event.currentTarget as HTMLElement).matches(":focus-visible");
+}
 
 watch([() => props.currentPath, () => props.actionPending, () => props.options.map(option => option.key).join(",")], () => {
   menuVisible.value = false;
@@ -71,7 +78,7 @@ function selectAction(key: string | number): void {
 </script>
 
 <template>
-  <li class="chat-tree__session" @contextmenu="openMenu" @selectstart.prevent>
+  <li class="chat-tree__session" @contextmenu="openMenu" @selectstart.prevent @mouseenter="titleHovered = true" @mouseleave="titleHovered = false">
     <button
       ref="trigger"
       class="chat-tree__session-link"
@@ -84,8 +91,11 @@ function selectAction(key: string | number): void {
       :aria-keyshortcuts="hasMenu ? 'Shift+F10' : undefined"
       @click="openSession"
       @keydown="handleKeydown"
+      @focus="focusTitle"
+      @blur="titleFocused = false"
+      @mousedown="titleFocused = false"
     >
-      <span class="chat-tree__session-title">{{ session.title }}</span>
+      <ChatSidebarSessionTitle class="chat-tree__session-title" :text="session.title" :active="(titleHovered || titleFocused) && !menuVisible && !actionPending" />
       <span class="chat-tree__session-status" aria-hidden="true">
         <span v-if="completed"  class="chat-tree__session-completed"  />
       </span>
@@ -145,7 +155,7 @@ function selectAction(key: string | number): void {
 }
 .chat-tree__session-link--active { color: var(--yj-color-text-primary); background: var(--yj-color-control-hover); }
 .chat-tree__session-link:hover { background: var(--yj-color-control-hover); }
-.chat-tree__session-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-tree__session-title { min-width: 0; flex: 1; }
 
 .chat-tree__session-status {
   display: flex;

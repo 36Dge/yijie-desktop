@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "../../stores/chat.store";
 import { useSidebarStore } from "../../stores/sidebar.store";
 import { useChatReadingStore } from "../../stores/chat-reading.store";
+import { useChatComposerDraftStore } from "../../stores/chat-composer-drafts.store";
 import ChatSidebarTree from "./ChatSidebarTree.vue";
 
 const PROJECT_ID = "019c1a00-0000-7000-8000-000000000001";
@@ -44,7 +45,7 @@ async function mountTree(prepare?: (store: ReturnType<typeof useChatStore>) => v
   prepare?.(store);
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: "/chat/:sessionId", component: { template: "<div />" } }],
+    routes: [{ path: "/chat", component: { template: "<div />" } }, { path: "/chat/:sessionId", component: { template: "<div />" } }],
   });
   await router.push(`/chat/${SESSION_ID}`);
   await router.isReady();
@@ -63,6 +64,56 @@ afterEach(() => {
 });
 
 describe("ChatSidebarTree", () => {
+  it("opens a workspace-bound new task from the icon after the muted more action", async () => {
+    const { wrapper, store, router } = await mountTree(store => {
+      store.context = { ...store.context!, allowedActions: [...store.context!.allowedActions, "create_session", "use_project"] };
+    });
+    const clear = vi.spyOn(store, "clearSelectedSession").mockResolvedValue();
+    const create = vi.spyOn(store, "createSessionWithResult");
+    const drafts = useChatComposerDraftStore();
+    drafts.texts = { ...drafts.texts, new: "保留的新任务草稿" };
+    const actions = wrapper.get(".chat-tree__project-actions").findAll("button");
+    expect(actions[0]!.classes()).toContain("chat-tree__more");
+    expect(actions[0]!.get("svg").classes()).toContain("yj-icon--muted");
+    expect(actions[1]!.attributes("data-yj-tooltip")).toBe("新建任务");
+    await wrapper.get(".chat-tree__project-toggle").trigger("click");
+    await actions[1]!.trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe("/chat");
+    expect(clear).toHaveBeenCalledOnce();
+    expect(create).not.toHaveBeenCalled();
+    expect(drafts.newWorkspaceTask).toEqual({ contextId: store.context!.contextId, projectId: PROJECT_ID });
+    expect(drafts.texts.new).toBe("保留的新任务草稿");
+    expect(wrapper.get(".chat-tree__project-toggle").attributes("aria-expanded")).toBe("true");
+    wrapper.unmount();
+  });
+
+  it("keeps the current draft and selection when workspace task navigation is cancelled", async () => {
+    const { wrapper, store, router } = await mountTree(store => {
+      store.context = { ...store.context!, allowedActions: [...store.context!.allowedActions, "create_session", "use_project"] };
+    });
+    const clear = vi.spyOn(store, "clearSelectedSession").mockResolvedValue();
+    router.beforeEach(() => false);
+    await wrapper.get(".chat-tree__new-task").trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
+    expect(clear).not.toHaveBeenCalled();
+    expect(useChatComposerDraftStore().newWorkspaceTask).toBeNull();
+    wrapper.unmount();
+  });
+
+  it("disables unavailable workspaces and hides new-task actions without create permission", async () => {
+    const { wrapper, store } = await mountTree(store => {
+      store.context = { ...store.context!, allowedActions: [...store.context!.allowedActions, "create_session", "use_project"] };
+      store.projects = [{ ...store.projects[0]!, available: false }];
+    });
+    expect(wrapper.get(".chat-tree__new-task").attributes("disabled")).toBeDefined();
+    store.context = { ...store.context!, allowedActions: ["read_sessions", "read_projects", "use_project"] };
+    await flushPromises();
+    expect(wrapper.find(".chat-tree__new-task").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("keeps a native available managed directory distinct from a removed project", async () => {
     const { wrapper, store } = await mountTree();
     store.projects = [];

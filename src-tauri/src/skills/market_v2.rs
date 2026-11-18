@@ -5,8 +5,6 @@ use super::market_v2_generated::{
 };
 use crate::chat::ChatRuntime;
 use sha2::{Digest, Sha256};
-use std::io::Read;
-use std::os::unix::fs::OpenOptionsExt;
 use tauri::State;
 use uuid::Uuid;
 
@@ -19,7 +17,7 @@ pub(crate) fn failure(code: &str, retryable: bool) -> ErrorResponse {
         retryable,
     }
 }
-async fn host(
+pub(super) async fn host(
     runtime: &SkillRuntime,
     chat: &ChatRuntime,
 ) -> Result<std::sync::Arc<crate::chat::HostBridge>, ErrorResponse> {
@@ -91,7 +89,7 @@ pub async fn skills_cancel_v2(
         .skill_market_operation(&operation_id, true)
         .await
 }
-fn validate_operation(id: &str) -> Result<(), ErrorResponse> {
+pub(super) fn validate_operation(id: &str) -> Result<(), ErrorResponse> {
     let parsed = Uuid::parse_str(id).map_err(|_| failure("invalid_request", false))?;
     if parsed.is_nil() || parsed.to_string() != id {
         return Err(failure("invalid_request", false));
@@ -107,55 +105,11 @@ pub async fn skills_import_v2(
 ) -> Result<Option<Operation>, ErrorResponse> {
     validate_operation(&operation_id)?;
     let host = host(&runtime, &chat).await?;
-    let Some(file) = rfd::AsyncFileDialog::new()
-        .set_title("导入技能")
-        .add_filter("技能 ZIP 或 SKILL.md", &["zip", "md"])
-        .pick_file()
-        .await
-    else {
+    let Some(path) = super::import_dialog::pick_file().await else {
         return Ok(None);
     };
-    // The path never leaves Native and cannot be supplied by the renderer. Open
-    // the selected regular file once, bind bytes and digest, then send by value.
-    let path = file.path().to_path_buf();
-    let (name, bytes) = tokio::task::spawn_blocking(move || {
-        let name = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| failure("import_format_invalid", false))?
-            .to_owned();
-        if !name.eq_ignore_ascii_case("SKILL.md") && !name.to_ascii_lowercase().ends_with(".zip") {
-            return Err(failure("import_format_invalid", false));
-        }
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW)
-            .open(path)
-            .map_err(|_| failure("import_file_unavailable", true))?;
-        let info = file
-            .metadata()
-            .map_err(|_| failure("import_file_unavailable", true))?;
-        let max = if name.eq_ignore_ascii_case("SKILL.md") {
-            1 << 20
-        } else {
-            64 << 20
-        };
-        if !info.is_file() || info.len() == 0 || info.len() > max {
-            return Err(failure("import_too_large", false));
-        }
-        let mut bytes = Vec::new();
-        file.take(max + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| failure("import_file_unavailable", true))?;
-        if bytes.len() as u64 != info.len() {
-            return Err(failure("import_file_changed", true));
-        }
-        Ok((name, bytes))
-    })
-    .await
-    .map_err(|_| failure("import_file_unavailable", true))??;
-    let digest = format!("{:x}", Sha256::digest(&bytes));
-    host.skill_market_import(&operation_id, &name, &digest, bytes)
+    let file = super::import_dialog::read_file(path).await?;
+    host.skill_market_import(&operation_id, &file.name, &file.digest, file.bytes)
         .await
         .map(Some)
 }

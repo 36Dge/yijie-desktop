@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, ref } from "vue";
+import { computed, inject, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { NButton, NInput } from "naive-ui";
 import { expertsUiEnabled } from "../../authorization/experts-ui-config";
@@ -21,12 +21,13 @@ const route = useRoute(), router = useRouter(), chat = useChatStore(), experts =
 const summon = useExpertSummon();
 if (expertsUiEnabled) useChatExpertsBinding(computed(() => chat.context?.contextId ?? null), summon.session);
 const retryAuthority = inject(CHAT_AUTHORITY_RETRY_KEY, async () => false);
-const expertQuery = ref("");
+const queries = reactive({ experts: "", skills: "" });
 const tabs = [{ key: "experts", label: "专家" }, { key: "skills", label: "技能" }];
 const tab = computed(() => route.query.tab === "skills" ? "skills" : "experts");
 const skillsPage = ref<InstanceType<typeof SkillMarketplacePage> | null>(null);
 const returnTo = computed(() => typeof route.query.from === "string" && /^\/chat(?:\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/.test(route.query.from) ? route.query.from : null);
 if (expertsUiEnabled) useExpertsBinding(computed(() => chat.context?.contextId ?? null));
+watch(() => experts.scope, () => { queries.skills = ""; });
 function changeTab(value: string): void { void router.replace({ path: "/plugins", query: { ...route.query, tab: value } }); }
 async function refresh(): Promise<void> { if (!chat.context) await retryAuthority(); await experts.refresh(); }
 </script>
@@ -45,15 +46,22 @@ async function refresh(): Promise<void> { if (!chat.context) await retryAuthorit
     </YjPageHeader>
     <div class="extensions-page__toolbar">
       <YjTabs class="extensions-page__tabs" variant="line" :items="tabs" :model-value="tab" aria-label="扩展类型" @update:model-value="changeTab" />
-      <NInput v-show="tab === 'experts'" v-model:value="expertQuery" class="extensions-page__search" clearable placeholder="搜索专家、平台或擅长领域" :input-props="{ 'aria-label': '搜索专家' }">
+      <NInput
+        :key="tab"
+        v-model:value="queries[tab]"
+        class="extensions-page__search"
+        clearable
+        :placeholder="tab === 'skills' ? '搜索技能名称、描述或分类' : '搜索专家、平台或擅长领域'"
+        :input-props="{ 'aria-label': tab === 'skills' ? '搜索技能' : '搜索专家' }"
+      >
         <template #prefix><YjIcon name="search" size="sm" tone="muted" /></template>
       </NInput>
     </div>
     <section v-show="tab === 'skills'" class="extensions-page__panel" aria-label="技能目录">
-      <SkillMarketplacePage ref="skillsPage" embedded :active="tab === 'skills'" />
+      <SkillMarketplacePage ref="skillsPage" embedded :active="tab === 'skills'" :query="queries.skills" />
     </section>
     <section v-show="tab === 'experts'" class="extensions-page__panel" aria-label="专家列表">
-      <ExpertMarketPanel v-model:query="expertQuery" :showcase-entries="expertShowcaseCatalog" :active="tab === 'experts'" :open-expert-id="typeof route.query.expert === 'string' ? route.query.expert : undefined" :open-expert-version="typeof route.query.expertVersion === 'string' ? route.query.expertVersion : undefined" :selected-expert="summon.selected.value" :summon-busy="summon.busy.value" :summon-error="summon.error.value" @summon="summon.summon" />
+      <ExpertMarketPanel v-model:query="queries.experts" :showcase-entries="expertShowcaseCatalog" :active="tab === 'experts'" :open-expert-id="typeof route.query.expert === 'string' ? route.query.expert : undefined" :open-expert-version="typeof route.query.expertVersion === 'string' ? route.query.expertVersion : undefined" :selected-expert="summon.selected.value" :summon-busy="summon.busy.value" :summon-error="summon.error.value" @summon="summon.summon" />
     </section>
   </YjPage>
 </template>

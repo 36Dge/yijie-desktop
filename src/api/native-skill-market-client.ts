@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { MutationKind, Operation, PendingOperation } from "../domain/skill-market-v2.generated";
 import { parseNativeSkillCatalog, parseNativeSkillOperation } from "../domain/native-skill-marketplace";
@@ -33,11 +33,14 @@ export function createNativeSkillMarketClient(nativeInvoke: SkillNativeInvoker =
     if (signal?.aborted) throw new SkillNativeClientError("aborted");
     latest = result; return result;
   }
-  async function finish(initial: Operation): Promise<SkillCatalogSnapshot> {
+  async function finish(initial: Operation, confirmingImport = false): Promise<SkillCatalogSnapshot> {
     let operation = initial;
     const deadline = Date.now() + 60_000;
     for (;;) {
       announce(operation);
+      if (confirmingImport && operation.state === "cancelled") {
+        throw new SkillNativeClientError("aborted", "skill_import_cancelled");
+      }
       if (operation.state === "complete" || operation.state === "cancelled") return list();
       if (operation.state === "needs_attention") throw new SkillNativeClientError("operation-failed", operation.error_code);
       if (Date.now() > deadline) throw new SkillNativeClientError("operation-failed", "reconciliation_pending");
@@ -55,17 +58,36 @@ export function createNativeSkillMarketClient(nativeInvoke: SkillNativeInvoker =
   return {
     list, scan: (_reason, signal) => list(signal), install: id => mutate(id, "install"),
     setEnabled: (id, enabled) => mutate(id, enabled ? "enable" : "disable"), uninstall: id => mutate(id, "uninstall"),
-    async importSkill() {
-      const id = crypto.randomUUID();
-      try {
-        const result = await request("skills_import_v2", { operationId: id });
+    importDialog: {
+      async open(dialogId, onDrag) {
+        await request("skills_open_import_v2", { dialogId, events: new Channel(onDrag) });
+      },
+      async prepare(dialogId, dropId) {
+        const result = await request("skills_prepare_import_v2", { dialogId, dropId });
         if (result === null) return null;
-        return finish(parseNativeSkillOperation(result));
+        if (typeof result !== "object" || !("id" in result) || typeof result.id !== "string" ||
+            !("name" in result) || typeof result.name !== "string" || !result.id || !result.name) {
+          throw new SkillNativeClientError("incompatible", "skill_contract_mismatch");
+        }
+        return { id: result.id, name: result.name };
+      },
+      async close(dialogId) {
+        await request("skills_close_import_v2", { dialogId });
+      },
+    },
+    async importSkill(confirmation) {
+      const id = confirmation?.selectionId ?? crypto.randomUUID();
+      try {
+        const result = confirmation
+          ? await request("skills_confirm_import_v2", { ...confirmation })
+          : await request("skills_import_v2", { operationId: id });
+        if (result === null) return null;
+        return finish(parseNativeSkillOperation(result), Boolean(confirmation));
       } catch (error) {
         // A lost import response is reconciled by the same identity, not a
         // second upload. The Host catalog also restores pending work on reopen.
         if (error instanceof SkillNativeClientError && error.code === "skill_import_outcome_unknown") {
-          return finish(parseNativeSkillOperation(await request("skills_operation_v2", { operationId: id })));
+          return finish(parseNativeSkillOperation(await request("skills_operation_v2", { operationId: id })), Boolean(confirmation));
         }
         throw error;
       }

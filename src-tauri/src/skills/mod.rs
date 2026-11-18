@@ -2,6 +2,7 @@ mod catalog;
 mod defaults;
 mod experts;
 pub(crate) mod host;
+pub(crate) mod import_dialog;
 mod resources;
 
 pub(crate) use host::reconcile_background;

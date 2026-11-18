@@ -75,24 +75,22 @@ async fn native_auth_local_whitelist_login(
 #[cfg(not(feature = "feat126-s10-driver"))]
 #[tauri::command]
 async fn native_auth_logout(
+    app: tauri::AppHandle,
     runtime: State<'_, NativeAuthRuntime>,
     chat_runtime: State<'_, ChatRuntime>,
     chat_ipc_runtime: State<'_, ChatIpcRuntime>,
-    artifact_file_native_runtime: State<'_, ArtifactFileNativeRuntime>,
-    artifact_native_runtime: State<'_, ArtifactNativeRuntime>,
-    artifact_report_native_runtime: State<'_, ArtifactReportNativeRuntime>,
-    artifact_video_native_runtime: State<'_, ArtifactVideoNativeRuntime>,
 ) -> Result<AuthStatus, CommandError> {
     let status = runtime.logout().await?;
+    app.state::<skills::import_dialog::ImportDialogState>().clear();
     if let Ok(manager) = chat_runtime.authorization_manager() {
         let _ = manager.invalidate_all();
     }
     chat_ipc_runtime.invalidate_pending_bindings();
     chat_ipc_runtime.invalidate_all();
-    artifact_file_native_runtime.invalidate_all();
-    artifact_native_runtime.invalidate_all();
-    artifact_report_native_runtime.invalidate_all();
-    artifact_video_native_runtime.invalidate_all();
+    app.state::<ArtifactFileNativeRuntime>().invalidate_all();
+    app.state::<ArtifactNativeRuntime>().invalidate_all();
+    app.state::<ArtifactReportNativeRuntime>().invalidate_all();
+    app.state::<ArtifactVideoNativeRuntime>().invalidate_all();
     Ok(status)
 }
 
@@ -229,6 +227,15 @@ pub fn run() {
             }
         });
     #[cfg(not(feature = "feat126-s10-driver"))]
+    let builder = builder
+        .manage(skills::import_dialog::ImportDialogState::default())
+        .on_webview_event(skills::import_dialog::on_webview_event)
+        .on_page_load(|webview, payload| {
+            if webview.label() == "main" && matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                webview.state::<skills::import_dialog::ImportDialogState>().clear();
+            }
+        });
+    #[cfg(not(feature = "feat126-s10-driver"))]
     let builder = builder.manage(workflows::WorkflowRuntime::new(
         local_profile,
         chat_native_auth.clone(),
@@ -250,6 +257,7 @@ pub fn run() {
         if matches!(event, tauri::WindowEvent::Destroyed) {
             #[cfg(not(feature = "feat126-s10-driver"))]
             if window.label() == "main" {
+                window.state::<skills::import_dialog::ImportDialogState>().clear();
                 window
                     .state::<workflows::WorkflowRuntime>()
                     .invalidate_from_window_event();
@@ -463,6 +471,10 @@ pub fn run() {
         skills::market_v2::skills_operation_v2,
         skills::market_v2::skills_cancel_v2,
         skills::market_v2::skills_import_v2,
+        skills::import_dialog::skills_open_import_v2,
+        skills::import_dialog::skills_prepare_import_v2,
+        skills::import_dialog::skills_confirm_import_v2,
+        skills::import_dialog::skills_close_import_v2,
         skills::host::skills_list_v1,
         skills::host::skills_scan_v1,
         skills::host::skills_install_v1,

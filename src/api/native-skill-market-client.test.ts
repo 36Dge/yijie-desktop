@@ -29,4 +29,30 @@ describe("native Skill marketplace commands", () => {
     });
     expect(await createNativeSkillMarketClient(invoke).importSkill?.()).toBeNull();
   });
+  it("confirms the staged file by receipt and reconciles a lost reply with the same operation ID", async () => {
+    const selectionId = crypto.randomUUID();
+    const dialogId = crypto.randomUUID();
+    const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
+      switch (command) {
+        case "skills_prepare_import_v2":
+          expect(args).toEqual({ dialogId, dropId: "native-drop" });
+          return { id: selectionId, name: "ordinary.zip" };
+        case "skills_confirm_import_v2":
+          expect(args).toEqual({ dialogId, selectionId });
+          throw { code: "skill_import_outcome_unknown" };
+        case "skills_operation_v2":
+          expect(args).toEqual({ operationId: selectionId });
+          return { operation_id: selectionId, skill_id: "ordinary-skill", epoch: 1, state: "complete", error_code: "" };
+        case "skills_list_v2": return nativeCatalogFixture();
+        default: throw new Error(command);
+      }
+    });
+    const client = createNativeSkillMarketClient(invoke);
+    expect(await client.importDialog?.prepare(dialogId, "native-drop")).toEqual({ id: selectionId, name: "ordinary.zip" });
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect((await client.importSkill?.({ dialogId, selectionId }))?.skills).toHaveLength(1);
+    expect(invoke.mock.calls.map(call => call[0])).toEqual([
+      "skills_prepare_import_v2", "skills_confirm_import_v2", "skills_operation_v2", "skills_list_v2",
+    ]);
+  });
 });

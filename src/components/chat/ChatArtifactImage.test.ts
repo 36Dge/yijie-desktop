@@ -28,7 +28,7 @@ const URL_A = `yijie-artifact-preview://localhost/v1/${"A".repeat(43)}`;
 const URL_B = `yijie-artifact-preview://localhost/v1/${"B".repeat(43)}`;
 const URL_C = `yijie-artifact-preview://localhost/v1/${"C".repeat(43)}`;
 enableAutoUnmount(afterEach);
-const modal = defineComponent({ props: ["show"], template: '<slot v-if="show"/>' });
+const modal = defineComponent({ inheritAttrs: false, props: ["show"], emits: ["after-enter", "after-leave", "update:show"], template: '<slot v-if="show"/>' });
 const popover = defineComponent({ props: ["show"], emits: ["update:show"], template: '<div><span @click="$emit(\'update:show\', !show)"><slot name="trigger"/></span><div v-if="show"><slot/></div></div>' });
 
 function artifact(overrides: Partial<ChatArtifact> = {}) {
@@ -77,10 +77,93 @@ async function viewer(view: View) {
 }
 
 describe("ChatArtifactImage", () => {
-  it("presents the image and readable title without the metadata card or permanent actions", async () => {
+  it("reserves the decoded aspect ratio across the first viewer handoff", async () => {
+    let width = 0, height = 0;
+    vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockImplementation(() => width);
+    vi.spyOn(HTMLImageElement.prototype, "naturalHeight", "get").mockImplementation(() => height);
+    const view = await readyWrapper(nativeClient(), false);
+    const frame = view.get<HTMLElement>(".artifact-image__frame").element;
+    expect(frame.style.aspectRatio).toBe("");
+    width = 1600; height = 1200;
+    await mediaDom.decodeAll();
+    expect(frame.style.aspectRatio).toBe("1600 / 1200");
+    await viewer(view);
+    expect(frame.style.aspectRatio).toBe("1600 / 1200");
+    await view.get('[data-testid="artifact-image-close"]').trigger("click");
+    await flushPromises();
+    expect(frame.style.aspectRatio).toBe("1600 / 1200");
+  });
+
+  it("shows a request-based filename only in the viewer and keeps the original artifact identity", async () => {
     const client = nativeClient();
     const view = await readyWrapper(client);
-    expect(view.get("figcaption").text()).toBe("江南烟雨-水墨写意");
+    await view.setProps({ artifact: { ...view.props("artifact"), displayName: "generated-image" }, userRequest: "一瓶冰镇气泡果汁，动态飞溅摄影" });
+    expect(view.find("figcaption").exists()).toBe(false);
+    expect(view.text()).not.toContain("冰镇气泡果汁");
+    await viewer(view);
+    expect(view.get('[role="dialog"] header strong').text()).toBe("冰镇气泡果汁-动态飞溅摄影.jpg");
+    expect(view.props("artifact").displayName).toBe("generated-image");
+    expect(client.openImagePreview).toHaveBeenCalledOnce();
+  });
+
+  it("skips the more button in Tab order and opens its menu from the image with Shift+F10", async () => {
+    const view = await readyWrapper();
+    expect(view.get('[data-testid="artifact-image-more"]').attributes("tabindex")).toBe("-1");
+    await view.get('[data-testid="artifact-image-preview"]').trigger("keydown", { key: "F10", shiftKey: true });
+    await flushPromises();
+    expect(view.find('[role="menu"]').exists()).toBe(true);
+    expect(document.activeElement).toBe(view.get('[data-testid="artifact-image-copy"]').element);
+    await view.get('[role="menu"]').trigger("keydown", { key: "Escape" }); await flushPromises();
+    expect(document.activeElement).toBe(view.get('[data-testid="artifact-image-preview"]').element);
+  });
+
+  it.each([1, 2])("holds the image position before and throughout the first close as the reply grows at %sx", async scale => {
+    const view = await readyWrapper();
+    const scroller = document.createElement("div");
+    scroller.style.overflowY = "auto";
+    document.body.append(scroller); scroller.append(view.element);
+    let top = 400, contentTop = 450;
+    Object.defineProperties(scroller, { scrollHeight: { value: 2000 }, clientHeight: { value: 500 }, offsetHeight: { value: 500 }, scrollTop: { get: () => top, set: value => { top = Number(value); } } });
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({ top: 80 * scale, height: 500 * scale } as DOMRect);
+    const preview = view.get('[data-testid="artifact-image-preview"]').element as HTMLElement;
+    vi.spyOn(preview, "getBoundingClientRect").mockImplementation(() => ({ top: (80 + contentTop - top) * scale, height: 440 * scale } as DOMRect));
+    await viewer(view);
+    await view.setProps({ artifact: { ...view.props("artifact"), displayName: "图片已交付.jpg" } });
+    const reply = document.createElement("p");
+    contentTop += 120;
+    scroller.prepend(reply);
+    await vi.waitFor(() => expect(top).toBe(520));
+    await view.get('[role="dialog"]').trigger("keydown", { key: "Escape" });
+    contentTop += 20;
+    reply.textContent = "图片已经生成。";
+    await vi.waitFor(() => expect(top).toBe(540));
+    view.getComponent(NModal).vm.$emit("after-leave"); await flushPromises();
+    expect((preview.getBoundingClientRect().top - scroller.getBoundingClientRect().top) / scale).toBe(50);
+    top = 400; // The reader can scroll freely when the transition has finished.
+    scroller.dispatchEvent(new Event("scroll"));
+    expect(top).toBe(400);
+    scroller.remove();
+  });
+
+  it("does not infer account balance from the shared service authorization failure", async () => {
+    const client = nativeClient();
+    const view = mount(ChatArtifactImage, { props: {
+      artifact: artifact({ status: "failed", errorCode: "unsupported_provider", retryable: false }),
+      contextId: CONTEXT_A,
+      client,
+    } });
+    await flushPromises();
+    expect(view.text()).toContain("图片服务暂不可用，请检查服务授权与配置。");
+    expect(view.text()).not.toMatch(/余额|账户额度|审图/);
+    expect(view.find('[data-testid="artifact-image-loading"]').exists()).toBe(false);
+    expect(client.openImagePreview).not.toHaveBeenCalled();
+  });
+
+  it("presents only the image inline without a title, metadata card or permanent actions", async () => {
+    const client = nativeClient();
+    const view = await readyWrapper(client);
+    expect(view.find("figcaption").exists()).toBe(false);
+    expect(view.get("figure").attributes("aria-label")).toBe("江南烟雨-水墨写意.jpg");
     expect(view.find(".artifact-shell").exists()).toBe(false);
     expect(view.text()).not.toMatch(/JPEG|32 B|服务生成|已就绪|保存图片/);
     expect(view.find('[role="menu"]').exists()).toBe(false);
@@ -96,7 +179,7 @@ describe("ChatArtifactImage", () => {
     const view = mount(ChatArtifactImage, { props: { artifact: artifact({ status, displayName: null }), contextId: CONTEXT_A, client } });
     await flushPromises();
     expect(view.get('[data-testid="artifact-image-loading"]').text()).toBe(status === "transferring" ? "加载中…" : "生成中…");
-    expect(view.get("figcaption").text()).toBe("生成的图片");
+    expect(view.find("figcaption").exists()).toBe(false);
     expect(view.find("button").exists()).toBe(false);
     expect(client.openImagePreview).not.toHaveBeenCalled();
     expect(client.copyImage).not.toHaveBeenCalled();
@@ -119,7 +202,7 @@ describe("ChatArtifactImage", () => {
     expect(view.text()).not.toContain("已复制");
     expect(view.find('[role="menu"]').exists()).toBe(false);
     expect(view.find('[role="dialog"]').exists()).toBe(false);
-    expect(document.activeElement).toBe(view.get('[data-testid="artifact-image-more"]').element);
+    expect(document.activeElement).toBe(view.get('[data-testid="artifact-image-preview"]').element);
   });
 
   it("gives a pointer-opened menu keyboard ownership and dismisses it with Escape", async () => {
@@ -133,7 +216,7 @@ describe("ChatArtifactImage", () => {
     expect(document.activeElement).toBe(view.get('[data-testid="artifact-image-save"]').element);
     await popup.trigger("keydown", { key: "Escape" }); await flushPromises();
     expect(view.find('[role="menu"]').exists()).toBe(false);
-    expect(document.activeElement).toBe(trigger.element);
+    expect(document.activeElement).toBe(view.get('[data-testid="artifact-image-preview"]').element);
   });
 
   it("retains download independently of preview decoding and uses toasts for save/errors and keeps cancellation silent", async () => {
@@ -202,7 +285,7 @@ describe("ChatArtifactImage", () => {
     await viewer(view);
     expect(view.get('[data-testid="artifact-image-dialog-img"]').attributes("src")).toBe(URL_A);
     const modal = view.get('[role="dialog"]');
-    expect(modal.get("header").text()).toContain("江南烟雨-水墨写意");
+    expect(modal.get("header").text()).toContain("江南烟雨-水墨写意.jpg");
     expect(modal.findAll("header button").map(button => button.attributes("aria-label"))).toEqual(["关闭图片预览", "刷新预览"]);
     expect(modal.findAll("button")).toHaveLength(2);
     await modal.trigger("keydown", { key: "-" });
@@ -307,7 +390,8 @@ describe("ChatArtifactImage", () => {
     await view.get('[data-testid="artifact-image-preview"]').trigger("click"); await flushPromises();
     expect(view.get('[data-testid="artifact-image-dialog-img"]').element).toBe(image);
     expect(client.openImagePreview).toHaveBeenCalledOnce();
-    expect(view.get("figcaption").text()).toBe("新的标题");
+    expect(view.find("figcaption").exists()).toBe(false);
+    expect(view.get('[role="dialog"] header strong').text()).toBe("新的标题.jpg");
     expect(view.find('[data-testid="artifact-image-loading"]').exists()).toBe(false);
   });
 

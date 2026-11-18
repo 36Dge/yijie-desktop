@@ -108,7 +108,7 @@ export function traceIsLive(turn: Turn): boolean {
     turn.statusSource === "runtime_notification" && turn.domainStatus === "in_progress" && turn.availability !== "unavailable" && !traceDiagnosticBlocksLive(turn.diagnostic);
 }
 
-export function traceCurrentStatus(turn: Turn): string | null {
+export function traceCurrentStatus(turn: Turn, hasDeliveredArtifact = false): string | null {
   if ((turn.liveObserved === true && turn.source === "native_observed" && turn.statusSource === "runtime_notification" && turn.domainStatus === "waiting_approval") || turn.items.some(item => item.approval?.status === "pending")) return "等待你的确认";
   if (!traceIsLive(turn)) return null;
   if (reasoningSummaryIsCurrent(turn)) return null;
@@ -124,5 +124,5 @@ export function traceCurrentStatus(turn: Turn): string | null {
   if (latest && ["final_answer", "assistant_unclassified"].includes(latest.presentation) && latest.contentBlocks.some(block => (block.type === "text" || block.type === "code") && block.text.trim())) return null;
   if (latest?.busy && ["command", "tool", "web_search"].includes(latest.presentation)) return null;
   if (latest?.presentation === "reasoning") return "正在思考";
-  return "等待模型继续输出";
+  return hasDeliveredArtifact ? null : "等待模型继续输出";
 }

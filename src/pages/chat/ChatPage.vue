@@ -77,6 +77,7 @@ import ChatTimeline from "../../components/chat/ChatTimeline.vue";
 import { conversationMessageItemId } from "../../api/chat-conversation-adapter";
 import YjIcon from "../../components/yijie/YjIcon.vue";
 import { useChatScroll } from "../../composables/useChatScroll";
+import { presentMediaTimeline } from "../../domain/chat-media-presentation";
 import type {
   ChatDraftTarget,
   ChatHistoryTurn,
@@ -415,9 +416,11 @@ const {
   update: updateScrollPosition,
   scrollToBottom,
   scrollToAnchor,
+  scrollToSubmittedTurn,
   followNewContent,
   preservePositionWhile,
 } = useChatScroll(conversationScroller);
+const submittedTurnAnchor = ref<{ sessionId: string; turnId: string; contextId: string | undefined } | null>(null);
 
 const isSessionRoute = computed(() => routeSessionId.value !== null);
 const selectedSession = computed(() => chatStore.sessions.find((session) =>
@@ -442,7 +445,7 @@ const timelineFrameProjection = createFrameBatchedProjection(
 );
 const selectConversationTimeline = createConversationTimelineSelector();
 const contextDetails = shallowRef<ContextWindowSnapshot | null>(null);
-const conversationTimeline = computed(() => {
+const rawConversationTimeline = computed(() => {
   const sessionId = chatStore.selectedSessionId;
   return sessionId === null
     ? null
@@ -453,6 +456,8 @@ const conversationTimeline = computed(() => {
         { protectApprovalProcessContent: feat137ApprovalUiEnabled, liveTurnId: chatStore.nativeLiveTurnId },
       ), contextDetails.value));
 });
+const mediaPresentation = computed(() => presentMediaTimeline(rawConversationTimeline.value, artifactsForTimelineReference));
+const conversationTimeline = computed(() => mediaPresentation.value.timeline);
 const turnTiming = useChatTurnTimingDetails({
   scope: () => chatStore.context && chatStore.selectedSessionId && chatStore.hasAction("read_sessions")
     ? `${chatStore.context.contextId}:${chatStore.selectedSessionId}` : null,
@@ -460,6 +465,10 @@ const turnTiming = useChatTurnTimingDetails({
   read: (turnId, signal) => chatStore.readTurnTiming(turnId, signal),
 });
 const turnTimingLabels = turnTiming.labels;
+const deliveredArtifactTurnIds = computed(() => new Set((conversationTimeline.value?.turns ?? [])
+  .filter(turn => turn.items.some(item => item.contentBlocks.some(block => block.type === "artifact_reference"
+    && artifactsForTimelineReference(item, block).some(artifact => artifact.status === "ready"))))
+  .map(turn => turn.turnId)));
 const turnTimingFacts = turnTiming.facts;
 const answerActionIds = computed(() => new Set((conversationTimeline.value?.turns ?? [])
   .flatMap(turn => turn.items.filter(item => isCompletedAnswer(item, turn)).map(item => item.identity))));
@@ -786,12 +795,46 @@ watch(
   },
 );
 
+// The sidebar chooses an existing workspace only after navigation succeeds.
+// Consume once so later picker changes and ordinary new-task navigation remain independent.
+watch(
+  [() => sharedDrafts.newWorkspaceTask, routeSessionId, () => chatStore.selectedSessionId, () => chatStore.context?.contextId],
+  async ([request, sessionId, selectedSessionId, contextId]) => {
+    if (!request || sessionId !== null || selectedSessionId !== null || isDraftMode.value) return;
+    sharedDrafts.newWorkspaceTask = null;
+    if (request.contextId !== contextId || !chatStore.hasAction("create_session") || !chatStore.hasAction("use_project")) return;
+    if (!chatStore.projects.some(project => project.projectId === request.projectId && project.available)) {
+      transientNotice.value = "所选工作空间已不可用，请重新选择后发送。";
+      return;
+    }
+    selectedProjectId.value = request.projectId;
+    await nextTick();
+    if (routeSessionId.value === null && selectedProjectId.value === request.projectId) composer.value?.focusInput?.();
+  },
+  { immediate: true, flush: "post" },
+);
+
 watch(
   attachmentInteractionAllowed,
   (allowed) => {
     if (!allowed) dragActive.value = false;
   },
 );
+
+watch([submittedTurnAnchor, conversationTimeline, () => chatStore.selectedSessionId, routeSessionId, () => chatStore.context?.contextId], async ([request]) => {
+  if (!request) return;
+  if (request.contextId !== chatStore.context?.contextId || routeSessionId.value !== request.sessionId) {
+    submittedTurnAnchor.value = null;
+    return;
+  }
+  if (chatStore.selectedSessionId !== request.sessionId) return;
+  await nextTick();
+  if (submittedTurnAnchor.value !== request || routeSessionId.value !== request.sessionId) return;
+  const anchor = conversationScroller.value?.querySelector<HTMLElement>(`[data-turn-id="${request.turnId}"]`);
+  if (!anchor) return; // The local submission may still be waiting for the presentation frame.
+  scrollToSubmittedTurn(anchor);
+  submittedTurnAnchor.value = null;
+}, { flush: "post" });
 
 const presentedConversationChange = computed(() => [renderedConversationView.value, readingApprovals.value]);
 
@@ -1023,8 +1066,7 @@ async function submit(recoverExpert = false): Promise<void> {
       sharedDrafts.clearSkills(draftTargetAtStart);
 
       if (turnExpert) chatExperts.acknowledgeSubmission(result.operationId);
-      await nextTick();
-      scrollToBottom();
+      submittedTurnAnchor.value = { sessionId: result.sessionId, turnId: result.turnId, contextId: contextAtStart };
       return;
     }
     const result = await (selectedRefs?.length
@@ -1052,6 +1094,7 @@ async function submit(recoverExpert = false): Promise<void> {
     models.resetNew();
     shopPreview.adoptNewChat(result.sessionId);
     await router.push(`/chat/${result.sessionId}`);
+    if (routeSessionId.value === result.sessionId) submittedTurnAnchor.value = { sessionId: result.sessionId, turnId: result.turnId, contextId: contextAtStart };
     focusRestoreTarget = chatComposerDraftKey(result.sessionId);
   } catch (error: unknown) {
     captureError(error);
@@ -1364,9 +1407,7 @@ onBeforeUnmount(() => {
         <h1 id="active-chat-title" class="chat-workspace__title">
           {{ selectedSession?.title ?? (isHistoryLoading ? "正在读取任务" : "任务对话") }}
         </h1>
-        <p v-if="isDraftMode || selectedSession?.projectId" class="chat-workspace__meta">
-          <span v-if="isDraftMode">定时任务草案 · 仅输入文本</span><span v-else-if="selectedSession?.projectId"><YjIcon name="folder" size="xs" tone="muted" />{{ activeProject?.safeName ?? "本地项目" }}</span>
-        </p>
+        <p v-if="isDraftMode" class="chat-workspace__meta">定时任务草案 · 仅输入文本</p>
       </div>
       <div
         v-if="readiness.tone !== 'success' || readiness.actionLabel !== null"
@@ -1413,6 +1454,7 @@ onBeforeUnmount(() => {
             :timeline="conversationTimeline"
             :skill-catalog="skills.skills"
             :turn-timing-labels="turnTimingLabels"
+            :delivered-artifact-turn-ids="deliveredArtifactTurnIds"
             :connector-names-by-turn="connectorNamesByTurn"
             :can-decide-approvals="chatStore.canDecideApprovals"
             :approval-authority-revision="chatStore.approvalAuthorityRevision"
@@ -1442,6 +1484,7 @@ onBeforeUnmount(() => {
                 v-else-if="itemCopyText(item)"
                 :adapter="browserChatClipboardAdapter"
                 :text="itemCopyText(item)"
+                :kind="item.presentation === 'user_message' ? 'user-message' : 'text'"
               />
             </template>
             <template #code-actions="{ text }">
@@ -1463,6 +1506,7 @@ onBeforeUnmount(() => {
                 <ChatArtifactList
                   v-if="chatStore.context && artifacts.length > 0"
                   :artifacts="artifacts"
+                  :user-request="mediaPresentation.requests[item.turnId]"
                   :context-id="chatStore.context.contextId"
                   :native-client="chatArtifactNativeClient"
                   :video-native-client="chatArtifactVideoNativeClient"
@@ -1698,8 +1742,7 @@ onBeforeUnmount(() => {
 .chat-workspace__preview-toggle:active { background:var(--yj-color-control-pressed); }
 .chat-workspace__preview-toggle:focus-visible { outline:var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset:var(--yj-space-1); }
 .chat-workspace__title { font-size: var(--yj-font-size-card-title); line-height: var(--yj-line-height-section-title); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-workspace__meta { display: flex; gap: var(--yj-space-4); margin: var(--yj-space-1) 0 0; color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
-.chat-workspace__meta span { display: inline-flex; align-items: center; gap: var(--yj-space-1); }
+.chat-workspace__meta { margin: var(--yj-space-1) 0 0; color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
 
 .chat-workspace__header-status {
   flex: none;

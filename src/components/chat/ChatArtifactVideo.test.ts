@@ -38,6 +38,16 @@ beforeEach(() => { toast.success.mockClear(); toast.error.mockClear(); mediaDom 
 afterEach(async () => { await flushPromises(); document.body.innerHTML = ""; vi.restoreAllMocks(); });
 
 describe("ChatArtifactVideo", () => {
+  it("uses a request-based filename in the viewer without adding an inline video title", async () => {
+    const client = nativeClient(), view = await mounted(client);
+    await view.setProps({ artifact: { ...view.props("artifact"), displayName: "生成的视频.mp4" }, userRequest: "一只白色马克杯缓缓旋转，产品展示" });
+    expect(view.text()).toBe("");
+    const modal = await open(view);
+    expect(modal.get("header strong").text()).toBe("白色马克杯缓缓旋转-产品展示.mp4");
+    expect(view.props("artifact").displayName).toBe("生成的视频.mp4");
+    expect(client.openVideoPreview).toHaveBeenCalledOnce();
+  });
+
   it("decodes a real still cover once without an inline player, autoplay or metadata clutter", async () => {
     const client = nativeClient(), view = await mounted(client);
     expect(view.get("canvas").attributes("aria-hidden")).toBe("true");

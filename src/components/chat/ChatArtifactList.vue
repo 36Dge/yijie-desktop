@@ -12,6 +12,7 @@ import ChatArtifactShell from "./ChatArtifactShell.vue";
 const props = defineProps<{
   artifacts: readonly ArtifactProjection[];
   contextId: string;
+  userRequest?: string;
   openFile?: (artifact: ArtifactProjection) => void;
   nativeClient?: ChatArtifactNativeClient;
   videoNativeClient?: ChatArtifactVideoNativeClient;
@@ -47,6 +48,7 @@ function hasDocumentCard(artifact: ArtifactProjection) {
         <ChatArtifactShell
           v-else
           :artifact="artifact"
+          :user-request="userRequest"
           :open-file="openFile"
           :context-id="contextId"
           :native-client="nativeClient"

@@ -1,28 +1,41 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, useId, watch, watchEffect } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, ref, useId, watch, watchEffect } from "vue";
 import { NModal, NPopover, useMessage } from "naive-ui";
 import type { ChatArtifactNativeClient } from "../../api/chat-artifact-native-client";
 import type { ArtifactProjection } from "../../domain/chat-artifact";
 import { useChatArtifactImage } from "../../composables/useChatArtifactImage";
 import { drawArtifactFrame } from "../../composables/chat-artifact-media-cache";
+import { holdChatAutoFollowKey } from "../../composables/useChatScroll";
+import { fileNameParts } from "../../domain/chat-file-presentation";
 import YjIcon from "../yijie/YjIcon.vue";
 import YjTooltip from "../yijie/YjTooltip.vue";
 
-const props = defineProps<{ artifact: ArtifactProjection; contextId: string; client?: ChatArtifactNativeClient }>();
+const props = defineProps<{ artifact: ArtifactProjection; contextId: string; userRequest?: string; client?: ChatArtifactNativeClient }>();
 const message = useMessage();
 const { eligible, generating, title, status, alt, source, inlinePhase, inlineError, inlineBusy,
   lightboxOpen, lightboxPhase, lightboxError, lightboxBusy, openLightbox, closeLightbox,
   openPreview, action, performAction } = useChatArtifactImage(props, (text, tone) => { message[tone](text); });
 const id = useId();
+const viewerNameParts = computed(() => fileNameParts(title.value));
 const menuOpen = ref(false);
 const overlay = ref<HTMLElement | null>(null);
-const trigger = ref<HTMLButtonElement | null>(null);
 const menu = ref<HTMLElement | null>(null);
 const preview = ref<HTMLButtonElement | null>(null);
 const inlineCanvas = ref<HTMLCanvasElement | null>(null);
 const inlineImageHost = ref<HTMLElement | null>(null);
 const viewerImageHost = ref<HTMLElement | null>(null);
 const viewerPresented = computed(() => lightboxOpen.value || viewerImageHost.value !== null);
+const inlineSize = computed(() => {
+  // The cache exposes the same image node before and after its first decode.
+  if (inlinePhase.value !== "ready") return;
+  const image = source.value;
+  if (!image?.naturalWidth || !image.naturalHeight) return;
+  const ratio = image.naturalWidth / image.naturalHeight;
+  return {
+    width: `min(${image.naturalWidth}px, calc(var(--yj-image-inline-size) * ${Math.min(1, ratio)}))`,
+    aspectRatio: `${image.naturalWidth} / ${image.naturalHeight}`,
+  };
+});
 const closeButton = ref<HTMLButtonElement | null>(null);
 const viewport = ref<HTMLElement | null>(null);
 const zoom = ref(1);
@@ -40,6 +53,62 @@ let viewerRevision = 0;
 let pan: { pointerId: number; x: number; y: number; left: number; top: number } | null = null;
 let gestureStartZoom: number | null = null;
 const panning = ref(false);
+const holdAutoFollow = inject(holdChatAutoFollowKey, null);
+let readingAnchor: ReturnType<typeof trackReadingPosition> | null = null;
+function readingIdentity() { return `${props.contextId}:${props.artifact.sessionId}:${props.artifact.turnId}:${props.artifact.artifactId}`; }
+
+function topInScrollport(target: HTMLElement, element: HTMLElement) {
+  const bounds = element.getBoundingClientRect();
+  const scale = element.offsetHeight && bounds.height ? bounds.height / element.offsetHeight : 1;
+  return (target.getBoundingClientRect().top - bounds.top) / scale;
+}
+
+function trackReadingPosition(target: HTMLElement) {
+  const identity = readingIdentity();
+  const parents: { element: HTMLElement; top: number; left: number }[] = [];
+  const current = () => target.isConnected && identity === readingIdentity();
+  function align() {
+    if (!current()) return;
+    // Correct the innermost scroller first so outer scrollers see its final position.
+    for (const { element, top, left } of parents) {
+      if (!element.contains(target)) continue;
+      const delta = topInScrollport(target, element) - top;
+      if (Math.abs(delta) > 0.5) element.scrollTop += delta;
+      if (element.scrollLeft !== left) element.scrollLeft = left;
+    }
+  }
+  const resumeFollow = holdAutoFollow?.();
+  const mutations = new MutationObserver(align);
+  const resize = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(align);
+  for (let child = target, element = child.parentElement; element; child = element, element = element.parentElement) {
+    if (!/(auto|scroll)/.test(getComputedStyle(element).overflowY)) continue;
+    parents.push({ element, top: topInScrollport(target, element), left: element.scrollLeft });
+    mutations.observe(element, { subtree: true, childList: true, characterData: true, attributeFilter: ["hidden", "open", "class", "style"] });
+    resize?.observe(child);
+    resize?.observe(element);
+    element.addEventListener("scroll", align, { passive: true });
+  }
+  function release() {
+    mutations.disconnect();
+    resize?.disconnect();
+    for (const { element } of parents) element.removeEventListener("scroll", align);
+    resumeFollow?.();
+  }
+  return { target, current, align, release };
+}
+
+function releaseReadingPosition() {
+  readingAnchor?.release();
+  readingAnchor = null;
+}
+
+async function finishViewerLeave() {
+  const saved = readingAnchor;
+  await nextTick(); // The decoded image has returned to its reserved inline frame.
+  if (!saved || saved !== readingAnchor || viewerPresented.value) return;
+  saved.align();
+  releaseReadingPosition();
+}
 
 async function setMenuOpen(open: boolean) {
   menuOpen.value = open;
@@ -53,11 +122,14 @@ async function openMenuWithKeyboard() {
   await setMenuOpen(true);
   if (menuOpen.value) menu.value?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true });
 }
-watch(eligible, ready => { if (!ready) menuOpen.value = false; });
-watch(() => [props.contextId, props.artifact.sessionId, props.artifact.turnId, props.artifact.artifactId], () => { menuOpen.value = false; });
+watch(eligible, ready => { if (!ready) { menuOpen.value = false; releaseReadingPosition(); } });
+watch([() => props.contextId, () => props.artifact.sessionId, () => props.artifact.turnId, () => props.artifact.artifactId], () => {
+  menuOpen.value = false;
+  releaseReadingPosition();
+});
 function dismissMenu(restore = true) {
   menuOpen.value = false;
-  if (restore) trigger.value?.focus({ preventScroll: true });
+  if (restore) preview.value?.focus({ preventScroll: true });
 }
 function menuKey(event: KeyboardEvent) {
   event.stopPropagation();
@@ -78,14 +150,21 @@ function selectAction(kind: "copy" | "save") {
 function openViewer() {
   if (!eligible.value || inlinePhase.value !== "ready" || lightboxOpen.value) return;
   dismissMenu(false);
+  releaseReadingPosition();
+  if (preview.value) readingAnchor = trackReadingPosition(preview.value);
   // The library focus trap records this trigger before the modal is mounted.
   preview.value?.focus({ preventScroll: true });
   openLightbox();
 }
 function closeViewer() {
-  const target = preview.value;
+  const saved = readingAnchor;
+  saved?.align();
   closeLightbox();
-  void nextTick(() => { if (!lightboxOpen.value && target?.isConnected) target.focus({ preventScroll: true }); });
+  void nextTick(() => {
+    if (!lightboxOpen.value && saved === readingAnchor && saved?.current() && document.activeElement !== saved.target) {
+      saved.target.focus({ preventScroll: true });
+    }
+  });
 }
 function refreshViewer(event: MouseEvent) {
   if (lightboxBusy.value || lightboxError.value?.retryable === false) return;
@@ -106,7 +185,7 @@ watch(lightboxOpen, async open => {
   if (open) { zoom.value = 1; dimensions.value = { width: 0, height: 0 }; }
   await nextTick();
   if (revision === viewerRevision && open && lightboxOpen.value) {
-    closeButton.value?.focus();
+    closeButton.value?.focus({ preventScroll: true });
     measure();
     if (viewport.value && typeof ResizeObserver !== "undefined") {
       observer = new ResizeObserver(measure);
@@ -117,6 +196,9 @@ watch(lightboxOpen, async open => {
 watchEffect(() => {
   const image = source.value;
   if (image && inlineCanvas.value && inlinePhase.value === "ready") drawArtifactFrame(inlineCanvas.value, image, 880);
+}, { flush: "post" });
+watchEffect(() => {
+  const image = source.value;
   if (!image || inlinePhase.value !== "ready") return;
   const host = viewerPresented.value ? viewerImageHost.value : inlineImageHost.value;
   if (!host) return;
@@ -187,17 +269,16 @@ function key(event: KeyboardEvent) {
     void setZoom(event.key === "0" ? 1 : zoom.value + (event.key === "-" ? -0.1 : 0.1));
   }
 }
-onBeforeUnmount(() => { ++viewerRevision; observer?.disconnect(); });
+onBeforeUnmount(() => { ++viewerRevision; observer?.disconnect(); releaseReadingPosition(); });
 defineExpose({ openLightbox: openViewer });
 </script>
 
 <template>
   <Teleport to="body"><div ref="overlay" class="chat-control-overlay" /></Teleport>
-  <figure v-if="artifact.kind === 'image'" class="artifact-image" :aria-labelledby="`${id}-title`" :aria-busy="generating || inlineBusy">
-    <figcaption :id="`${id}-title`" class="artifact-image__title">{{ title }}</figcaption>
-    <div class="artifact-image__frame" :class="{ 'is-menu-open': menuOpen, 'is-loading-frame': inlineBusy }">
+  <figure v-if="artifact.kind === 'image'" class="artifact-image" :aria-label="title" :aria-busy="generating || inlineBusy">
+    <div class="artifact-image__frame" :style="inlineSize" :class="{ 'is-menu-open': menuOpen, 'is-loading-frame': inlineBusy }">
       <button v-if="inlinePhase === 'ready'" ref="preview" type="button" tabindex="0" class="artifact-image__preview" data-testid="artifact-image-preview"
-        :aria-label="`预览图片：${title}`" @click="openViewer">
+        :aria-label="`预览图片：${title}`" aria-keyshortcuts="Shift+F10" @click="openViewer" @keydown.shift.f10.prevent="openMenuWithKeyboard">
         <span ref="inlineImageHost" class="artifact-image__source-host" />
         <canvas v-if="viewerPresented" ref="inlineCanvas" class="artifact-image__inline" data-testid="artifact-image-inline" role="img" :aria-label="alt" />
       </button>
@@ -214,7 +295,7 @@ defineExpose({ openLightbox: openViewer });
         <template #trigger>
           <span class="artifact-image__more-anchor chat-control-anchor">
             <YjTooltip :text="menuOpen ? null : '图片操作'" to="body">
-              <button ref="trigger" class="artifact-image__more" type="button" tabindex="0" aria-label="图片操作" aria-haspopup="menu" :aria-expanded="menuOpen" :aria-controls="menuOpen ? `${id}-menu` : undefined"
+              <button class="artifact-image__more" type="button" tabindex="-1" aria-label="图片操作" aria-haspopup="menu" :aria-expanded="menuOpen" :aria-controls="menuOpen ? `${id}-menu` : undefined"
                 data-testid="artifact-image-more" @keydown.down.prevent="openMenuWithKeyboard" @keydown.enter.prevent="openMenuWithKeyboard" @keydown.space.prevent="openMenuWithKeyboard" @keydown.esc.stop="dismissMenu()">
                 <YjIcon name="more" size="md" />
               </button>
@@ -234,14 +315,14 @@ defineExpose({ openLightbox: openViewer });
         </div>
       </NPopover>
     </div>
-    <NModal :show="lightboxOpen" :mask-closable="true" :close-on-esc="true" :trap-focus="true" :auto-focus="false" :block-scroll="true" @update:show="!$event && closeViewer()" @after-enter="measure">
+    <NModal :show="lightboxOpen" :mask-closable="true" :close-on-esc="true" :trap-focus="true" :auto-focus="false" :block-scroll="true" @update:show="!$event && closeViewer()" @after-enter="measure" @after-leave="finishViewerLeave">
       <div class="artifact-image__dialog" data-testid="artifact-image-dialog" role="dialog" aria-modal="true"
         :aria-labelledby="`${id}-viewer-title`" :aria-describedby="`${id}-zoom-help`" tabindex="-1" @keydown="key">
         <header class="artifact-image__dialog-header">
           <YjTooltip text="关闭" placement="bottom-start" :show-arrow="false" to="body">
             <button ref="closeButton" class="artifact-image__icon-button" type="button" tabindex="0" data-testid="artifact-image-close" aria-label="关闭图片预览" @click="closeViewer"><YjIcon name="dismiss" size="sm" :stroke-width="1.5" /></button>
           </YjTooltip>
-          <strong :id="`${id}-viewer-title`">{{ title }}</strong><span class="artifact-image__kind">· 图片</span>
+          <strong :id="`${id}-viewer-title`"><span>{{ viewerNameParts.stem }}</span><span>{{ viewerNameParts.extension }}</span></strong><span class="artifact-image__kind">· 图片</span>
           <YjTooltip text="刷新预览" placement="bottom-end" :show-arrow="false" to="body">
             <button class="artifact-image__icon-button artifact-image__refresh" type="button" tabindex="0" data-testid="artifact-image-refresh" aria-label="刷新预览"
               :disabled="lightboxError?.retryable === false" :aria-disabled="lightboxBusy || undefined" :aria-busy="lightboxBusy || undefined" @click="refreshViewer"><YjIcon name="refresh" size="sm" :stroke-width="1.5" /></button>
@@ -268,13 +349,12 @@ defineExpose({ openLightbox: openViewer });
 </template>
 
 <style scoped>
-.artifact-image { display: grid; justify-items: start; gap: var(--yj-space-2); min-width: 0; margin: 0; }
-.artifact-image__title { max-width: min(100%, var(--yj-image-inline-size)); color: var(--yj-color-text-primary); font-size: var(--yj-font-size-body); font-weight: var(--yj-font-weight-semibold); overflow-wrap: anywhere; }
+.artifact-image { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; gap: var(--yj-space-2); min-width: 0; margin: 0; }
 .artifact-image__frame { position: relative; display: block; max-width: min(100%, var(--yj-image-inline-size)); width: fit-content; border-radius: var(--yj-radius-xs); }
 .artifact-image__frame.is-loading-frame { width: var(--yj-image-placeholder-size); height: var(--yj-image-placeholder-size); }
 .artifact-image__frame.is-loading-frame .artifact-image__preview { position: absolute; inset: 0; visibility: hidden; }
-.artifact-image__preview { display: block; max-width: 100%; padding: 0; border: 0; border-radius: inherit; overflow: hidden; background: transparent; cursor: pointer; }
-.artifact-image__frame :deep(.artifact-image__inline) { display: block; width: auto; height: auto; max-width: 100%; max-height: var(--yj-image-inline-size); border-radius: inherit; object-fit: contain; }
+.artifact-image__preview { position: absolute; inset: 0; display: block; width: 100%; height: 100%; padding: 0; border: 0; border-radius: inherit; overflow: hidden; background: transparent; cursor: pointer; }
+.artifact-image__frame :deep(.artifact-image__inline) { display: block; width: 100%; height: 100%; border-radius: inherit; object-fit: contain; }
 .is-loading { opacity: 0; }
 .artifact-image__preview:disabled { cursor: wait; }
 .artifact-image__placeholder { display: flex; box-sizing: border-box; flex-direction: column; align-items: center; justify-content: center; gap: var(--yj-space-3); width: var(--yj-image-placeholder-size); max-width: 100%; aspect-ratio: 1; padding: var(--yj-space-6); border-radius: var(--yj-radius-md); background: var(--yj-color-bg-composer-tray); color: var(--yj-color-text-primary); font-size: var(--yj-font-size-body); text-align: center; }
@@ -290,7 +370,9 @@ defineExpose({ openLightbox: openViewer });
 .artifact-image :focus-visible, .artifact-image__dialog :focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-space-1); }
 .artifact-image__dialog { position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(var(--yj-image-viewer-width), calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-8))); height: min(var(--yj-image-viewer-height), calc(var(--yj-ui-viewport-height, 100vh) - var(--yj-space-8))); overflow: hidden; border: var(--yj-border-width) solid var(--yj-color-border-default); border-radius: var(--yj-radius-lg); background: var(--yj-color-bg-elevated); color: var(--yj-color-text-primary); box-shadow: var(--yj-shadow-modal); }
 .artifact-image__dialog-header { display: flex; align-items: center; gap: var(--yj-space-2); min-width: 0; padding: var(--yj-space-1) var(--yj-space-3); background: var(--yj-color-bg-nav); }
-.artifact-image__dialog-header strong { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--yj-font-size-body); font-weight: var(--yj-font-weight-medium); }
+.artifact-image__dialog-header strong { display: inline-flex; min-width: 0; overflow: hidden; white-space: nowrap; font-size: var(--yj-font-size-body); font-weight: var(--yj-font-weight-medium); }
+.artifact-image__dialog-header strong span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.artifact-image__dialog-header strong span:last-child { flex: none; }
 .artifact-image__kind { flex: none; color: var(--yj-color-text-tertiary); }
 .artifact-image__icon-button { display: grid; place-items: center; flex: none; width: var(--yj-space-8); height: var(--yj-space-8); padding: 0; border: 0; border-radius: var(--yj-radius-md); background: transparent; color: var(--yj-color-icon-subtle); cursor: pointer; }
 .artifact-image__icon-button .yj-icon { color: inherit; }

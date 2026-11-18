@@ -6,6 +6,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { NMessageProvider } from "naive-ui";
 import { defineComponent } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SkillNativeClientError, type SkillImportDrag } from "../../api/skill-native-client";
 import {
   parseSkillCatalogSnapshot,
   type SkillCatalogSnapshot,
@@ -25,6 +26,8 @@ const nativeMock = vi.hoisted(() => ({
   setEnabled: vi.fn(),
   uninstall: vi.fn(),
   subscribeDirectoryChanged: vi.fn(),
+  importDialog: { open: vi.fn(), prepare: vi.fn(), close: vi.fn() },
+  importSkill: vi.fn(),
 }));
 
 vi.mock("../../stores/permission.store", () => ({
@@ -135,6 +138,10 @@ beforeEach(() => {
   directoryEventState.handler = null;
   directoryEventState.unlisten.mockReset();
   const initial = snapshot();
+  nativeMock.importDialog.open.mockResolvedValue(undefined);
+  nativeMock.importDialog.prepare.mockReset().mockResolvedValue(null);
+  nativeMock.importDialog.close.mockResolvedValue(undefined);
+  nativeMock.importSkill.mockResolvedValue(initial);
   nativeMock.list.mockResolvedValue(initial);
   nativeMock.scan.mockResolvedValue(initial);
   nativeMock.install.mockResolvedValue(snapshot({
@@ -162,12 +169,116 @@ afterEach(() => {
 });
 
 describe("SkillMarketplacePage", () => {
+  it("opens the import dialog first, keeps a cancelled replacement, and installs only the confirmed selection", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    const trigger = buttonByText(wrapper, "导入技能");
+    expect(trigger.find("svg").exists()).toBe(true);
+    await trigger.trigger("click");
+    await flushPromises();
+    const id = nativeMock.importDialog.open.mock.calls[0]![0];
+    expect(nativeMock.importDialog.prepare).not.toHaveBeenCalled();
+    expect(buttonByText(wrapper, "安装").attributes("disabled")).toBeDefined();
+    const file = wrapper.get('button[aria-label="选择技能文件"]');
+    nativeMock.importDialog.prepare.mockResolvedValueOnce({ id: "first", name: "ordinary.zip" });
+    await file.trigger("click");
+    await flushPromises();
+    expect(file.text()).toContain("ordinary.zip");
+    expect(file.text()).toContain("更换");
+    await file.trigger("click");
+    await flushPromises();
+    expect(file.text()).toContain("ordinary.zip");
+    expect(nativeMock.importSkill).not.toHaveBeenCalled();
+    await buttonByText(wrapper, "安装").trigger("click");
+    await flushPromises();
+    expect(nativeMock.importSkill).toHaveBeenCalledExactlyOnceWith({ dialogId: id, selectionId: "first" });
+    expect(nativeMock.importDialog.close).toHaveBeenCalledWith(id);
+    wrapper.unmount();
+  });
+
+  it("stages only a drop inside the file area and releases the selection on cancel", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    await buttonByText(wrapper, "导入技能").trigger("click");
+    await flushPromises();
+    const [id, drag] = nativeMock.importDialog.open.mock.calls[0] as [string, (event: SkillImportDrag) => void];
+    const zone = wrapper.get('button[aria-label="选择技能文件"]');
+    vi.spyOn(zone.element, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 120, 420, 186));
+    drag({ type: "drop", position: { x: 10, y: 15 }, dropId: "outside" });
+    expect(nativeMock.importDialog.prepare).not.toHaveBeenCalled();
+    drag({ type: "over", position: { x: 200, y: 170 } });
+    await flushPromises();
+    expect(zone.classes()).toContain("is-dragging");
+    nativeMock.importDialog.prepare.mockResolvedValueOnce({ id: "first", name: "SKILL.md" });
+    drag({ type: "drop", position: { x: 200, y: 170 }, dropId: "inside" });
+    await flushPromises();
+    expect(nativeMock.importDialog.prepare).toHaveBeenCalledWith(id, "inside");
+    expect(zone.text()).toContain("SKILL.md");
+    nativeMock.importDialog.prepare.mockResolvedValueOnce({ id: "second", name: "replacement.zip" });
+    await zone.trigger("click");
+    await flushPromises();
+    expect(zone.text()).toContain("replacement.zip");
+    await buttonByText(wrapper, "取消").trigger("click");
+    await flushPromises();
+    expect(nativeMock.importDialog.close).toHaveBeenCalledWith(id);
+    await buttonByText(wrapper, "导入技能").trigger("click");
+    await flushPromises();
+    expect(buttonByText(wrapper, "安装").attributes("disabled")).toBeDefined();
+    expect(nativeMock.importSkill).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("reports file errors in the dialog and allows selecting another file", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    await buttonByText(wrapper, "导入技能").trigger("click");
+    await flushPromises();
+    const zone = wrapper.get('button[aria-label="选择技能文件"]');
+    nativeMock.importDialog.prepare.mockRejectedValueOnce(new SkillNativeClientError("operation-failed", "import_format_invalid"));
+    await zone.trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[role="dialog"] [role="alert"]').text()).toContain("名为 SKILL.md");
+    expect(buttonByText(wrapper, "安装").attributes("disabled")).toBeDefined();
+    nativeMock.importDialog.prepare.mockResolvedValueOnce({ id: "valid", name: "SKILL.md" });
+    await zone.trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[role="dialog"] [role="alert"]').exists()).toBe(false);
+    expect(buttonByText(wrapper, "安装").attributes("disabled")).toBeUndefined();
+    await wrapper.get('button[aria-label="关闭安装技能"]').trigger("click");
+    expect(nativeMock.importSkill).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("keeps the selection after an install error and prevents a second submission while waiting", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    await buttonByText(wrapper, "导入技能").trigger("click");
+    await flushPromises();
+    nativeMock.importDialog.prepare.mockResolvedValueOnce({ id: "ready", name: "example.zip" });
+    await wrapper.get('button[aria-label="选择技能文件"]').trigger("click");
+    await flushPromises();
+    let rejectInstall!: (reason: Error) => void;
+    nativeMock.importSkill.mockImplementationOnce(() => new Promise((_, reject) => { rejectInstall = reject; }));
+    await buttonByText(wrapper, "安装").trigger("click");
+    const pending = buttonByText(wrapper, "安装中…");
+    expect(pending.attributes("disabled")).toBeDefined();
+    await pending.trigger("click");
+    expect(nativeMock.importSkill).toHaveBeenCalledTimes(1);
+    rejectInstall(new SkillNativeClientError("operation-failed", "import_entrypoint_missing"));
+    await flushPromises();
+    expect(wrapper.get('[role="dialog"] [role="alert"]').text()).toContain("没有找到 SKILL.md");
+    expect(wrapper.get(".skill-import-dialog__filename").text()).toBe("example.zip");
+    expect(buttonByText(wrapper, "安装").attributes("disabled")).toBeUndefined();
+    wrapper.unmount();
+  });
+
   it("renders only the native catalog in the fixed five-category order", async () => {
     const wrapper = mountPage();
     await flushPromises();
 
     expect(nativeMock.scan).toHaveBeenCalledWith("page_open", expect.any(AbortSignal));
     expect(wrapper.get("h1").text()).toBe("Skill 广场");
+    expect(wrapper.find(".yj-section__heading :is(img, svg)").exists()).toBe(false);
     expect(wrapper.findAll(".yj-section__title").map((heading) => heading.text())).toEqual([
       "货源与选品",
       "市场调研与分析",
@@ -242,6 +353,7 @@ describe("SkillMarketplacePage", () => {
     expect(nativeMock.list).toHaveBeenCalledWith(expect.any(AbortSignal));
     expect(nativeMock.scan).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain("当前仅可查看 Skill");
+    expect(wrapper.find(".skill-marketplace__import-button").exists()).toBe(false);
     expect(wrapper.find(`button[aria-label="安装 跨境营销文案"]`).exists()).toBe(false);
   });
 

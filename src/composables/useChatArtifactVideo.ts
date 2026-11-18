@@ -6,6 +6,7 @@ import {
   type ChatArtifactVideoNativeClient,
 } from "../api/chat-artifact-video-native-client";
 import type { ArtifactProjection } from "../domain/chat-artifact";
+import { mediaDisplayName } from "../domain/chat-media-presentation";
 import type { ArtifactVideoNativeErrorCode } from "../domain/chat-artifact-video-native";
 
 type Failure = Readonly<{ message: string; retryable: boolean }>;
@@ -45,7 +46,7 @@ function saveFailure(code: ArtifactVideoNativeErrorCode): string {
 }
 
 export function useChatArtifactVideo(
-  props: Readonly<{ artifact: ArtifactProjection; contextId: string; client?: ChatArtifactVideoNativeClient }>,
+  props: Readonly<{ artifact: ArtifactProjection; contextId: string; userRequest?: string; client?: ChatArtifactVideoNativeClient }>,
   notify: (message: string, tone: "success" | "error") => void,
 ) {
   const cache = useArtifactMediaCache();
@@ -76,7 +77,7 @@ export function useChatArtifactVideo(
     video.controls = true;
     video.className = "artifact-video__media";
     video.dataset.testid = "artifact-video-media";
-    video.setAttribute("aria-label", `播放视频：${props.artifact.displayName ?? "未命名视频"}`);
+    video.setAttribute("aria-label", `播放视频：${mediaDisplayName(props.artifact, props.userRequest)}`);
     video.tabIndex = 0;
     if (video.parentElement !== mediaHost.value) mediaHost.value.replaceChildren(video);
   }, { flush: "post" });

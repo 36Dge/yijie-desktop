@@ -277,7 +277,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange) { emit("app
               :file-links="item.kind === 'assistant_message'"
               :link-target="item.kind === 'assistant_message' ? {sessionId: item.threadId, turnId: item.turnId, itemId: item.itemId} : undefined"
               :mode="item.presentation === 'user_message' ? 'plain' : item.contentMode"
-              :typography="!processPresentation && (answerCandidate || ['final_answer', 'assistant_unclassified'].includes(item.presentation)) ? 'answer' : 'compact'"
+              :typography="item.presentation === 'user_message' ? 'user' : !processPresentation && (answerCandidate || ['final_answer', 'assistant_unclassified'].includes(item.presentation)) ? 'answer' : 'compact'"
               :streaming="item.kind === 'assistant_message' && item.busy === true && visible"
               :animate="visible && !['failed', 'interrupted'].includes(turn.domainStatus)"
             >

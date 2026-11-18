@@ -92,6 +92,8 @@ API / Agent Host、路由与权限语义、本地持久状态均无变化。
 
 2026-11-02 用户指定的回答评价选中态：点赞/点踩默认使用既有 Lucide 线性图标，选中使用同轮廓的实心变体，手掌与袖口保留透明间隙。变体位于 `src/icons/answer-feedback-icons.ts`，通过 registry 和 `YjIcon` 消费；16px、1.5px 线宽与原命中区保持，颜色使用 `--yj-color-text-secondary`，不添加选中底色。此为用户明确指定的状态表达例外，不更换全局图标风格或增加依赖。`contract-impact = none`：仅改变前端显示，不影响评价行为、模型、协议和持久状态。
 
+2026-11-17 用户进一步要求柔化回答操作图标：复制采用更圆的双层方框；点赞、点踩保留原手势方向，以曲线连接指尖、手掌和圆角袖口。回答工具栏使用 registry 的 `answerCopy`、`answerThumbsUp`、`answerThumbsDown`，选中变体共用同一轮廓和透明袖口间隙。保持 16px、1.5 线宽、中性前景和 32px 命中区。其他场景的全局 Copy / Thumbs 图标不受影响。`contract-impact = none`。
+
 ## 对话产物文档图标（2026-11-10 用户指定例外）
 
 普通对话产物卡片按用户要求参考 WorkBuddy 的实心折角文档风格：彩色纸张、浅色折角、白色格式标识。Markdown 为青色 M，Word 为蓝色 W，演示文稿为橙色 P，表格为绿色 X，PDF 为红色 PDF；文本、代码与其他文档使用同一轮廓的对应标识。图形为本仓绘制的 SVG 路径，位于 `src/icons/document-icons.ts`，经 registry／`YjIcon` 消费，使用专用颜色 token。

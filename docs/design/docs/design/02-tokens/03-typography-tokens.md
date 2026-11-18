@@ -52,13 +52,15 @@ Token 行使用 `--yj-font-size-context-window: 13px`，三行统一
 `--yj-line-height-context-window: 20px`。Token 行词间距 -0.06em，正文仍使用系统无衬线字体。
 此尺寸仅用于上下文用量浮层，不改变普通 tooltip、聊天正文或其他弹层的字号。
 
-### 对话回答阅读样式（2026-11-02）
+### 对话回答阅读样式（2026-11-17 对齐 WorkBuddy）
 
-正式模型回答使用独立阅读样式：正文14px、行高1.8（约25.2px），H1/H2/H3依次20/18/16px，标题行高1.5、字重600；正文强调也为600，避免嵌套粗体叠加。系统无衬线字体保持，代码使用系统等宽字体13/20，表格14/22。
+按本机 WorkBuddy 5.11.3 当前 `cr-markdown` 渲染器的默认字号档（2）对齐：阅读根字号17.143px，正文、列表、表格及已发送消息为根字号的0.875倍（约15px）；H1为根字号的1.25倍（约21.43px），H2/H3为根字号（约17.14px），H4–H6与正文相同。行高1.75，正文400、标题和强调600。使用独立 chat token，避免嵌套列表字号累乘。
+
+对话字体栈为 `"PingFang SC", -apple-system, "Helvetica Neue", Arial, "Microsoft Yahei", sans-serif`；代码使用 `"SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace`，代码块保持13/20。字号档来自安装包的默认配置，未读取 WorkBuddy 原生窗口的实时字号/缩放偏好。来源和验证范围见 `docs/verification/2026-11-17-answer-icons-and-typography.md`。
 
 段落间距12px，章节标题前24px，标题到正文8px，相邻标题12px，引导句到列表8px。普通列表项间距4px，包含多块内容的列表项与相邻项之间8px，嵌套列表与引用继承同一阅读样式。间距按相邻块类型施加，不把统一grid gap与标题margin叠加。
 
-仅正式回答启用；用户输入、深度思考及过程说明保留紧凑样式。流式和已完成回答使用同一套规则，原Markdown语义、显式换行、代码和复制原文不变。`contract-impact = none`：前端展示变化，不改变模型、协议、权限或持久状态。
+正式回答与已发送用户消息采用上述字号；深度思考和过程说明保留紧凑字号，使用同一对话字体。流式和已完成回答使用同一套规则，原Markdown语义、显式换行、代码和复制原文不变。`contract-impact = none`：前端展示变化，Desktop/API/Agent Host跨进程接口、权限和本地持久状态均不变。
 
 中文界面避免过长句。按钮文案优先 2 到 6 个汉字。解释性文案使用短句，必要时使用列表。
 

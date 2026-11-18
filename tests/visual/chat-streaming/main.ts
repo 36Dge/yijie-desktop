@@ -16,7 +16,7 @@ const answer = "**灵隐寺位于杭州西湖以西，是了解杭州佛教文�
 const expected = createChatMarkdownParser()([{identity: "body", blockIndex: 0, type: "text", text: answer}], "rich", false).text.replace(/\s/g, "");
 createApp(defineComponent({setup() {
   const stream = ref(""); const live = ref(false); const run = ref(0); const dark = ref(false); const long = ref(false);
-  const scroller = ref<HTMLElement | null>(null); const { update, showBottomButton, scrollToBottom } = useChatScroll(scroller);
+  const scroller = ref<HTMLElement | null>(null); const { update, showBottomButton, scrollToBottom, scrollToSubmittedTurn } = useChatScroll(scroller);
   const stats = ref(""); let timer: ReturnType<typeof setTimeout> | undefined;
   let frame: number | null = null; let lastPaint = 0; let lastLength = 0; let visibleSteps = 0; let maxStep = 0; let maxFrame = 0; let completedAt = 0; let drain = 0;
   const snapshot: ConversationSnapshot = { threads: [{threadId: "preview", status: "active"}], turns: [], items: [] };
@@ -60,10 +60,17 @@ createApp(defineComponent({setup() {
     timer = setTimeout(tick, 100);
     void nextTick(() => scrollToBottom());
   }
+  async function sendExample() {
+    clearTimeout(timer); stream.value = ""; live.value = true; run.value++;
+    await nextTick();
+    const anchor = scroller.value?.querySelector<HTMLElement>('[data-turn-id="live"]');
+    if (anchor) scrollToSubmittedTurn(anchor);
+  }
   frame = requestAnimationFrame(sample);
   onBeforeUnmount(() => { clearTimeout(timer); if (frame !== null) cancelAnimationFrame(frame); });
   return () => h("main", [h("h1", "易界连续流式渲染验收"), h("nav", {class: "preview-controls"}, [
     h("button", {onClick: () => play(5, 50)}, "小块流式"), h("button", {onClick: () => play(80, 300)}, "大块突发"),
+    h("button", {onClick: sendExample}, "发送本地示例消息"),
     h("button", {onClick: () => play(20, 50, true)}, "中途停顿"), h("button", {onClick: () => {long.value = !long.value;}}, long.value ? "清除历史演示" : "加载 30 轮历史"),
     h("button", {onClick: () => {clearTimeout(timer); live.value = false; stream.value = answer; completedAt = performance.now();}}, "完整历史"),
     h("button", {onClick: () => {clearTimeout(timer); live.value = false;}}, "停止"),

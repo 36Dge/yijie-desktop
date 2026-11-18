@@ -1,16 +1,16 @@
 {
   "date": "2026-10-18",
   "generator": "Codex built-in image_gen",
-  "derivation": "Each image generated independently. Original outputs preserved; sips --resampleHeightWidth 192 192 exports local 4x card / 8x category display assets. No recoloring or compositing.",
+  "derivation": "The 2026-11-18 card and fallback illustrations use the alpha >= 128 bounds to center and size each object to the listed object_long_edge_px. The complete original is proportionally resampled with Lanczos3 and composited on a #F4F4F4 sRGB tile at 192 by 192. The UI rounds the corners. Historical 2026-10-18 category art was exported with sips --resampleHeightWidth 192 192.",
   "assets": [
     {
       "index": 0,
       "id": "yijie.sourcing-selection.aliexpress-supplier-evaluator",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-211ff768-e680-4f65-b1b5-4f77b258e492.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-a5b33efd-edb6-4026-84a2-d105070b188b.png",
       "destination": "src/assets/skills/generated/aliexpress-supplier-evaluator.png",
-      "source_sha256": "2139194a6ae57efc4d2c5655462486f7592f75eade86dd1e913fa863bbcfb3e1",
-      "asset_sha256": "e62583e1c1344c5f99a46232447a368a14ec58dcea2ecbf613dad04d98581024",
+      "source_sha256": "a3f2241d17eb10d8bfd8c984bebfab488d2e66476c78814fb15ec9c17ab343f8",
+      "asset_sha256": "cdfc60c091e47a9d0eecbc9bbaaa0fa72a47da670de7db178f400ea38b7195bb",
       "source_dimensions": [
         1254,
         1254
@@ -19,16 +19,18 @@
         192,
         192
       ],
-      "asset_bytes": 33973
+      "asset_bytes": 17369,
+      "object_long_edge_px": 110,
+      "date": "2026-11-18"
     },
     {
       "index": 1,
       "id": "yijie.sourcing-selection.dropshipping-supplier-integrator",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-f6a0eca9-5f63-4e78-8d97-5daace5729f3.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-c173fdb9-9512-49a5-8d9f-7385f3a49f98.png",
       "destination": "src/assets/skills/generated/dropshipping-supplier-integrator.png",
-      "source_sha256": "fab16184d2a4b63417ce4dda4fcac7ebfe594c1f8ba55a4bc2dc0aedaa3a8f0a",
-      "asset_sha256": "8790e437e98a44050e6a866b17e193017eb47063b8b7a78b610fcd9235ad1264",
+      "source_sha256": "3e9dcabcf3809c9411646ab19e4387d58faaafbafa0ddcee96462cd18a63acf9",
+      "asset_sha256": "a00e3a0f4ff8b5a24ee30a1d2de1b3a76a2cda1cb2f3c70789929dadf1d28750",
       "source_dimensions": [
         1254,
         1254
@@ -37,16 +39,18 @@
         192,
         192
       ],
-      "asset_bytes": 37669
+      "asset_bytes": 20989,
+      "object_long_edge_px": 118,
+      "date": "2026-11-18"
     },
     {
       "index": 2,
       "id": "yijie.sourcing-selection.product-supplier-sourcing",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-952e8695-00f4-4764-afce-f81f45287251.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-7d9bcbce-9f33-4fc7-ab9e-1ec7779197ed.png",
       "destination": "src/assets/skills/generated/product-supplier-sourcing.png",
-      "source_sha256": "0281490fc636dc56b4ba511df370cd12f750e00e23753419b9708c7ff8ad187f",
-      "asset_sha256": "525d358599d668002279f66f13cdca8260148f4ca41adf1b0b5eda3a585d45cb",
+      "source_sha256": "9319ad1a07e33e7e4069378eeedf4a5f78ecf42ad6f0bda53a67d7094430a262",
+      "asset_sha256": "0f2fc060ae89561130e3fc4ee961cf718aa4c3194b046e9a32bb5e919d04e19f",
       "source_dimensions": [
         1254,
         1254
@@ -55,34 +59,40 @@
         192,
         192
       ],
-      "asset_bytes": 38033
+      "asset_bytes": 24156,
+      "object_long_edge_px": 116,
+      "date": "2026-11-18",
+      "initial_source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-3d58d078-8da7-432c-9e65-c4e10344baf6.png",
+      "initial_source_sha256": "02969752e2ad6238efcaa5a8486c07b6cac85043a7d907d9b1b880e45a6051d2"
     },
     {
       "index": 3,
       "id": "yijie.sourcing-selection.sales-negotiator",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-7b7f914b-23eb-4a6e-a06e-d626633d5bbe.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-3185657c-bd7f-4b2c-8192-ca4dca0407be.png",
       "destination": "src/assets/skills/generated/sales-negotiator.png",
-      "source_sha256": "f0f6d01fd33d4d9b31dc3d3767a69066601cd5e96e270e7ed8ea4f277fd77e21",
-      "asset_sha256": "6f967b3aeef4575c8f030e7c85b2d4ee5438049dee61e8afa90a8f016f4987fb",
+      "source_sha256": "a56d98abd6394fc5bc14791db20866b04afc4e55ab856f5092c3d339a1c020a1",
+      "asset_sha256": "c244a82fa20c98a0d06d9a0ed42aff14eb216fdfab592aabdd69caece22218e3",
       "source_dimensions": [
-        1254,
-        1254
+        1312,
+        1199
       ],
       "asset_dimensions": [
         192,
         192
       ],
-      "asset_bytes": 35312
+      "asset_bytes": 14867,
+      "object_long_edge_px": 124,
+      "date": "2026-11-18"
     },
     {
       "index": 4,
       "id": "yijie.sourcing-selection.supplier-performance-manager",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-696ea666-e33a-4378-99f4-09b05b7f1347.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-bcd6f4f5-c7b4-4b07-8698-f715fcb9a734.png",
       "destination": "src/assets/skills/generated/supplier-performance-manager.png",
-      "source_sha256": "2f6e2f37057255c1e4bc04de838dc30d8529236fa61c16d3ae049a70a3aa003b",
-      "asset_sha256": "99f53d2dcb2e6addd915513012127a1b6110deb95ec49d69f2175203268b07d0",
+      "source_sha256": "32c2865959c3c518b555c348bc7ba6757bf175f195d5585453efea65be96221b",
+      "asset_sha256": "f4bff30d0c6b22334d73857d084efe38514d2b941c85cb77b2599b3118e1bd7d",
       "source_dimensions": [
         1254,
         1254
@@ -91,16 +101,18 @@
         192,
         192
       ],
-      "asset_bytes": 28101
+      "asset_bytes": 22273,
+      "object_long_edge_px": 111,
+      "date": "2026-11-18"
     },
     {
       "index": 5,
       "id": "yijie.market-research.alibaba-amazon-market-intel",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-15f4371b-30e6-4c94-bfa8-c415ad9fefde.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-5141e860-4a47-4638-9e9a-27632fbb808e.png",
       "destination": "src/assets/skills/generated/alibaba-amazon-market-intel.png",
-      "source_sha256": "6249996fb000b13efe66b3b0c723ca918a5fdcfb57d50cad394ca8014b6cfa60",
-      "asset_sha256": "dd01f0b43197efd081e495fd988452591b7b653b3bd323db0d388cb8c835936d",
+      "source_sha256": "1c075f8daae3dc3c03e810364c1ce13f62c6264655ce0092a2b259e1c1f15ca6",
+      "asset_sha256": "950b94198cd7c8af4f49447dd9efebeacbdb368b4c133ea491451aece59971ac",
       "source_dimensions": [
         1254,
         1254
@@ -109,16 +121,18 @@
         192,
         192
       ],
-      "asset_bytes": 36411
+      "asset_bytes": 25578,
+      "object_long_edge_px": 122,
+      "date": "2026-11-18"
     },
     {
       "index": 6,
       "id": "yijie.market-research.competitor-deep-analysis",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-619660bd-67f1-4ec8-914b-b24822ab9cf6.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-99948ccc-12f9-4b5a-8a4f-bb28e948c604.png",
       "destination": "src/assets/skills/generated/competitor-deep-analysis.png",
-      "source_sha256": "3b17ed9a369c33442b3acc0b3681614ef4fb640381c67c696d70624e9f480e7d",
-      "asset_sha256": "d7e7af7327791ebe9190f00739faaff2abee98bfde972350df44e7c2467d6c49",
+      "source_sha256": "a922ec3dec72779f21f139660c84cbe6295ace5b88c39dd46c2c0789ed926e12",
+      "asset_sha256": "733a7da65727e90040eb19513db3ef0e26bc3391e14027e59d70c953f35f2349",
       "source_dimensions": [
         1254,
         1254
@@ -127,16 +141,18 @@
         192,
         192
       ],
-      "asset_bytes": 35594
+      "asset_bytes": 20509,
+      "object_long_edge_px": 120,
+      "date": "2026-11-18"
     },
     {
       "index": 7,
       "id": "yijie.market-research.cross-border-selection",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-f6637e13-536d-4443-9378-b9f81e90ec06.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-0554c33e-5ace-45cb-9bcd-8ed0a209288c.png",
       "destination": "src/assets/skills/generated/cross-border-selection.png",
-      "source_sha256": "dfab1baab920a841f9f38fd442b398e41344fe872d218f6b4c5c531da88b58de",
-      "asset_sha256": "2b0f720213fd3ff19d96457a00d235e6e33a2d363f655e2c3d639d4c8d8cb6eb",
+      "source_sha256": "ee841bde548f0e5559a2d7bf9dd77038e2161c63fe59f5e5c9e26290e2609d9b",
+      "asset_sha256": "8d8ce75d5399e72baaca82d37a6043b2aa3c4ab82d4d4cba17a5ede2cff4f10a",
       "source_dimensions": [
         1254,
         1254
@@ -145,16 +161,18 @@
         192,
         192
       ],
-      "asset_bytes": 37649
+      "asset_bytes": 21551,
+      "object_long_edge_px": 114,
+      "date": "2026-11-18"
     },
     {
       "index": 8,
       "id": "yijie.market-research.jungle-scout-deep-dive-analyzer",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-3acf9c21-6ecc-4d3a-916d-42ba7ba65c54.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-49352f19-4061-4bda-a5fa-9e0b841f42bf.png",
       "destination": "src/assets/skills/generated/jungle-scout-deep-dive-analyzer.png",
-      "source_sha256": "c4a492037ab7cd76a764e726e30762da1577e2479045c5a85c17670159e2bb51",
-      "asset_sha256": "b613b062c5b9938a5a53461c3e0e0980256563c484151ec9ce92a14840991f2e",
+      "source_sha256": "dff01565d08334e596adf3eaa9373f7ba4a13da582ad0700ec874206fc79f3e0",
+      "asset_sha256": "a724e6109684f368941b66d9106b169fdda4925a890b7ae9d795c9e1ec187359",
       "source_dimensions": [
         1254,
         1254
@@ -163,16 +181,18 @@
         192,
         192
       ],
-      "asset_bytes": 39848
+      "asset_bytes": 24081,
+      "object_long_edge_px": 120,
+      "date": "2026-11-18"
     },
     {
       "index": 9,
       "id": "yijie.market-research.market-insight-product-selection",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-6ebe4ae5-5447-4f08-9c4e-50884ab8cc75.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-d2943f1b-be5d-4cdb-a6a5-b794e338ad3e.png",
       "destination": "src/assets/skills/generated/market-insight-product-selection.png",
-      "source_sha256": "65b2cc0ca426a7f8cb1ff001578da428509eb9436398d8c1aa67502356ebae47",
-      "asset_sha256": "37bfb71c529ad5d5efdc8099907df3af353cb5cddb7358b63f0c89c73d2a0e7a",
+      "source_sha256": "e3044dc83d06d5146948f7fc24a3a394dbc510d8d796b2da2bad857c3021150c",
+      "asset_sha256": "e906c6c7aefe1014fff66dcf21affaeabdaf7270ca3d34fd3b38ae5d456df89e",
       "source_dimensions": [
         1254,
         1254
@@ -181,16 +201,18 @@
         192,
         192
       ],
-      "asset_bytes": 36425
+      "asset_bytes": 23008,
+      "object_long_edge_px": 111,
+      "date": "2026-11-18"
     },
     {
       "index": 10,
       "id": "yijie.market-research.product-attribute-analyzer",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-8b4e81bd-2990-4e81-a9ab-fa4d1fdfce27.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-72d644ce-2292-4090-bceb-afa3598b5b5b.png",
       "destination": "src/assets/skills/generated/product-attribute-analyzer.png",
-      "source_sha256": "adbbb234c20def490ffd4271c7b89ab3510aba41fe77e8c8c2d6c2a034fa44de",
-      "asset_sha256": "935344c42fd96020aeffe9031f233461f3df314d955dec7526cf3ec660490837",
+      "source_sha256": "5e3ef1464a6d46ed46b68539d5e4ff1f4fce951b824f31a9f0e37542ddf13d60",
+      "asset_sha256": "20bf972fd135916d1569eecc0ad5d87d1efe75066df8a24e39fafe9a6f4ea0bd",
       "source_dimensions": [
         1254,
         1254
@@ -199,16 +221,18 @@
         192,
         192
       ],
-      "asset_bytes": 35137
+      "asset_bytes": 16556,
+      "object_long_edge_px": 121,
+      "date": "2026-11-18"
     },
     {
       "index": 11,
       "id": "yijie.market-research.product-selection",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-e4c57b1f-5bf2-411e-a298-3fa2baabcfe0.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-0c6e319c-7a31-4bf3-bc00-de7a62dccfe1.png",
       "destination": "src/assets/skills/generated/product-selection.png",
-      "source_sha256": "745e6115088dc5995f122f99183e2f062e78d837f671268a21d2dfcf0001662c",
-      "asset_sha256": "d9c43cc43419175dec9622173a00a93c3792ad8ff3c2792348a0817e8075cc78",
+      "source_sha256": "a7d0cfa9a45d74e58eeed507b925280f40cfb0b104bb90f1873cb3da97bab80a",
+      "asset_sha256": "f963a34f036981f2d1cca280635f81b5c34071b2c375273de917431dd8caa12f",
       "source_dimensions": [
         1254,
         1254
@@ -217,16 +241,18 @@
         192,
         192
       ],
-      "asset_bytes": 32471
+      "asset_bytes": 24149,
+      "object_long_edge_px": 116,
+      "date": "2026-11-18"
     },
     {
       "index": 12,
       "id": "yijie.market-research.review-analyst-agent",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-091123b2-5a04-48d4-b928-cc684309b548.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-691a9f41-ba12-4908-af51-a3875daf35bd.png",
       "destination": "src/assets/skills/generated/review-analyst-agent.png",
-      "source_sha256": "c13ff20815cf1e589a9770dbb23a3b111f3be837c9a74f17540d29668f1dee26",
-      "asset_sha256": "fafcdb53bebcfbc5d3d9e2738da3540855f889fffc3cfb98220bcbc98972cb79",
+      "source_sha256": "044981c78f2dcd93b51aed4763bd6358076458aa9d2e796201338f8a6674cab0",
+      "asset_sha256": "7ac13971e5a2bd11fb4dbdfc7f403978290409fc2a1e89b73f21e4b17e98dd33",
       "source_dimensions": [
         1254,
         1254
@@ -235,16 +261,18 @@
         192,
         192
       ],
-      "asset_bytes": 34350
+      "asset_bytes": 22977,
+      "object_long_edge_px": 111,
+      "date": "2026-11-18"
     },
     {
       "index": 13,
       "id": "yijie.market-research.scenario-driven-product-scout",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-e2c93a85-db78-4720-bc76-0f173c672c15.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-d3d6e309-b965-4c04-b822-99a82658f58c.png",
       "destination": "src/assets/skills/generated/scenario-driven-product-scout.png",
-      "source_sha256": "17d6089830f49369ee589d749c15835f7f0a32a5c135e565fe61b7cc00f273c1",
-      "asset_sha256": "7255901c03e8fdba62212c5ca7071045009143fcd62a24db2c2d03fb89796e62",
+      "source_sha256": "ee23e02533a67ef26f46e9245ec0f502922eef1cba49ffe6a1dfa6726f3b10b5",
+      "asset_sha256": "0ab704037e37e38d4a13b46e2f6bc6debcb144bc6ee91d700c51638a130dc778",
       "source_dimensions": [
         1254,
         1254
@@ -253,16 +281,18 @@
         192,
         192
       ],
-      "asset_bytes": 34134
+      "asset_bytes": 24797,
+      "object_long_edge_px": 118,
+      "date": "2026-11-18"
     },
     {
       "index": 14,
       "id": "yijie.content-marketing.content-breakdown",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-317fc8c3-baf1-45c5-83ca-5f384c79acaf.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-373b6dac-8435-4cfa-8a07-e27bcec0021c.png",
       "destination": "src/assets/skills/generated/content-breakdown.png",
-      "source_sha256": "49a3550657b73aae0e3658c7d9283f81921a3448269b6efa6e1b0c2a346ea6be",
-      "asset_sha256": "d01580766905372856ca941675a251dde81369996d8fd77a3aa2c7ed5e64a61c",
+      "source_sha256": "84cbb4dabc9ee97d31584e433cd7ae914324c77ea5c91c289a0fd1a857e0414c",
+      "asset_sha256": "1697d8e8c90324c8c4f28c2293243bc0e34453ff8f86197c8b039d2545cdfd8c",
       "source_dimensions": [
         1254,
         1254
@@ -271,16 +301,18 @@
         192,
         192
       ],
-      "asset_bytes": 35999
+      "asset_bytes": 17372,
+      "object_long_edge_px": 122,
+      "date": "2026-11-18"
     },
     {
       "index": 15,
       "id": "yijie.content-marketing.content-strategy",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-a6d7dbe7-d82e-4777-8d35-c931ccd39fce.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-afd46035-8531-427b-a10c-c847aea8ea97.png",
       "destination": "src/assets/skills/generated/content-strategy.png",
-      "source_sha256": "7cee595735d32b41ec4e8a85552807f93de7e17ad033993d41ed11a7dbf6f901",
-      "asset_sha256": "d008343d72e4bead4794e04ebf73782403485b58a8568c19f43ff9f559c57c88",
+      "source_sha256": "af537371f18ad8c81278c01c62868e3b89129cb707f93f2e4e3b1bb871d500b5",
+      "asset_sha256": "194c271296dfeb49a1ceef0b5bd4274f89c7aa431466cd5dcddd5646a028fdf2",
       "source_dimensions": [
         1254,
         1254
@@ -289,16 +321,18 @@
         192,
         192
       ],
-      "asset_bytes": 32504
+      "asset_bytes": 24403,
+      "object_long_edge_px": 113,
+      "date": "2026-11-18"
     },
     {
       "index": 16,
       "id": "yijie.content-marketing.copywriting",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-0676ef93-1811-4b2a-ae57-7de160660f91.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-bbdc1f02-c37f-40b6-886e-10292d2d03bf.png",
       "destination": "src/assets/skills/generated/copywriting.png",
-      "source_sha256": "9d7ee26ed35958c5ec881f68e96aac457e3557122a0bf8acba83a2fce7b6767d",
-      "asset_sha256": "7caaca37e4e4b06adc85aca6ec60406ed8c2b6f3bff2b3189c9b190e361d94ed",
+      "source_sha256": "113e1b4cb5a1dea5293e6a1325e98a934f66604d0abe571b307aec1ad937805b",
+      "asset_sha256": "44d161026bb2eedaf547e132d1e4188e4af814cf398b628e8e917d4c78e078b1",
       "source_dimensions": [
         1254,
         1254
@@ -307,16 +341,18 @@
         192,
         192
       ],
-      "asset_bytes": 30455
+      "asset_bytes": 30669,
+      "object_long_edge_px": 121,
+      "date": "2026-11-18"
     },
     {
       "index": 17,
       "id": "yijie.content-marketing.product-marketing-context",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-cd88ffad-1e72-40e3-ade8-4b80771149eb.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-0f7adebf-f8b4-4dd1-afba-813052c5e7c3.png",
       "destination": "src/assets/skills/generated/product-marketing-context.png",
-      "source_sha256": "7614df37bbc06fadecb2dd84386b2bf97c94eea00af4eb617daf9ec4bd03cae0",
-      "asset_sha256": "03eee013caa3b62cbbee50552958b52cf73f7dab45128dca35fb3733af0603eb",
+      "source_sha256": "83dde007e28727766b04bf5d3f83c270c53ff973d22c8f276cb8e85b458f5800",
+      "asset_sha256": "50d7079ebacee068aea163a8772a065543e9461cf46ac9fdfc5f5a39579a41e3",
       "source_dimensions": [
         1254,
         1254
@@ -325,16 +361,18 @@
         192,
         192
       ],
-      "asset_bytes": 33458
+      "asset_bytes": 26158,
+      "object_long_edge_px": 116,
+      "date": "2026-11-18"
     },
     {
       "index": 18,
       "id": "yijie.content-marketing.social-media-content-creator",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-203d587b-7093-45ae-ae85-ebadd9dd6c8e.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-0dd25ecd-bbb8-4f40-bb1e-1586b4eaf298.png",
       "destination": "src/assets/skills/generated/social-media-content-creator.png",
-      "source_sha256": "77a4dc2c54395e6523fb4c6c238c1fcbaf6ab61716790d8862dd47d01f385fed",
-      "asset_sha256": "9de174a296b45f2ba4e12ef7d243f20132a9e36057cbce924dd8e862f8f4ea50",
+      "source_sha256": "0e354d201770c658bbef71f08d0c7a2e79e1c1de4a63db5151bfc3d65fba45d2",
+      "asset_sha256": "037d07ec8c777cbcfd40e5729c16d6808c4bf333025b72d6b2dc212b41ce566e",
       "source_dimensions": [
         1254,
         1254
@@ -343,16 +381,18 @@
         192,
         192
       ],
-      "asset_bytes": 31950
+      "asset_bytes": 17651,
+      "object_long_edge_px": 115,
+      "date": "2026-11-18"
     },
     {
       "index": 19,
       "id": "yijie.content-marketing.vibe-marketing",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-912a3e3a-0269-4863-b5a1-3e6f26989fba.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-c695f66a-ca07-491c-a3de-564c37f1ff21.png",
       "destination": "src/assets/skills/generated/vibe-marketing.png",
-      "source_sha256": "1641560112b4bc19d64ea8f36c77f95078b4d52b58dffc535209457ac0ed0369",
-      "asset_sha256": "5ee221e919b12f6fede85581377fed2fdbec80052d873033c71349e4402f85b0",
+      "source_sha256": "dd7a3b89a362a07bd5834bb530aad476ebc24f70c53f7d88bb8a92a4778f55ea",
+      "asset_sha256": "5f5531d1503193aadc76929e1cc6bd4292bae2a5b52e783be12398d7fe0475a1",
       "source_dimensions": [
         1254,
         1254
@@ -361,16 +401,18 @@
         192,
         192
       ],
-      "asset_bytes": 35150
+      "asset_bytes": 18333,
+      "object_long_edge_px": 119,
+      "date": "2026-11-18"
     },
     {
       "index": 20,
       "id": "yijie.content-marketing.xiaohongshu-content-creator",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-73895c42-19c3-49e3-8684-d9e4d861e36d.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-08c69fd2-9bb6-4a21-bef6-f5b7e7162c51.png",
       "destination": "src/assets/skills/generated/xiaohongshu-content-creator.png",
-      "source_sha256": "29f77590f6850d415923c40a4be5296cb87a57428b8a0c4a5ec49ba2dc63acd0",
-      "asset_sha256": "012020188ede86d25babc5759c428a5c4fd35685171d2dde6962b1b4c01f32e8",
+      "source_sha256": "591bd84431786e2b991950f3b0f5b13e78a3b9241c4974b165551a6ed5b5b938",
+      "asset_sha256": "2477c514f27a48ed56263489182c7ed73cf9e01f2935b58cbcaf2d61533feccf",
       "source_dimensions": [
         1254,
         1254
@@ -379,16 +421,18 @@
         192,
         192
       ],
-      "asset_bytes": 33018
+      "asset_bytes": 23499,
+      "object_long_edge_px": 113,
+      "date": "2026-11-18"
     },
     {
       "index": 21,
       "id": "yijie.traffic-advertising.amazon-listing-expert",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-8d3f4fa2-dace-4369-9b07-28e01f5e07e1.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-99f1fef9-4afe-42e1-b417-01ce02e241a1.png",
       "destination": "src/assets/skills/generated/amazon-listing-expert.png",
-      "source_sha256": "cc7500b31e4aa8eb9ad6af162fc63a546dffb733ffdb3f495faa77fad993d689",
-      "asset_sha256": "b0e354e89c5e4894b196151a1465adb0aea2561aee1f05a69b1ab2ed3e6ab7d1",
+      "source_sha256": "a0667d69738014a43705f8ba590ac02402bbc59ae6b4060fa1e6c29a9c90e6b2",
+      "asset_sha256": "538367dfae624da54284fd7164bdec02bf0b77e0ef039150ca31710f28f7b78e",
       "source_dimensions": [
         1254,
         1254
@@ -397,16 +441,18 @@
         192,
         192
       ],
-      "asset_bytes": 32505
+      "asset_bytes": 22008,
+      "object_long_edge_px": 115,
+      "date": "2026-11-18"
     },
     {
       "index": 22,
       "id": "yijie.traffic-advertising.amazon-ppc-campaign-manager",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-2e25230b-9eb5-41e7-b013-ecbcfb1c81d6.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-6f6edd63-378c-454e-bc5c-47d88ec4c2b8.png",
       "destination": "src/assets/skills/generated/amazon-ppc-campaign-manager.png",
-      "source_sha256": "decfb86ca72b44f0d38cf5b1f3df7046c0c71cbbdba0cbda2c4a06cfe0a74dcd",
-      "asset_sha256": "f4c9781940690a7462d799a61924bcc69b8bb9549af1d02c5237f505515c562a",
+      "source_sha256": "df0bfa97870989c1dd934fe5af247b54ec853b87b83d4b34b44b9bd3b116cb9b",
+      "asset_sha256": "5b6c233704594ffbc151c10e9186e239f69a8f564a0fc100337c3e0373540f7b",
       "source_dimensions": [
         1254,
         1254
@@ -415,16 +461,18 @@
         192,
         192
       ],
-      "asset_bytes": 36965
+      "asset_bytes": 20528,
+      "object_long_edge_px": 122,
+      "date": "2026-11-18"
     },
     {
       "index": 23,
       "id": "yijie.traffic-advertising.amz-hot-keywords",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-27d864c1-e794-4d49-b276-1109caf88aaa.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-f2dada4c-2c57-44d9-9efe-e4ff88648f32.png",
       "destination": "src/assets/skills/generated/amz-hot-keywords.png",
-      "source_sha256": "a356067e9d1d8c4b2578533108aa0c3b47952951f124577b7e611cdfe8c6e990",
-      "asset_sha256": "919e75ba00176d5dd5808365f6a75334fcfd9c1c5dc3db2ed51f102d0750968e",
+      "source_sha256": "87f2d0449e54a41b7cb24de41e8221818d28deedb2b62490eb7ec92861a44a67",
+      "asset_sha256": "c190153cf6b3182eb018ec3d44fd5339e5342e30e60b0a6a59750b91ca363c5b",
       "source_dimensions": [
         1254,
         1254
@@ -433,16 +481,18 @@
         192,
         192
       ],
-      "asset_bytes": 35304
+      "asset_bytes": 21181,
+      "object_long_edge_px": 111,
+      "date": "2026-11-18"
     },
     {
       "index": 24,
       "id": "yijie.traffic-advertising.amz-product-optimizer",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-2dec459f-8d0d-408e-8f5a-62c633df5959.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-ca6764e5-1b4d-4612-a3e2-1e0a075b88e3.png",
       "destination": "src/assets/skills/generated/amz-product-optimizer.png",
-      "source_sha256": "f699f6511df75c62886fa6f317e9fd2509318d4552c4e51cdd726825386d0df4",
-      "asset_sha256": "47e7133b21be2aad14446054135af37d447bf0ed55b4b010180cbe1cb874d44f",
+      "source_sha256": "041e11ec9fab15cd05ee4f835acb8c85515c99c0d7731795d3ef5a691ab4b6fe",
+      "asset_sha256": "b5aa610db3c2ff1773be8fcc848909ee55546a26a5864843a15880b17b91e8c7",
       "source_dimensions": [
         1254,
         1254
@@ -451,16 +501,18 @@
         192,
         192
       ],
-      "asset_bytes": 32112
+      "asset_bytes": 30560,
+      "object_long_edge_px": 118,
+      "date": "2026-11-18"
     },
     {
       "index": 25,
       "id": "yijie.traffic-advertising.ecommerce-seo-optimizer",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-7d372552-1b25-49e1-bbaa-e4d5eaa2ee51.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-1848368f-6778-4a31-ada2-25b36cd5e60d.png",
       "destination": "src/assets/skills/generated/ecommerce-seo-optimizer.png",
-      "source_sha256": "e69219a95ed93431bf2ad50fbeefd3b3a41b05ee1751c6565d18084ed1367933",
-      "asset_sha256": "43f4c943e08168b28363423adcb0a4501c9d76d6318ed083e45a3605490574a9",
+      "source_sha256": "a08727c2615cd61ef1612c9038af4e4fe34bbcbac255a06c342345b6cc9ea4be",
+      "asset_sha256": "0d27ed4b6e604a4632406fb25cab3a2f2a8cd3661f89bb34e06fc123ad2ba681",
       "source_dimensions": [
         1254,
         1254
@@ -469,16 +521,20 @@
         192,
         192
       ],
-      "asset_bytes": 36625
+      "asset_bytes": 22673,
+      "object_long_edge_px": 112,
+      "date": "2026-11-18",
+      "initial_source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-67e6f4f8-0c49-4fa8-8b71-2b1cbbbd38b5.png",
+      "initial_source_sha256": "fd30e12cf09a3e231c93b9e105f9cb84ee65aace0d98efb0895892d5ea6d7e93"
     },
     {
       "index": 26,
       "id": "yijie.traffic-advertising.etsy-seo-optimizer",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-3fbff2c5-f24e-4fe1-a6ba-18b4b0a4267c.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-1a793633-9911-496f-bc4e-6d75cc26c727.png",
       "destination": "src/assets/skills/generated/etsy-seo-optimizer.png",
-      "source_sha256": "de3b8d463dd8f1badb29d3375a10ad9d4319c2a856a72641b35251f8e06ba8a7",
-      "asset_sha256": "88ad14a93918421c3a0aa31265325fb6a43ae6d44ea0888ea1a9e83dc7ad7e2a",
+      "source_sha256": "aab11735e3fe7c7d72020769f3876652dbae543ce78d6f9339dd6cff7365c34f",
+      "asset_sha256": "bd63ff08d8fdf069dfa7b45ab75d7ae294bd1db8fb39d546892e7e0eccf34c8e",
       "source_dimensions": [
         1254,
         1254
@@ -487,16 +543,18 @@
         192,
         192
       ],
-      "asset_bytes": 36825
+      "asset_bytes": 25288,
+      "object_long_edge_px": 118,
+      "date": "2026-11-18"
     },
     {
       "index": 27,
       "id": "yijie.traffic-advertising.product-description-generator",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-cc4f08ab-d5ea-44f7-aa08-418c0508deb0.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-5b3a2bfb-eb51-4243-863b-d409fbe05e9b.png",
       "destination": "src/assets/skills/generated/product-description-generator.png",
-      "source_sha256": "62ae11145bd1fcbf9df2446646b1771fdf4fdb6264552417557c0a06aae20403",
-      "asset_sha256": "91e767f9589de33259e1bbeb6c9380e5c08e65aa14ac180c6a8f6b466baec7d1",
+      "source_sha256": "71c6d68db336acc7114fe302a8f3c419f6f9e8387e828289e253b3a31762f9f6",
+      "asset_sha256": "f327412c0ddf46cda0bf58d8b3c88efa8868d10d989e2f59a7fbc43d8832a0fa",
       "source_dimensions": [
         1254,
         1254
@@ -505,16 +563,18 @@
         192,
         192
       ],
-      "asset_bytes": 33569
+      "asset_bytes": 21341,
+      "object_long_edge_px": 117,
+      "date": "2026-11-18"
     },
     {
       "index": 28,
       "id": "yijie.traffic-advertising.seo-keyword-research",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-7a5e8cb1-0536-452e-9846-68a07b62f145.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-8d64a0fc-6663-414b-9d11-2b95218ddd88.png",
       "destination": "src/assets/skills/generated/seo-keyword-research.png",
-      "source_sha256": "69fa15a69e89ff2ddb496288b9bf15b436fcfb0f8865040811469382dd76e19f",
-      "asset_sha256": "73e7ed2e7df969cd54543903a75ca6dc071389e3a429eaa899aef32d1de65773",
+      "source_sha256": "2b091644bb4068e7862efbf7211de6344cc156bda46227d6e0a30e6518c52168",
+      "asset_sha256": "f2d91896cd307be51042fed3cc3f6c06b669e00137f1ecba8e880a043ab7c22b",
       "source_dimensions": [
         1254,
         1254
@@ -523,16 +583,18 @@
         192,
         192
       ],
-      "asset_bytes": 30722
+      "asset_bytes": 18243,
+      "object_long_edge_px": 118,
+      "date": "2026-11-18"
     },
     {
       "index": 29,
       "id": "yijie.traffic-advertising.tiktok-ads-strategy",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-ea0456ae-c2fb-4d6e-a283-539e82ea8d29.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-18ab4221-1e61-407f-9382-6d166d0c05b4.png",
       "destination": "src/assets/skills/generated/tiktok-ads-strategy.png",
-      "source_sha256": "59c3bd1e821c2ea9d30d8111d3941b8259afaf5658c947598d5dc99fe53f531d",
-      "asset_sha256": "904cb084037ee634edb7511aadb45bd05e53f8b193255e3b0bbb99dd9d85ab50",
+      "source_sha256": "7138e70af0674bed07159f6540d9c195afb25960bdedd9d98d6e89a13c038e1d",
+      "asset_sha256": "34bc4042afb770f9cc9d900bb42334fb2a5daaf355a844cfe2f27caf7f0ded6d",
       "source_dimensions": [
         1254,
         1254
@@ -541,16 +603,18 @@
         192,
         192
       ],
-      "asset_bytes": 32382
+      "asset_bytes": 24992,
+      "object_long_edge_px": 121,
+      "date": "2026-11-18"
     },
     {
       "index": 30,
       "id": "yijie.store-operations.amazon-brand-protection",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-2b770170-a014-44cb-ae10-0eca3333a150.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-0acdf40d-6863-4c4c-9b69-29d7415af622.png",
       "destination": "src/assets/skills/generated/amazon-brand-protection.png",
-      "source_sha256": "d8739c961ede09e0e59173cd78fe3222a7693cac8b2d5c3cea4cf07db51b3838",
-      "asset_sha256": "cef327c31952a70dbdb8cb2689144768fd49f77b6ca518733702af97210fd29e",
+      "source_sha256": "ea8e6a6ece4191018add80f2436d25e2a873cd11bca05ed113c42f1a205d974d",
+      "asset_sha256": "57888ed14f7b9028838ff2e05b044f2ea71899211b93e6ba8cf6cfc0d65cf469",
       "source_dimensions": [
         1254,
         1254
@@ -559,16 +623,18 @@
         192,
         192
       ],
-      "asset_bytes": 34940
+      "asset_bytes": 22090,
+      "object_long_edge_px": 112,
+      "date": "2026-11-18"
     },
     {
       "index": 31,
       "id": "yijie.store-operations.buy-now-pay-later-setup",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-526f9b1c-8450-40d9-86a5-0db5001ff6de.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-0235647b-0bee-42b9-8f16-b0d4ed73e91b.png",
       "destination": "src/assets/skills/generated/buy-now-pay-later-setup.png",
-      "source_sha256": "2717719064120d0301db885ddb71ca88ebb79ec7e9b54fa662544377c58b352e",
-      "asset_sha256": "9ea3da74a09d43875651cb20e808e4d6df183c6d117b9d984415b7fed5d6014a",
+      "source_sha256": "7acb4358110ed6f8b0a235741c75d949ac65d7e5a1d9a191b8c9f75c1f245d3b",
+      "asset_sha256": "91522d3ec06a045318f8adef323158038409b336ba52465502e1ecbeea3cb16d",
       "source_dimensions": [
         1254,
         1254
@@ -577,16 +643,18 @@
         192,
         192
       ],
-      "asset_bytes": 32753
+      "asset_bytes": 25972,
+      "object_long_edge_px": 115,
+      "date": "2026-11-18"
     },
     {
       "index": 32,
       "id": "yijie.store-operations.ecommerce-gdpr-compliance",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-d4a376cb-f4f7-4510-8766-30d580d12876.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-feffbbf6-efee-415a-8c3a-d089ada34267.png",
       "destination": "src/assets/skills/generated/ecommerce-gdpr-compliance.png",
-      "source_sha256": "a113c73a0fa2a9f8312c70ff32ce4822378b75ea18013f24ccce5380c1f6d5c4",
-      "asset_sha256": "67afadfc719c542272d3a8bfbe4debfc3a57b751e0e382217a7283cd6852bf79",
+      "source_sha256": "f0c14bf98f98548579dac36cf57e2e1390bbd70acdac2a1f9cccc06469dba3cb",
+      "asset_sha256": "e4547f0e1b3d18622bb0b8891db5a0e4b43f5ab39c73942f4083cfe7ca3bf690",
       "source_dimensions": [
         1254,
         1254
@@ -595,16 +663,18 @@
         192,
         192
       ],
-      "asset_bytes": 35267
+      "asset_bytes": 26975,
+      "object_long_edge_px": 115,
+      "date": "2026-11-18"
     },
     {
       "index": 33,
       "id": "yijie.store-operations.invoice-generator",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-a39d965a-920c-4084-b523-93f9a373c49c.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-97d832dc-4bee-4e5b-8976-c0721676786d.png",
       "destination": "src/assets/skills/generated/invoice-generator.png",
-      "source_sha256": "86dd14c47143d07f70a9205b8316b8f3aaa8dba61f41f7459450bcffb3a3cd12",
-      "asset_sha256": "13c4a6a333801c2a058e2eb0bdb50df206b0a37e78fb2950d5e7450b7b4caa97",
+      "source_sha256": "c4476dcbe56263bccaa4c168736b45eac5d0f9d0b329b93d516c958a62f456dd",
+      "asset_sha256": "44f3b35fbf081f0b0cea9e3235b32040b56cc62885492a324a7dbbb4274e8f4e",
       "source_dimensions": [
         1254,
         1254
@@ -613,16 +683,18 @@
         192,
         192
       ],
-      "asset_bytes": 31617
+      "asset_bytes": 20568,
+      "object_long_edge_px": 114,
+      "date": "2026-11-18"
     },
     {
       "index": 34,
       "id": "yijie.store-operations.multichannel-inventory-sync",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-85947c64-ee57-4a9c-8f89-89cd7d0bf920.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-e70c1ccc-900c-4e1c-8c00-4a394952077a.png",
       "destination": "src/assets/skills/generated/multichannel-inventory-sync.png",
-      "source_sha256": "0403f5370e38a5ec6281e6657a494d00c8e6641da706d2bf4723cde4577c4819",
-      "asset_sha256": "b66033657cc4d8971738916e6563a8fa61fd660a80fa58be6466b507aa57c01e",
+      "source_sha256": "8d65e86ea662df5d94a0178828ff25113f04a271d867f1d02c5c535531867a76",
+      "asset_sha256": "7bd469ee9ec6b45c93bee8397d8cdf574a8141b7af675a6d1c6ef416f0988936",
       "source_dimensions": [
         1254,
         1254
@@ -631,34 +703,38 @@
         192,
         192
       ],
-      "asset_bytes": 33511
+      "asset_bytes": 27374,
+      "object_long_edge_px": 120,
+      "date": "2026-11-18"
     },
     {
       "index": 35,
       "id": "yijie.store-operations.payment-fraud-detector",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-9dee9623-0da6-4fd9-8d7a-a47b0b774a53.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-62c9fb8c-9513-44f3-96e0-210fff11cc8c.png",
       "destination": "src/assets/skills/generated/payment-fraud-detector.png",
-      "source_sha256": "a75d9b45e04aa48ba1c25d18788c52cb0c492b7c4ae4fadce25f82cad0af999e",
-      "asset_sha256": "2f70cd9cadd7488297b861d4e90fb9b628070a09e1fa649b07c556dbe1b73f15",
+      "source_sha256": "ad0040e038d040202a24cfb29c6c4b0b5da13ce39c1dbcc977ea977d0fcac66b",
+      "asset_sha256": "b35e46cc41cecf75c47fe85598407f995b4826f7537e836bc3fa473276e96c8a",
       "source_dimensions": [
-        1254,
-        1254
+        1312,
+        1199
       ],
       "asset_dimensions": [
         192,
         192
       ],
-      "asset_bytes": 33740
+      "asset_bytes": 22203,
+      "object_long_edge_px": 120,
+      "date": "2026-11-18"
     },
     {
       "index": 36,
       "id": "yijie.store-operations.tiktok-shop-setup",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-f1281e3f-c5f8-41f4-972b-53d451200c48.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-1da545e4-995a-4cc9-973a-2d79d783f278.png",
       "destination": "src/assets/skills/generated/tiktok-shop-setup.png",
-      "source_sha256": "b1ce0c5b4a67a3ed81ab960c32a5c337467b0da3bc310dc69ff3ea32cde68701",
-      "asset_sha256": "9eb46612d14094b3b2a6f5682e926bcca7ece96ba53ee781504d316da4f644f6",
+      "source_sha256": "92db1e9facc508c34d9d248252cb33f5eb5665f8cd15214c0da9946b2b56ae27",
+      "asset_sha256": "c7592596b27586faa16355c641c55a592e4996fd09e587bc823573b1adee520a",
       "source_dimensions": [
         1254,
         1254
@@ -667,16 +743,18 @@
         192,
         192
       ],
-      "asset_bytes": 30442
+      "asset_bytes": 28022,
+      "object_long_edge_px": 117,
+      "date": "2026-11-18"
     },
     {
       "index": 37,
       "id": "yijie.store-operations.warehouse-fulfillment-workflow",
       "kind": "skill",
-      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-988b9b2d-a59a-4b79-8dc7-778d79e2655a.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-7b59ca49-c818-4b85-a0cc-123da88c5bb1.png",
       "destination": "src/assets/skills/generated/warehouse-fulfillment-workflow.png",
-      "source_sha256": "ebe11a89bedfa63ee0c701680a00da8de63d1b813341d128d81142517325cdaf",
-      "asset_sha256": "09e0093bdcf2b9292ea7674448caef8d7c5aa002dac2ea9daf646d5af6655dab",
+      "source_sha256": "de5a99e4f772debeb82b6f3ce50b31eb94acea4ccf85391d5ab04225df2cd8a8",
+      "asset_sha256": "600a28356adcfcdbc99cf0b2291b24d2095bc87e1176b965bc8b4def56ba2ed0",
       "source_dimensions": [
         1254,
         1254
@@ -685,7 +763,9 @@
         192,
         192
       ],
-      "asset_bytes": 30325
+      "asset_bytes": 24110,
+      "object_long_edge_px": 124,
+      "date": "2026-11-18"
     },
     {
       "index": 38,
@@ -776,6 +856,26 @@
         192
       ],
       "asset_bytes": 28480
+    },
+    {
+      "index": 43,
+      "id": "personal",
+      "kind": "fallback",
+      "destination": "src/assets/skills/generated/personal-skill-manual.png",
+      "source": "/Users/jack/.codex/generated_images/01a1ece1-ae70-7e71-a290-671b54cd253b/exec-aadb07f6-9623-4eef-a8c0-f00339e79bcb.png",
+      "source_sha256": "7cb3ab68722bdfea50d77ac0cf90bdd9734003b7a170e3686079e22702a20e48",
+      "asset_sha256": "f3523f69c7dbab5b9126f13c79a90f380bc9a80c301b6efe68771997f843ad93",
+      "source_dimensions": [
+        1254,
+        1254
+      ],
+      "asset_dimensions": [
+        192,
+        192
+      ],
+      "asset_bytes": 18860,
+      "object_long_edge_px": 111,
+      "date": "2026-11-18"
     }
   ]
 }

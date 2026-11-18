@@ -1,14 +1,23 @@
 {
   "schemaVersion": 2,
   "feature": "FEAT-174",
-  "authority": "Native command names and file-picker boundary; shared bodies come from yijie-contracts skills/market-v2",
+  "authority": "Desktop owns native command names, import dialogs and file selection. Shared bodies come from yijie-contracts skills/market-v2.",
   "wireSchema": "../../contracts/skill-market-v2.schema.json",
   "commands": {
     "skills_list_v2": {"capability": "plugin.read", "arguments": [], "response": "Catalog"},
     "skills_mutate_v2": {"capability": "plugin.manage", "arguments": ["request"], "request": "Mutation", "response": "Operation"},
     "skills_operation_v2": {"capability": "plugin.read", "arguments": ["operationId"], "operationId": "canonical nonzero UUID", "response": "Operation"},
     "skills_cancel_v2": {"capability": "plugin.manage", "arguments": ["operationId"], "operationId": "canonical nonzero UUID", "response": "Operation"},
-    "skills_import_v2": {"capability": "plugin.manage", "arguments": ["operationId"], "operationId": "canonical nonzero UUID", "response": "Operation or null when picker is cancelled", "inputAuthority": "Native picker-owned regular file, bounded read and SHA-256; no renderer path or bytes"}
+    "skills_import_v2": {"capability": "plugin.manage", "arguments": ["operationId"], "operationId": "canonical nonzero UUID", "response": "Operation or null when picker is cancelled", "inputAuthority": "Native picker-owned regular file, bounded read and SHA-256; no renderer path or bytes"},
+    "skills_open_import_v2": {"capability": "plugin.manage", "arguments": ["dialogId", "events"], "dialogId": "canonical nonzero UUID", "events": "Tauri channel for ImportDrag", "response": "void"},
+    "skills_prepare_import_v2": {"capability": "plugin.manage", "arguments": ["dialogId", "dropId?"], "response": "{id, name} or null when picker is cancelled", "inputAuthority": "Native picker or single-use native drop receipt in the active dialog. A successful read replaces its in-memory selection. Cancellation or read failure preserves the previous selection."},
+    "skills_confirm_import_v2": {"capability": "plugin.manage", "arguments": ["dialogId", "selectionId"], "response": "Operation", "inputAuthority": "Current selection from the same dialog. The selection ID is the Host operation ID for every retry of its bound bytes and SHA-256."},
+    "skills_close_import_v2": {"capability": "plugin.manage", "arguments": ["dialogId"], "response": "void", "effect": "Release only the matching dialog, its selection, drop receipt and channel."}
+  },
+  "importDrag": {
+    "over": {"type": "over", "position": "{x,y} in Mac WebView points"},
+    "leave": {"type": "leave"},
+    "drop": {"type": "drop", "position": "{x,y} in Mac WebView points", "dropId": "opaque single-use ID"}
   },
   "errors": "ErrorResponse",
   "admission": "Exact local managed profile and paired Runtime artifact; request authorization remains in Native and Host",

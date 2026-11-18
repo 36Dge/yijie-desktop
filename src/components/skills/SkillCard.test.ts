@@ -9,6 +9,7 @@ import {
   type ManagedSkillProjection,
 } from "../../domain/skill-marketplace";
 import { skillCardArtwork, skillCategoryArtwork } from "../../icons/skill-artwork";
+import personalSkillManual from "../../assets/skills/generated/personal-skill-manual.png";
 import SkillCard from "./SkillCard.vue";
 
 const SKILL_ID = "yijie.content-marketing.copywriting";
@@ -141,6 +142,11 @@ describe("SkillCard", () => {
     const wrapper = mountCard(skill({ id: "partner.future-skill", iconKey: "futureIcon" }));
 
     expect(wrapper.get("img.skill-card__icon").attributes("src")).toBe(skillCategoryArtwork("content-marketing"));
+  });
+
+  it("uses the reference manual on a personal skill card", () => {
+    const wrapper = mountCard(skill({ id: "personal.project-notes", category: "personal" }));
+    expect(wrapper.get("img.skill-card__icon").attributes("src")).toBe(personalSkillManual);
   });
 
   it("keeps an installable degraded Skill actionable before and after Runtime confirmation", async () => {

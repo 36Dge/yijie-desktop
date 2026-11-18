@@ -3,12 +3,13 @@ import { computed, nextTick, ref, useId, watch } from "vue";
 import { NModal, useMessage } from "naive-ui";
 import type { ChatArtifactVideoNativeClient } from "../../api/chat-artifact-video-native-client";
 import type { ArtifactProjection } from "../../domain/chat-artifact";
-import { chatFilePresentation } from "../../domain/chat-file-presentation";
+import { chatFilePresentation, fileNameParts } from "../../domain/chat-file-presentation";
+import { mediaDisplayName } from "../../domain/chat-media-presentation";
 import { useChatArtifactVideo } from "../../composables/useChatArtifactVideo";
 import YjIcon from "../yijie/YjIcon.vue";
 import YjTooltip from "../yijie/YjTooltip.vue";
 
-const props = defineProps<{ artifact: ArtifactProjection; contextId: string; client?: ChatArtifactVideoNativeClient }>();
+const props = defineProps<{ artifact: ArtifactProjection; contextId: string; userRequest?: string; client?: ChatArtifactVideoNativeClient }>();
 const message = useMessage();
 const { eligible, viewerOpen, cover, error, saving, busy,
   openViewer, closeViewer, refresh, saveVideo } = useChatArtifactVideo(props, (text, tone) => message[tone](text));
@@ -16,7 +17,8 @@ const id = useId();
 const preview = ref<HTMLButtonElement | null>(null);
 const closeButton = ref<HTMLButtonElement | null>(null);
 const refreshButton = ref<HTMLButtonElement | null>(null);
-const displayName = computed(() => props.artifact.displayName ?? "未命名视频");
+const displayName = computed(() => mediaDisplayName(props.artifact, props.userRequest));
+const viewerNameParts = computed(() => fileNameParts(displayName.value));
 const metadata = computed(() => {
   const format = props.artifact.mediaType ? chatFilePresentation(props.artifact.mediaType).label : "视频";
   const bytes = props.artifact.sizeBytes;
@@ -62,7 +64,7 @@ defineExpose({ play });
           <YjTooltip text="关闭" placement="bottom-start" :show-arrow="false" to="body">
             <button ref="closeButton" class="artifact-video__icon-button" type="button" tabindex="0" aria-label="关闭视频预览" data-testid="artifact-video-close" @click="close"><YjIcon name="dismiss" size="sm" :stroke-width="1.5" /></button>
           </YjTooltip>
-          <strong :id="`${id}-title`" class="artifact-video__title">{{ displayName }}</strong>
+          <strong :id="`${id}-title`" class="artifact-video__title"><span>{{ viewerNameParts.stem }}</span><span>{{ viewerNameParts.extension }}</span></strong>
           <span class="artifact-video__metadata">{{ metadata }}</span>
           <div class="artifact-video__actions">
             <YjTooltip text="刷新预览" placement="bottom-end" :show-arrow="false" to="body">
@@ -104,7 +106,9 @@ defineExpose({ play });
 .artifact-video :focus-visible, .artifact-video__dialog :focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-space-1); }
 .artifact-video__dialog { display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(var(--yj-image-viewer-width), calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-8))); height: min(var(--yj-image-viewer-height), calc(var(--yj-ui-viewport-height, 100vh) - var(--yj-space-8))); overflow: hidden; border: var(--yj-border-width) solid var(--yj-color-border-default); border-radius: var(--yj-radius-lg); background: var(--yj-color-bg-elevated); color: var(--yj-color-text-primary); box-shadow: var(--yj-shadow-modal); }
 .artifact-video__header { display: flex; align-items: center; gap: var(--yj-space-2); min-width: 0; padding: var(--yj-space-1) var(--yj-space-3); background: var(--yj-color-bg-nav); }
-.artifact-video__title { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--yj-font-size-body); font-weight: var(--yj-font-weight-medium); }
+.artifact-video__title { display: inline-flex; min-width: 0; overflow: hidden; white-space: nowrap; font-size: var(--yj-font-size-body); font-weight: var(--yj-font-weight-medium); }
+.artifact-video__title span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.artifact-video__title span:last-child { flex: none; }
 .artifact-video__metadata { flex: none; color: var(--yj-color-text-tertiary); font-size: var(--yj-font-size-caption); white-space: nowrap; }
 .artifact-video__actions { display: flex; flex: none; gap: var(--yj-space-2); margin-inline-start: auto; }
 .artifact-video__icon-button { display: grid; place-items: center; flex: none; width: var(--yj-space-8); height: var(--yj-space-8); padding: 0; border: 0; border-radius: var(--yj-radius-md); background: transparent; color: var(--yj-color-icon-subtle); cursor: pointer; }

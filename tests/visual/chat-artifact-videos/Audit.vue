@@ -14,6 +14,8 @@ import "../../../src/styles/main.css";
 import "../../../src/styles/component-colors.css";
 import "../../../src/styles/tooltips.css";
 const dark = ref(false), longTitle = ref(false), zoom = ref(100), narrow = ref(false), shown = ref(true), holdReads = ref(false);
+const genericNames = new URLSearchParams(location.search).get("generic-names") === "1";
+const userRequest = "一段流动的红色光影，抽象动画";
 const sample = ref("video-red");
 const colorNames: Readonly<Record<string, string>> = { red: "红", blue: "蓝", green: "绿" };
 const tasks = ["video-red", "video-blue", "video-green", "image-red", "image-blue", "image-green"].map((key, index) => ({
@@ -32,7 +34,7 @@ const artifact = computed<ArtifactProjection>(() => {
   const task = tasks.find(task => task.key === sample.value)!;
   const kind = task.key.startsWith("video") ? "video" : "image";
   return { sessionId: task.sessionId, turnId: task.turnId, artifactId: task.artifactId, kind, provenance: "synthetic", status: "ready", ordinal: 0,
-    progressStage: null, progressPercent: null, displayName: kind === "image" ? "同名图片.png" : longTitle.value ? "同名视频-用于验证快速切换多个任务与超长文件名仍然完整保留元数据和操作按钮.mp4" : "同名视频.mp4",
+    progressStage: null, progressPercent: null, displayName: kind === "image" ? genericNames ? "generated-image" : "同名图片.png" : longTitle.value ? "同名视频-用于验证快速切换多个任务与超长文件名仍然完整保留元数据和操作按钮.mp4" : genericNames ? "生成的视频.mp4" : "同名视频.mp4",
     mediaType: kind === "video" ? "video/mp4" : "image/png", sizeBytes: 9122611, localCommittedAt: 1_000, expiresAt: 9999999999, hasPoster: false, errorCode: null, retryable: null };
 });
 async function preview(identity: ArtifactNativeIdentity) {
@@ -96,7 +98,7 @@ watch(zoom, value => {
         <label>界面缩放 <select v-model="zoom"><option :value="100">100%</option><option :value="200">200%</option></select></label>
       </header>
       <p>不同任务使用相同文件名，红、蓝、绿画面应与所选任务一致。</p>
-      <div :style="{ width: narrow ? '180px' : '100%' }"><ChatArtifactList v-if="shown" :key="sample" :artifacts="[artifact]" :native-client="imageClient" context-id="019c1a00-0000-7000-8000-000000000501" :video-native-client="client" /></div>
+      <div :style="{ width: narrow ? '180px' : '100%' }"><ChatArtifactList v-if="shown" :key="sample" :artifacts="[artifact]" :user-request="userRequest" :native-client="imageClient" context-id="019c1a00-0000-7000-8000-000000000501" :video-native-client="client" /></div>
       <p class="audit-note">普通本地合成素材；8.7 MB 为布局用模拟元数据。这里只验证前端交互，原生保存另行检查。</p>
       <output data-testid="media-read-counts">{{ JSON.stringify({ reads: counts, released }) }}</output>
       <p data-testid="media-playing-count">正在播放：{{ players.filter(player => !player.paused).length }}</p>

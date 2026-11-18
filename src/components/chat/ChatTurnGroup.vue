@@ -22,6 +22,7 @@ const props = withDefaults(defineProps<{
   turn: ConversationTimelineTurnViewModel;
   position: number;
   timingLabel?: string | null;
+  hasDeliveredArtifact?: boolean;
   skillCatalog?: readonly SelectedChatSkill[];
   connectorNames?: readonly string[];
   canDecideApprovals?: boolean;
@@ -29,6 +30,7 @@ const props = withDefaults(defineProps<{
   approvalTransients?: Readonly<Record<string, ChatApprovalTransientState | undefined>>;
 }>(), {
   timingLabel: null,
+  hasDeliveredArtifact: false,
   skillCatalog: () => Object.freeze([]),
   connectorNames: () => Object.freeze([]),
   canDecideApprovals: false,
@@ -67,7 +69,7 @@ watch(() => [props.turn.identity, props.timingLabel] as const, ([identity, label
 }, {immediate: true, flush: "sync"});
 const preloading = computed(() => nativeLiveProgress.value && !outputObserved.value);
 const processExpanded = computed(() => choices.get(props.turn.identity, nativeLiveProgress.value && !answerStarted.value));
-const currentStatus = computed(() => traceCurrentStatus(props.turn));
+const currentStatus = computed(() => traceCurrentStatus(props.turn, props.hasDeliveredArtifact));
 const plan = computed(() => props.turn.plan ? {...props.turn.plan, defaultExpanded: false} : null);
 const processControls = computed(() => nodes.value.filter(isProcess).map(node => `${processId}-${encodeURIComponent(node.identity)}`).concat(plan.value ? [`${processId}-plan`] : []).join(" "));
 const entries = computed(() => {
@@ -334,10 +336,6 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
   min-width: 0;
   gap: var(--yj-space-3);
   padding-block: var(--yj-space-4);
-}
-
-.chat-turn-group + .chat-turn-group {
-  border-top: var(--yj-border-width) solid var(--yj-color-border-subtle);
 }
 
 .chat-turn-group__header {

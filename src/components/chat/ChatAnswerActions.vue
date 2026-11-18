@@ -36,7 +36,7 @@ function toggleReason(reason: AnswerFeedbackReason) {
 }
 function confirm() {
   if (!draft.value.length) return;
-  reasons.value = [...draft.value]; vote.value = "dislike"; announcement.value = "已标记点踩。评价不会影响模型。";
+  reasons.value = [...draft.value]; vote.value = "dislike"; announcement.value = "已标记点踩。";
   close(true);
 }
 function panelKey(event: KeyboardEvent) {
@@ -68,7 +68,6 @@ watch(() => [props.identity, props.text], () => { close(); vote.value = null; re
           <button v-for="reason in answerFeedbackReasons" :key="reason" type="button" role="checkbox" :aria-checked="draft.includes(reason)"
             class="chat-answer-feedback__reason" @click="toggleReason(reason)">{{ reason }}</button>
         </div>
-        <p>仅标记这条回答，不会影响模型。</p>
         <NButton type="primary" attr-type="button" block size="small" :disabled="!draft.length" @click="confirm">确认反馈</NButton>
       </section>
     </NPopover>
@@ -100,7 +99,6 @@ watch(() => [props.identity, props.text], () => { close(); vote.value = null; re
 .chat-answer-feedback__reason:hover { background: var(--yj-color-control-hover); }
 .chat-answer-feedback__reason[aria-checked="true"] { border-color: var(--yj-color-border-strong); background: var(--yj-color-control-pressed); }
 .chat-answer-feedback__reason:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-space-1); }
-.chat-answer-feedback p { margin: 0; color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); line-height: var(--yj-line-height-caption); }
 .chat-answer-actions__announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (hover: none) { .chat-answer-actions__time { visibility: visible; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .chat-answer-actions__time { transition: none; } }

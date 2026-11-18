@@ -33,6 +33,7 @@
   --yj-color-control-hover: #f7f8f9;
   --yj-color-control-pressed: #eceef0;
   --yj-color-control-disabled-bg: #f7f8f9;
+  --yj-color-skill-import-mask: rgb(0 0 0 / 20%);
 
   --yj-color-text-primary: #25282b;
   --yj-color-text-body: #25282b;
@@ -140,12 +141,18 @@
 
   --yj-font-family-sans: -apple-system, blinkmacsystemfont, "Segoe UI", system-ui, sans-serif;
   --yj-font-family-mono: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  --yj-font-family-chat: "PingFang SC", -apple-system, "Helvetica Neue", Arial, "Microsoft Yahei", sans-serif;
+  --yj-font-family-chat-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   --yj-font-size-caption: 12px;
   --yj-font-size-context-window: 13px;
   --yj-font-size-chat-generation-notice: 11px;
   --yj-font-size-body: 14px;
   --yj-font-size-code: 13px;
-  --yj-font-size-chat-answer-title: 20px;
+  /* WorkBuddy 5.11.3 conversation renderer, default font level (2). */
+  --yj-font-size-chat-root: 17.143px;
+  --yj-font-size-chat-body: calc(var(--yj-font-size-chat-root) * 0.875);
+  --yj-font-size-chat-answer-title: calc(var(--yj-font-size-chat-root) * 1.25);
+  --yj-font-size-chat-answer-heading: var(--yj-font-size-chat-root);
   --yj-font-size-chat-artifact-title: 15px;
   --yj-font-size-chat-artifact-meta: 13px;
   --yj-font-size-chat-expert-chip: 13px;
@@ -160,8 +167,8 @@
   --yj-line-height-chat-generation-notice: 16px;
   --yj-line-height-body: 22px;
   --yj-line-height-code: 20px;
-  --yj-line-height-chat-answer: 1.8;
-  --yj-line-height-chat-answer-heading: 1.5;
+  --yj-line-height-chat-answer: 1.75;
+  --yj-line-height-chat-answer-heading: 1.75;
   --yj-line-height-chat-artifact-title: 25px;
   --yj-line-height-chat-artifact-meta: 21px;
   --yj-line-height-workflow-description: 20px;
@@ -221,6 +228,9 @@
   --yj-motion-fast: 120ms;
   --yj-motion-base: 180ms;
   --yj-motion-slow: 240ms;
+  --yj-motion-sidebar-title-delay: 500ms;
+  --yj-sidebar-title-speed: 32;
+  --yj-sidebar-title-gap: var(--yj-space-8);
   --yj-motion-chat-thinking: 1800ms;
   --yj-color-chat-thinking-highlight: #f4f5f6;
   --yj-motion-chat-stream-fade: 600ms;
@@ -373,6 +383,7 @@
   --yj-color-control-hover: #30363d;
   --yj-color-control-pressed: #414850;
   --yj-color-control-disabled-bg: #30363d;
+  --yj-color-skill-import-mask: rgb(0 0 0 / 48%);
 
   --yj-color-text-primary: #f5f7fa;
   --yj-color-text-body: #e6e9ed;

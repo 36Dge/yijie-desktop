@@ -5,6 +5,7 @@ import { defineStore } from "pinia";
 import {
   skillNativeClient,
   SkillNativeClientError,
+  type SkillImportConfirmation,
   type SkillNativeClient,
   type SkillNativeFailureKind,
   type SkillScanReason,
@@ -60,6 +61,12 @@ export function skillNativeFailureMessage(kind: SkillNativeFailureKind): string 
   }
 }
 
+export function skillImportFailureMessage(error: unknown): string {
+  return error instanceof SkillNativeClientError && error.code
+    ? nativeSkillFailureMessage(error.code)
+    : skillNativeFailureMessage(failureKind(error));
+}
+
 export function createSkillStoreDefinition(
   client: SkillNativeClient,
   storeId = STORE_ID,
@@ -78,7 +85,7 @@ export function createSkillStoreDefinition(
     const notice = ref<string | null>(null);
     const importError = ref<string | null>(null);
     const pendingOperations = shallowRef<readonly PendingOperation[]>([]);
-    const canImport = Boolean(client.importSkill);
+    const canImport = Boolean(client.importSkill && client.importDialog);
     const unsubscribeOperations = client.subscribeOperations?.(operation => {
       const values = pendingOperations.value.filter(value => value.operation_id !== operation.operation_id);
       if (operation.state === "pending" || operation.state === "needs_attention") values.push(operation);
@@ -250,22 +257,26 @@ export function createSkillStoreDefinition(
       return perform(skillId, "uninstall", () => client.uninstall(skillId));
     }
 
-    async function importSkill(): Promise<boolean> {
+    async function importSkill(confirmation: SkillImportConfirmation): Promise<boolean> {
       if (!client.importSkill || importing.value) return false;
       importing.value = true; importError.value = null;
       try {
-        const snapshot = await client.importSkill();
-        if (snapshot === null) return false;
+        const snapshot = await client.importSkill(confirmation);
+        if (snapshot === null || disposed) return false;
+        activeRead?.abort();
+        activeRead = null;
+        readEpoch += 1;
+        refreshing.value = false;
         applySnapshot(snapshot); return true;
       } catch (error) {
-        importError.value = error instanceof SkillNativeClientError && error.code ? nativeSkillFailureMessage(error.code) : skillNativeFailureMessage(failureKind(error));
+        importError.value = skillImportFailureMessage(error);
         return false;
       } finally { importing.value = false; }
     }
     async function cancelOperation(id: string): Promise<void> {
       if (!client.cancelOperation) return;
       try { applySnapshot(await client.cancelOperation(id)); importError.value = null; }
-      catch (error) { importError.value = error instanceof SkillNativeClientError && error.code ? nativeSkillFailureMessage(error.code) : skillNativeFailureMessage(failureKind(error)); }
+      catch (error) { importError.value = skillImportFailureMessage(error); }
     }
 
     function clearOperationError(skillId: string): void {

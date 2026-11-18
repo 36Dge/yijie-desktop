@@ -72,6 +72,17 @@ function artifact(
 }
 
 describe("ChatArtifactShell", () => {
+  it("keeps a generating video status without showing its filename inline", () => {
+    const wrapper = mount(ChatArtifactShell, { props: {
+      artifact: artifact(0, { kind: "video", provenance: "provider", status: "generating", displayName: "生成的视频.mp4" }),
+      contextId: CONTEXT_ID,
+    } });
+    expect(wrapper.text()).not.toContain("生成的视频.mp4");
+    expect(wrapper.find(".artifact-shell__name").exists()).toBe(false);
+    expect(wrapper.attributes("aria-busy")).toBe("true");
+    wrapper.unmount();
+  });
+
   it("keeps provider video delivery failures on the original task without offering regeneration", () => {
     for (const retryable of [true, false]) {
       const wrapper = mount(ChatArtifactShell, { props: {
@@ -98,7 +109,7 @@ describe("ChatArtifactShell", () => {
       expect(FILE_NATIVE_CLIENT.saveFile).toHaveBeenCalled();
       const image = artifact(0, {kind:"image",status:"ready",mediaType:"image/png",displayName:"图.png"});
       await wrapper.setProps({artifacts:[image]});
-      expect(wrapper.get(".artifact-image__title").text()).toBe("图");
+      expect(wrapper.find(".artifact-image__title").exists()).toBe(false);
       expect(wrapper.find(".artifact-shell").exists()).toBe(false);
       const video = artifact(0, {kind:"video",status:"ready",mediaType:"video/mp4",displayName:"演示.mp4"});
       await wrapper.setProps({artifacts:[video]});

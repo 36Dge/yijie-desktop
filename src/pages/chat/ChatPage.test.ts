@@ -32,6 +32,7 @@ import { useSkillStore } from "../../stores/skill.store";
 import { installedSkill } from "../../test/skill-fixture";
 import { PREVIEW_SHOPS, SHOP_PREVIEW_TIMING } from "../../domain/chat-shop-preview";
 import ChatWorkspaceControl from "../../components/chat/ChatWorkspaceControl.vue";
+import ChatSidebarTree from "../../components/chat/ChatSidebarTree.vue";
 import { chatWorkspaceClient } from "../../api/chat-workspace-client";
 import ChatModelControl from "../../components/chat/ChatModelControl.vue";
 import { chatModelClient, chatModelsEnabled, kimiK31Candidate } from "../../api/chat-model-client";
@@ -563,13 +564,14 @@ describe("FEAT-126 ChatPage", () => {
     expect(frames.size).toBe(0);
   });
 
-  it("keeps the task title and workspace context without duplicating turn status in the header", async () => {
-    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+  it("shows the task title without a workspace row and reserves the subtitle for scheduled drafts", async () => {
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true, HISTORY, undefined, false, { ScheduledDraftPanel: true });
     store.liveTurnStatus = "completed";
     await flushPromises();
     const header = wrapper.get(".chat-workspace__header");
     expect(header.get("h1").text()).toBe(SESSION.title);
-    expect(header.get(".chat-workspace__meta").text()).toBe(PROJECT.safeName);
+    expect(header.find(".chat-workspace__meta").exists()).toBe(false);
+    expect(header.text()).not.toContain(PROJECT.safeName);
     expect(header.text()).not.toContain("已完成");
     expect(wrapper.get('.chat-workspace > .sr-only[aria-live="polite"]').text()).toBe("已完成");
 
@@ -577,6 +579,9 @@ describe("FEAT-126 ChatPage", () => {
     await flushPromises();
     expect(header.find(".chat-workspace__meta").exists()).toBe(false);
     expect(header.get("h1").text()).toBe(SESSION.title);
+    store.selectedSessionPurpose = "scheduled_plan_draft";
+    await flushPromises();
+    expect(header.get(".chat-workspace__meta").text()).toBe("定时任务草案 · 仅输入文本");
     wrapper.unmount();
   });
 
@@ -772,13 +777,18 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.text()).toContain("synthetic-brief.pdf");
     expect(wrapper.get(".chat-file-chip").attributes("aria-label")).toContain("PDF");
 
-    const textCopyActions = wrapper.findAll('[aria-label="复制文本"], [aria-label="复制"]');
-    expect(textCopyActions).toHaveLength(2);
-    await textCopyActions[1]!.trigger("click");
+    const userCopy = wrapper.get('.chat-timeline-item-shell__user-meta [aria-label="复制文本"]');
+    const answerCopy = wrapper.get('.chat-answer-actions [aria-label="复制"]');
+    expect(wrapper.findAll(".chat-copy-action")).toHaveLength(2);
+    expect(userCopy.get("svg").html()).toBe(answerCopy.get("svg").html());
+    await userCopy.trigger("click");
     await flushPromises();
-    expect(writeText).toHaveBeenCalledOnce();
-    expect(writeText).toHaveBeenCalledWith("标题检查完成");
-    expect(wrapper.text()).toContain("已复制");
+    expect(writeText).toHaveBeenCalledExactlyOnceWith("检查标题");
+    expect(wrapper.get(".chat-timeline-item-shell__user-meta .chat-copy-action__feedback").text()).toBe("已复制");
+    await answerCopy.trigger("click");
+    await flushPromises();
+    expect(writeText).toHaveBeenNthCalledWith(2, "标题检查完成");
+    expect(wrapper.get(".chat-answer-actions [role='status']").text()).toContain("已复制");
   });
 
   it("projects approval lifecycle, keeps the exact gate closed, and wires only typed decisions", async () => {
@@ -1125,6 +1135,33 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.text()).toContain("标题检查完成");
   });
 
+  it.each(["image", "video"] as const)("hides %s IDs in the conversation and forwards the matching user request for media naming", async kind => {
+    const { wrapper, store, pinia } = await mountPage(`/chat/${SESSION_ID}`, true, HISTORY, async () => false, false, { ChatArtifactList: true });
+    const id = "019c1a00-0000-7000-8000-000000000021";
+    const request = "一瓶冰镇气泡果汁，动态飞溅摄影";
+    const artifactHistory: ChatHistoryPage = {
+      turns: [{ ...HISTORY.turns[0]!, reasoning: [], messages: [
+        { ...HISTORY.turns[0]!.messages[0]!, content: request, contentBlocks: [{ type: "text", text: request }] },
+        { ...HISTORY.turns[0]!.messages[1]!, content: `已生成并交付。\n\n产物 ID：\`${id}\`` },
+      ], artifacts: [{ artifactId: id, kind, provenance: "provider", status: "ready", ordinal: 0,
+        progressStage: null, progressPercent: null, displayName: kind === "image" ? "generated-image" : "生成的视频.mp4",
+        mediaType: kind === "image" ? "image/jpeg" : "video/mp4", sizeBytes: 32, localCommittedAt: 1000, expiresAt: 2_000_000_000,
+        hasPoster: false, errorCode: null, retryable: null,
+      }] }], nextCursor: null,
+    };
+    const artifacts = useArtifactStore(pinia);
+    artifacts.replaceAuthority({ authorizationRevision: 7, contextId: store.context!.contextId, tenantId: PROJECT_ID, sessionId: SESSION_ID });
+    artifacts.ingestHistoryV3(artifacts.captureAuthority(), artifactHistory);
+    setHistoryProjection(store, artifactHistory); await flushPromises();
+    expect(wrapper.text()).toContain("已生成并交付。");
+    expect(wrapper.text()).not.toContain("产物 ID");
+    expect(wrapper.text()).not.toContain(id);
+    expect(wrapper.getComponent(ChatArtifactList).props("userRequest")).toBe(request);
+    expect(store.history!.turns[0]!.messages[1]!.content).toContain(id);
+    expect(wrapper.getComponent(ChatArtifactList).props("artifacts")[0]!.artifactId).toBe(id);
+    wrapper.unmount();
+  });
+
   it("renders an empty-text assistant turn with trusted Artifact identity and all typed clients", async () => {
     const { wrapper, store, pinia } = await mountPage(`/chat/${SESSION_ID}`, true);
     const artifacts = useArtifactStore(pinia);
@@ -1178,6 +1215,15 @@ describe("FEAT-126 ChatPage", () => {
     expect(list.props("reportNativeClient")).toBe(chatArtifactReportNativeClient);
     expect(wrapper.text()).toContain("safe-metadata.txt");
     expect(wrapper.find(".artifact-list").exists()).toBe(true);
+    expect(wrapper.getComponent(ChatTimeline).props("deliveredArtifactTurnIds")?.has(TURN_ID)).toBe(false);
+    artifacts.applyProjection(artifacts.captureAuthority(), TURN_ID, {
+      ...artifactHistory.turns[0]!.artifacts![0]!, status: "ready", mediaType: "text/plain", sizeBytes: 32,
+      localCommittedAt: 1000, expiresAt: 2_000_000_000,
+    });
+    await flushPromises();
+    expect(wrapper.getComponent(ChatTimeline).props("deliveredArtifactTurnIds")?.has(TURN_ID)).toBe(true);
+    artifacts.clearAuthority(); await flushPromises();
+    expect(wrapper.getComponent(ChatTimeline).props("deliveredArtifactTurnIds")?.has(TURN_ID)).toBe(false);
     expect(JSON.stringify(store.$state)).not.toMatch(/bytes|base64|digest|hostHref|absolutePath|token|requestId/);
     const results = await axe.run(wrapper.element, {
       rules: { "color-contrast": { enabled: false } },
@@ -1326,6 +1372,44 @@ describe("FEAT-126 ChatPage", () => {
     expect(create).toHaveBeenCalledWith(null, "分析最近一周的差评");
     expect(model.current.value?.id).toBe(PREVIEW_SHOPS[0]!.id);
     wrapper.unmount();
+  });
+
+  it.each([false, true])("submits a sidebar workspace task under that workspace (shared drafts=%s)", async shared => {
+    expertFlag.enabled = shared;
+    const { wrapper, store, router, pinia } = await mountPage(`/chat/${SESSION_ID}`, true);
+    store.projects = [PROJECT, SECOND_PROJECT];
+    vi.spyOn(store, "clearSelectedSession").mockImplementation(async () => {
+      store.selectedSessionId = null;
+      store.selectedAccessMode = null;
+      store.selectedSessionPurpose = null;
+      store.history = null;
+      store.draftTarget = CHAT_NEW_DRAFT_TARGET;
+      store.draftTargetReady = true;
+    });
+    const createSession = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
+    const sidebar = mount(ChatSidebarTree, {
+      props: { currentPath: `/chat/${SESSION_ID}` },
+      global: { plugins: [pinia, router] },
+    });
+    try {
+      const button = sidebar.get(`[aria-label="在工作空间 ${SECOND_PROJECT.safeName} 中新建任务"]`);
+      await button.trigger("click"); await flushPromises();
+      expect(router.currentRoute.value.path).toBe("/chat");
+      const picker = wrapper.getComponent(ChatWorkspaceControl);
+      expect(picker.props("selectedProjectId")).toBe(SECOND_PROJECT.projectId);
+      expect(useChatComposerDraftStore(pinia).newWorkspaceTask).toBeNull();
+      expect(createSession).not.toHaveBeenCalled();
+      picker.vm.$emit("select", PROJECT_ID); await flushPromises();
+      store.projects = [...store.projects]; await flushPromises();
+      expect(picker.props("selectedProjectId")).toBe(PROJECT_ID);
+      // Repeated clicks on the same /chat route must still choose this workspace.
+      await button.trigger("click"); await flushPromises();
+      expect(picker.props("selectedProjectId")).toBe(SECOND_PROJECT.projectId);
+      await wrapper.get("textarea").setValue("在所选工作空间开始任务");
+      await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();
+      expect(createSession).toHaveBeenCalledOnce();
+      expect(createSession.mock.calls[0]?.slice(0, 2)).toEqual([SECOND_PROJECT.projectId, "在所选工作空间开始任务"]);
+    } finally { sidebar.unmount(); wrapper.unmount(); }
   });
 
   it("automatically selects a newly created workspace for the next submission", async () => {
@@ -1667,6 +1751,43 @@ describe("FEAT-126 ChatPage", () => {
     expect((wrapper.get("textarea").element as HTMLTextAreaElement).value)
       .toBe("不能丢失的回复");
     expect(wrapper.text()).toContain("本地服务尚未就绪");
+  });
+
+  it("waits for an accepted reply to render before positioning its user message above the composer", async () => {
+    const callbacks = new Map<number, FrameRequestCallback>(); let frameId = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { callbacks.set(++frameId, callback); return frameId; });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => callbacks.delete(id));
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+    const scroller = wrapper.get<HTMLElement>(".chat-workspace__conversation").element;
+    const turnId = "019c1a00-0000-7000-8000-000000000088";
+    let top = 100;
+    scroller.style.scrollPaddingTop = "32px"; scroller.style.scrollPaddingBottom = "80px";
+    Object.defineProperties(scroller, {
+      clientHeight: { value: 500 }, offsetHeight: { value: 500 },
+      scrollTop: { get: () => top, set: value => { top = Number(value); } },
+      scrollHeight: { get: () => 1080 + Math.max(100, Number.parseFloat(scroller.querySelector<HTMLElement>(`[data-turn-id="${turnId}"]`)?.style.minHeight ?? "") || 0) },
+    });
+    const rectangle = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this === scroller) return new DOMRect(0, 80, 760, 500);
+      if (this.dataset.turnId === turnId) return new DOMRect(0, 80 + 1000 - top, 760, 100);
+      return rectangle.call(this);
+    });
+    vi.spyOn(store, "submitTurnWithResult").mockResolvedValue(acceptedSubmission(SESSION_ID, chatSessionDraftTarget(SESSION_ID), turnId));
+    const textarea = wrapper.get("textarea").element as HTMLTextAreaElement;
+    await wrapper.get("textarea").setValue("新发出的消息应完整可见"); textarea.focus();
+    wrapper.getComponent(ChatComposer).vm.$emit("submit"); await flushPromises();
+    expect(wrapper.find(`[data-turn-id="${turnId}"]`).exists()).toBe(false);
+    setHistoryProjection(store, historyWithAcceptedTurn(turnId, "queued", "新发出的消息应完整可见"));
+    for (let index = 0; index < 4; index++) {
+      await flushPromises();
+      const pending = [...callbacks.values()]; callbacks.clear(); pending.forEach(callback => callback(index * 16));
+    }
+    await flushPromises();
+    expect(wrapper.get<HTMLElement>(`[data-turn-id="${turnId}"]`).element.style.minHeight).toBe("388px");
+    expect(top).toBe(968);
+    expect(document.activeElement).toBe(textarea);
+    wrapper.unmount();
   });
 
   it("isolates text drafts while switching between session targets", async () => {

@@ -1,21 +1,78 @@
 // @vitest-environment happy-dom
 
 import { mount } from "@vue/test-utils";
-import { defineComponent, nextTick, ref } from "vue";
+import { defineComponent, inject, nextTick, ref } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useChatScroll } from "./useChatScroll";
+import { holdChatAutoFollowKey, useChatScroll } from "./useChatScroll";
 
 const Harness = defineComponent({
   setup() {
     const element = ref<HTMLElement | null>(null);
     return { element, ...useChatScroll(element) };
   },
-  template: '<div ref="element" tabindex="-1" />',
+  template: '<div ref="element" tabindex="-1"><slot /></div>',
 });
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("useChatScroll", () => {
+  it("cancels pending follow while a viewer holds the reading position and respects the distance on release", async () => {
+    const request = vi.fn(() => 1), cancel = vi.fn();
+    vi.stubGlobal("requestAnimationFrame", request);
+    vi.stubGlobal("cancelAnimationFrame", cancel);
+    const Viewer = defineComponent({
+      setup: () => ({ hold: inject(holdChatAutoFollowKey)! }),
+      template: "<span />",
+    });
+    const wrapper = mount(Harness, { slots: { default: Viewer } });
+    await nextTick();
+    const element = wrapper.get("div").element as HTMLElement;
+    let height = 1000;
+    Object.defineProperties(element, { scrollHeight: { get: () => height }, clientHeight: { value: 400 } });
+    element.scrollTop = 600;
+    await wrapper.vm.followNewContent();
+    expect(request).toHaveBeenCalledOnce();
+    const resume = wrapper.getComponent(Viewer).vm.hold();
+    expect(cancel).toHaveBeenCalledWith(1);
+    height += 240;
+    await wrapper.vm.followNewContent();
+    expect(request).toHaveBeenCalledOnce();
+    resume();
+    expect(wrapper.vm.following).toBe(false);
+    element.scrollTop = 840;
+    wrapper.vm.update();
+    await wrapper.vm.followNewContent();
+    expect(request).toHaveBeenCalledTimes(2);
+    wrapper.unmount();
+  });
+
+  it("positions a newly sent turn above the composer without moving input focus and resumes following", async () => {
+    const wrapper = mount(Harness, { attachTo: document.body });
+    await nextTick();
+    const element = wrapper.get("div").element as HTMLElement;
+    const anchor = document.createElement("section");
+    const input = document.createElement("textarea");
+    element.append(anchor); document.body.append(input); input.focus();
+    let top = 300;
+    element.style.scrollPaddingTop = "32px"; element.style.scrollPaddingBottom = "80px";
+    Object.defineProperties(element, {
+      clientHeight: { value: 500 }, offsetHeight: { value: 500 },
+      scrollTop: { get: () => top, set: value => { top = Number(value); } },
+      scrollHeight: { get: () => 1000 + Math.max(100, Number.parseFloat(anchor.style.minHeight) || 0) + 80 },
+    });
+    vi.spyOn(element, "getBoundingClientRect").mockReturnValue({ top: 80, height: 500 } as DOMRect);
+    vi.spyOn(anchor, "getBoundingClientRect").mockImplementation(() => ({ top: 80 + 1000 - top } as DOMRect));
+    wrapper.vm.scrollToSubmittedTurn(anchor);
+    expect(anchor.style.minHeight).toBe("388px");
+    expect(top).toBe(968);
+    expect(document.activeElement).toBe(input);
+    expect(wrapper.vm.following).toBe(true);
+    element.dispatchEvent(new WheelEvent("wheel", { deltaY: -20 }));
+    expect(wrapper.vm.following).toBe(false);
+    wrapper.unmount(); input.remove();
+    expect(anchor.style.minHeight).toBe("");
+  });
+
   it("follows at 48px and shows the bottom control only beyond 160px", async () => {
     const wrapper = mount(Harness);
     const element = wrapper.get("div").element as HTMLElement;
