@@ -71,6 +71,16 @@ const actionsVisible = computed(() => showConversationItemActions(props.item, pr
   !messageContent.value?.revealPending);
 defineExpose({ actionsVisible });
 
+function unpublishedLabel(item: ConversationTimelineItemViewModel): string {
+  switch (item.publication?.source) {
+    case "interrupted": return "中断时未发布的文字";
+    case "failed": return "执行失败时未发布的文字";
+    case "superseded": return "后续步骤已替代的文字";
+    case "display_limit": return "达到显示上限时保留的文字";
+    default: return "未发布的文字";
+  }
+}
+
 function itemLabel(item: ConversationTimelineItemViewModel): string {
   if (props.processPresentation && item.presentation === "assistant_unclassified") return "模型消息";
   switch (item.presentation) {
@@ -208,7 +218,12 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange) { emit("disclos
 function forwardApprovalDecision(change: ChatApprovalDecisionChange) { emit("approval-decision", change); }
 </script>
 <template>
-          <ChatContextUpdate v-if="item.presentation === 'context_update'" :state="item.contextUpdateState ?? 'unknown'" />
+          <details v-if="item.presentation === 'unpublished_text'" class="chat-activity-row__unpublished">
+            <summary>{{ unpublishedLabel(item) }}</summary>
+            <p v-if="item.publication?.truncated">仅保留了部分正文。</p>
+            <p v-for="block in item.contentBlocks" :key="block.identity" style="white-space: pre-wrap">{{ block.type === 'text' ? block.text : '' }}</p>
+          </details>
+          <ChatContextUpdate v-else-if="item.presentation === 'context_update'" :state="item.contextUpdateState ?? 'unknown'" />
           <ChatDeepThinking v-else-if="item.presentation === 'reasoning'" :item="item"
             :visible="visible"
             :live="visible && turn.liveObserved === true && item.busy === true" :state-message="reasoningStateMessage(item)"

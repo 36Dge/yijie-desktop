@@ -90,11 +90,17 @@ def snapshot(root, environment):
                 continue
             source = root.parent / name
             text = source.read_text()
-            literals = re.findall(r'include(?:_str|_bytes)?!\s*\(\s*"([^"]+)"', text)
-            require(len(literals) == len(re.findall(r'include(?:_str|_bytes)?!\s*\(', text)), "动态 Rust 嵌入依赖需要先登记到构建规则：" + name)
+            include = r'include(?:_str|_bytes)?!\s*\(\s*'
+            literals = re.findall(include + r'"([^"]+)"', text)
+            # Cargo expands this exact expression to a path under the crate manifest directory.
+            manifest_paths = re.findall(include + r'concat!\s*\(\s*env!\s*\(\s*"CARGO_MANIFEST_DIR"\s*\)\s*,\s*"/([^"]+)"\s*,?\s*\)\s*\)', text)
+            require(len(literals) + len(manifest_paths) == len(re.findall(include, text)), "动态 Rust 嵌入依赖需要先登记到构建规则：" + name)
             literals += re.findall(r'#\[\s*path\s*=\s*"([^"]+)"\s*\]', text)
-            for relative in literals:
-                target = (source.parent / relative).resolve(strict=True)
+            crate_root = root.parent / repository / Path(directory).parent
+            targets = [source.parent / relative for relative in literals]
+            targets.extend(crate_root / relative for relative in manifest_paths)
+            for target in targets:
+                target = target.resolve(strict=True)
                 require(target.is_relative_to(root.parent), "嵌入依赖超出当前工作区。")
                 key = str(target.relative_to(root.parent))
                 edges.add(key)

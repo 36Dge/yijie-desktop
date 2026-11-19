@@ -57,7 +57,7 @@ export interface components {
         NativeItem: {
             id: string;
             /** @enum {string} */
-            type: "userMessage" | "agentMessage" | "reasoning" | "commandExecution" | "mcpToolCall" | "webSearch" | "fileChange" | "subAgentActivity" | "imageView" | "unknown";
+            type: "userMessage" | "agentMessage" | "reasoning" | "commandExecution" | "mcpToolCall" | "webSearch" | "fileChange" | "subAgentActivity" | "imageView" | "unknown" | "unpublishedText";
             clientId?: string | null;
             text?: string;
             /** @enum {string|null} */
@@ -91,6 +91,7 @@ export interface components {
             webSearch?: components["schemas"]["NativeWebSearchDisplay"];
             commandActions?: components["schemas"]["NativeCommandActionDisplay"][];
             toolDisplay?: components["schemas"]["NativeToolDisplay"];
+            publication?: components["schemas"]["NativeMessagePublication"];
         };
         NativeTurn: {
             id: string;
@@ -246,6 +247,15 @@ export interface components {
             /** @enum {string} */
             error_code?: "invalid_arguments" | "session_expired" | "not_entitled" | "quota_exceeded" | "busy" | "upstream_unavailable" | "timeout" | "no_content" | "response_too_large" | "invalid_response" | "cancelled" | "outcome_unknown" | "operation_conflict" | "operation_expired" | "result_unavailable";
         };
+        /** @description Published by the negotiated Runtime. order is the original turn observation order. afterItemId anchors a delayed message. Undelivered text is never an agentMessage or an execution terminal. */
+        NativeMessagePublication: {
+            itemId: string;
+            order: number;
+            afterItemId?: string;
+            /** @enum {string} */
+            source: "provider" | "declaration" | "subsequent_work" | "turn_commit" | "progress_step" | "final_step" | "interrupted" | "failed" | "superseded" | "display_limit";
+            truncated: boolean;
+        };
     };
     responses: never;
     parameters: never;
@@ -261,6 +271,8 @@ export interface operations {
             header?: {
                 /** @description Opt in to typed receipt projection for the builtin deep-search tool. */
                 "X-Yijie-Search-Receipt"?: "2";
+                /** @description Opt in to stable message identities, publication provenance and bounded undelivered text. */
+                "X-Yijie-Publication"?: "2";
             };
             path: {
                 agent_session_id: string;
@@ -307,6 +319,8 @@ export interface operations {
                 "Last-Event-ID"?: string;
                 /** @description Opt in to typed receipt projection for the builtin deep-search tool. */
                 "X-Yijie-Search-Receipt"?: "2";
+                /** @description Opt in to stable message identities, publication provenance and bounded undelivered text. */
+                "X-Yijie-Publication"?: "2";
             };
             path: {
                 agent_session_id: string;

@@ -551,6 +551,7 @@ pub fn run() {
         chat::ipc::web_sources::chat_web_source_v1,
         chat::ipc::chat_load_history_v1,
         chat::ipc::chat_load_native_history_v6,
+        chat::ipc::chat_load_native_history_v7,
         chat::ipc::chat_load_history_v2,
         chat::ipc::chat_load_history_v3,
         chat::artifact_native::chat_open_artifact_image_preview_v1,

@@ -13,6 +13,7 @@ export const CONVERSATION_ITEM_KINDS = Object.freeze([
   "web_search",
   "approval",
   "artifact",
+  "unpublished_text",
   "unknown",
 ] as const);
 
@@ -250,6 +251,7 @@ export interface ConversationTurn {
 }
 
 export interface ConversationItem {
+  readonly publication?: NativeConversationView["items"][number]["item"]["publication"];
   readonly webSearch?: NativeConversationView["items"][number]["item"]["webSearch"];
   readonly availability?: NativeConversationView["availability"];
   readonly threadId: string;
@@ -448,7 +450,7 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
       for (const k of old?.itemKeys ?? []) delete items[k];
       const nativeItems: ConversationItem[] = view.items.map(entry => {
         const item = entry.item;
-        const kind: ConversationItemKind = item.type === "userMessage" ? "user_message" : item.type === "agentMessage" ? "assistant_message" : item.type === "reasoning" ? "reasoning" : item.type === "commandExecution" ? "command" : ["mcpToolCall", "fileChange", "subAgentActivity", "imageView"].includes(item.type) ? "tool" : item.type === "webSearch" ? "web_search" : "unknown";
+        const kind: ConversationItemKind = item.type === "unpublishedText" ? "unpublished_text" : item.type === "userMessage" ? "user_message" : item.type === "agentMessage" ? "assistant_message" : item.type === "reasoning" ? "reasoning" : item.type === "commandExecution" ? "command" : ["mcpToolCall", "fileChange", "subAgentActivity", "imageView"].includes(item.type) ? "tool" : item.type === "webSearch" ? "web_search" : "unknown";
         const contentBlocks: readonly TextContentBlock[] = item.type === "userMessage" && submittedText !== null
           ? submittedText
           : item.type === "reasoning"
@@ -457,6 +459,7 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
           : item.text == null ? [] : [{type: "text", text: item.type === "agentMessage" ? readablePublicAssistantText(item.text, item.phase) : item.text, blockIndex: 0}];
         return {threadId: view.sessionId, turnId: view.turnId, itemId: item.id, ordinal: entry.ordinal, kind,
           availability: item.availability,
+          ...(item.publication && {publication: item.publication}),
           ...(item.webSearch ? {webSearch: item.webSearch} : {}),
           status: entry.lastMethod === "item/completed" ? "completed" : entry.lastMethod === "thread/read" ? "incomplete" : "streaming",
           agentMessagePhase: item.type === "agentMessage" ? conversationAgentMessagePhase(item.phase) : null,

@@ -222,19 +222,55 @@ impl NativeDisplayBuffer {
                         self.mark_unavailable("native_source_changed");
                     }
                     let position = self.view.items.iter().position(|v| v.item.id == item.id);
-                    let ordinal = position
-                        .map(|i| self.view.items[i].ordinal)
-                        .unwrap_or(self.view.items.len() as i64);
+                    let index = position.unwrap_or_else(|| {
+                        let Some(stamp) = &item.publication else {
+                            return self.view.items.len();
+                        };
+                        if let Some(anchor) = &stamp.after_item_id {
+                            if let Some(i) =
+                                self.view.items.iter().position(|e| e.item.id == *anchor)
+                            {
+                                return i + 1;
+                            }
+                        }
+                        self.view
+                            .items
+                            .iter()
+                            .position(|e| {
+                                e.item
+                                    .publication
+                                    .as_ref()
+                                    .is_some_and(|other| other.order > stamp.order)
+                            })
+                            .unwrap_or_else(|| (stamp.order as usize).min(self.view.items.len()))
+                    });
                     let value = NativeDisplayItem {
                         item: item.clone(),
                         last_method: n.method.clone(),
-                        ordinal,
+                        ordinal: index as i64,
                     };
-                    // Capacity is a display concern, never an execution failure.
                     if let Some(i) = position {
-                        self.view.items[i] = value
+                        if self.view.items[i]
+                            .item
+                            .publication
+                            .as_ref()
+                            .is_some_and(|old| {
+                                value.item.publication.as_ref().is_none_or(|new| {
+                                    old.item_id != new.item_id
+                                        || old.source != new.source
+                                        || old.order != new.order
+                                }) || self.view.items[i].item.phase != value.item.phase
+                            })
+                        {
+                            self.mark_unavailable("publication_conflict");
+                            return Ok(true);
+                        }
+                        self.view.items[i] = value;
                     } else if self.view.items.len() < 512 {
-                        self.view.items.push(value)
+                        self.view.items.insert(index, value);
+                        for (i, entry) in self.view.items.iter_mut().enumerate().skip(index + 1) {
+                            entry.ordinal = i as i64;
+                        }
                     } else {
                         self.mark_unavailable("display_limit");
                         return Ok(true);
@@ -246,7 +282,7 @@ impl NativeDisplayBuffer {
                     {
                         // The newest native status and identity survive capacity
                         // pressure. Never restore the preceding Item snapshot.
-                        let current = position.unwrap_or(self.view.items.len() - 1);
+                        let current = index;
                         omit_display_content(&mut self.view.items[current].item);
                         bound_display_content(&mut self.view)?;
                         self.mark_unavailable("display_limit");
@@ -808,5 +844,18 @@ mod tests {
         assert_eq!(b.view.availability, "partial");
         assert_eq!(b.view.status, None);
         assert!(!b.view.terminal_observed);
+    }
+}
+
+/// Downgrade only the copy sent to legacy IPC readers.
+pub(crate) fn strip_publication(view: &mut NativeConversationView) {
+    for entry in &mut view.items {
+        let item = &mut entry.item;
+        item.publication = None;
+        if item.kind == "unpublishedText" {
+            item.kind = "unknown".into();
+            item.text = None;
+            item.availability = "unavailable".into();
+        }
     }
 }

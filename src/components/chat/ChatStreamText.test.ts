@@ -29,7 +29,7 @@ async function drain() {
 }
 const block = (text: string) => [{identity: "body", blockIndex: 0, type: "text" as const, text}];
 describe("message-wide stream presentation", () => {
-  it.each(["final_answer", undefined] as const)("folds the process at the first answer text and waits for the last fade before showing actions (%s)", async phase => {
+  it("folds on explicit final text and waits for the last fade before showing actions", async () => {
     const processItems = [
       traceItem("opening", "agentMessage", {phase: "commentary", text: "先整理资料。"}),
       traceItem("summary", "reasoning", {summary: ["整理重点"]}),
@@ -37,7 +37,7 @@ describe("message-wide stream presentation", () => {
     ];
     const text = "这是正式回答。".repeat(25);
     const answerTurn = (body: string, live: boolean) => traceTurn([...processItems,
-      traceItem("answer", "agentMessage", {text: body, phase, status: live ? "inProgress" : "completed"}),
+      traceItem("answer", "agentMessage", {text: body, phase: "final_answer", status: live ? "inProgress" : "completed"}),
     ], live);
     const wrapper = mount(ChatTurnGroup, {
       attachTo: document.body, props: {turn: answerTurn("", true), position: 1},

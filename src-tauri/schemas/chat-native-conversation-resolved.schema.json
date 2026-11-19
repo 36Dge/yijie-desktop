@@ -28,7 +28,8 @@
             "fileChange",
             "subAgentActivity",
             "imageView",
-            "unknown"
+            "unknown",
+            "unpublishedText"
           ]
         },
         "clientId": {
@@ -169,6 +170,9 @@
         },
         "toolDisplay": {
           "$ref": "#/definitions/NativeToolDisplay"
+        },
+        "publication": {
+          "$ref": "#/definitions/NativeMessagePublication"
         }
       }
     },
@@ -878,6 +882,51 @@
         "availability"
       ]
     },
+    "NativeMessagePublication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "itemId",
+        "order",
+        "source",
+        "truncated"
+      ],
+      "properties": {
+        "itemId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "afterItemId": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "provider",
+            "declaration",
+            "subsequent_work",
+            "turn_commit",
+            "progress_step",
+            "final_step",
+            "interrupted",
+            "failed",
+            "superseded",
+            "display_limit"
+          ]
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "description": "Published by the negotiated Runtime. order is the original turn observation order. afterItemId anchors a delayed message. Undelivered text is never an agentMessage or an execution terminal."
+    },
     "NativeDisplayItem": {
       "type": "object",
       "additionalProperties": false,
@@ -1078,7 +1127,8 @@
         "schemaVersion": {
           "type": "integer",
           "enum": [
-            6
+            6,
+            7
           ]
         },
         "contextId": {

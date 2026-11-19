@@ -756,7 +756,7 @@ it("uses elapsed time to reveal the entire process while leaving answers and lat
   expect(wrapper.get(".chat-turn-group__item--final_answer").isVisible()).toBe(true);
 });
 
-it("follows live Turn state until the user chooses expansion, without resetting on duration or streamed updates", async () => {
+it("keeps the live expansion choice through terminal status without a readable final answer", async () => {
   const base = projectedTurn({status: "in_progress", items: [
     {...message("progress", 0, "assistant_message", "开始检查", "streaming"), agentMessagePhase: "commentary"},
     message("context-after-progress", 1, "reasoning", "后续处理"),
@@ -777,7 +777,7 @@ it("follows live Turn state until the user chooses expansion, without resetting 
   expect(wrapper.get(".chat-turn-group__process-toggle").attributes("aria-expanded")).toBe("false");
   const automatic = mount(ChatTurnGroup, { attachTo: document.body, props: {turn: active, position: 2}});
   await automatic.setProps({turn: ended});
-  expect(automatic.get(".chat-turn-group__process-toggle").attributes("aria-expanded")).toBe("false");
+  expect(automatic.get(".chat-turn-group__process-toggle").attributes("aria-expanded")).toBe("true");
 });
 
 it("keeps pending approvals and failed or incomplete process records outside the folded content", async () => {

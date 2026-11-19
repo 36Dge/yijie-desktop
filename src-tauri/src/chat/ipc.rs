@@ -1005,7 +1005,13 @@ impl TurnProjectionSink for ChatEventBridge {
         let window = app
             .get_webview_window("main")
             .ok_or(ChatError::OrchestrationUnavailable)?;
-        for event in events {
+        for mut event in events {
+            event.schema_version = 7;
+            window
+                .emit("chat:native-view:v7", &event)
+                .map_err(|_| ChatError::OrchestrationUnavailable)?;
+            event.schema_version = 6;
+            super::native_conversation::strip_publication(&mut event.view);
             window
                 .emit("chat:native-view:v6", event)
                 .map_err(|_| ChatError::OrchestrationUnavailable)?;
@@ -8779,6 +8785,24 @@ pub async fn chat_load_native_history_v6(
     chat_runtime: State<'_, ChatRuntime>,
     ipc_runtime: State<'_, ChatIpcRuntime>,
 ) -> Result<Value, ChatIpcError> {
+    load_native_history(request, chat_runtime, ipc_runtime, false).await
+}
+
+#[tauri::command]
+pub async fn chat_load_native_history_v7(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<Value, ChatIpcError> {
+    load_native_history(request, chat_runtime, ipc_runtime, true).await
+}
+
+async fn load_native_history(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
+    publication: bool,
+) -> Result<Value, ChatIpcError> {
     let request: CommandRequest<super::native_conversation_generated::NativeHistoryRequest> =
         decode_request(request)?;
     let (application, _, manager) = offline_applications(&chat_runtime, request.request_id).await?;
@@ -8811,8 +8835,13 @@ pub async fn chat_load_native_history_v6(
         .native_history(request.context_id, session_id, turn_ids)
         .await;
     let finished = ipc_runtime.finish_read(request.request_id);
-    let data = result.map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+    let mut data = result.map_err(|error| map_chat_error(error, Some(request.request_id)))?;
     finished?;
+    if !publication {
+        for view in &mut data.views {
+            super::native_conversation::strip_publication(view);
+        }
+    }
     enforce_response_limit(&data, 8 * 1024 * 1024, request.request_id)?;
     serde_json::to_value(CommandResponse::new(request.request_id, data))
         .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request.request_id)))

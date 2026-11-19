@@ -9223,6 +9223,7 @@ fn persist_new_task_permission(
 
 #[cfg(test)]
 mod tests {
+    mod publication_acceptance;
     #[test]
     #[cfg(feature = "kimi-k31-pro-candidate")]
     fn retired_tool_preference_is_removed_without_changing_chat_history() {

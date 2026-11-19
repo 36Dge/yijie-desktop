@@ -72,6 +72,12 @@ pub struct NativeItem {
         skip_serializing_if = "Option::is_none"
     )]
     pub tool_display: Option<NativeToolDisplay>,
+    #[serde(
+        rename = "publication",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub publication: Option<NativeMessagePublication>,
 }
 impl std::fmt::Debug for NativeItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -408,6 +414,30 @@ pub struct DeepSearchReceipt {
 impl std::fmt::Debug for DeepSearchReceipt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("DeepSearchReceipt([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeMessagePublication {
+    #[serde(rename = "itemId")]
+    pub item_id: String,
+    #[serde(rename = "order")]
+    pub order: i64,
+    #[serde(
+        rename = "afterItemId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub after_item_id: Option<String>,
+    #[serde(rename = "source")]
+    pub source: String,
+    #[serde(rename = "truncated")]
+    pub truncated: bool,
+}
+impl std::fmt::Debug for NativeMessagePublication {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NativeMessagePublication([REDACTED])")
     }
 }
 

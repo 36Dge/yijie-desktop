@@ -5,7 +5,6 @@ import type { SelectedChatSkill } from "../../domain/chat-skills";
 import type { YjIconName } from "../../icons/registry";
 import { conversationActivityPresentation, traceCurrentStatus, traceIsLive } from "../../domain/conversation-activity-presentation";
 import { groupConversationTurnOutput, type ConversationTurnReadingNode } from "../../domain/conversation-turn-output";
-import { hasUnclassifiedToolContinuation } from "../../domain/conversation-process";
 import { chatTracePresentationKey, createChatTracePresentationStore } from "../../stores/chat-trace-presentation.store";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatActivityGroup from "./ChatActivityGroup.vue";
@@ -45,23 +44,16 @@ provide(chatTracePresentationKey, choices);
 const processId = `${useId()}-trace`;
 const attentionIds = computed(() => new Set(props.turn.items.filter(item => item.approval && ["submitting", "reconciling", "error"].includes(props.approvalTransients[item.approval.approvalRequestId]?.phase ?? "idle")).map(item => item.identity)));
 const nodes = computed(() => conversationActivityPresentation(props.turn, attentionIds.value, Boolean(slots["structured-answer"])));
-const answerIdentity = computed<string | undefined>(previous => {
-  const answer = [...nodes.value].reverse().find(node => {
-    if (node.kind === "activity" || node.process) return false;
-    const item = node.item;
-    if (item.presentation !== "final_answer") {
-      // An unphased opening may still be followed by tools. Only use the displayed
-      // answer while it streams, across its completion, or in completed history.
-      if (item.presentation !== "assistant_unclassified" || hasUnclassifiedToolContinuation(item, props.turn.items)) return false;
-      if (!item.busy && props.turn.domainStatus !== "completed" && previous !== item.identity) return false;
-    }
-    return item.contentBlocks.some(block => (block.type === "text" || block.type === "code") && block.text.trim());
-  });
-  return answer?.identity;
-});
+const hasReadableFinal = computed(() => props.turn.items.some(item =>
+  item.presentation === "final_answer" && item.contentBlocks.some(block =>
+    (block.type === "text" || block.type === "code") && block.text.trim().length > 0)));
+watch([() => props.turn.identity, hasReadableFinal], ([turnIdentity, readable]) => {
+  if (readable) choices.set(`${turnIdentity}:final-started`, true);
+}, { immediate: true, flush: "sync" });
+const answerStarted = computed(() => choices.has(`${props.turn.identity}:final-started`));
 const nativeLiveProgress = computed(() => traceIsLive(props.turn));
 const reasoningSummary = computed(() => conversationReasoningSummary(props.turn, nativeLiveProgress.value));
-const hasProcess = computed(() => Boolean(props.turn.plan || (answerIdentity.value && reasoningSummary.value)) || nodes.value.some(isProcess));
+const hasProcess = computed(() => Boolean(props.turn.plan || (answerStarted.value && reasoningSummary.value)) || nodes.value.some(isProcess));
 const reasoningHeader = useActivitySummary(computed(() => ({
   heading: reasoningSummary.value?.heading,
   key: reasoningSummary.value?.key ?? "empty",
@@ -83,8 +75,11 @@ watch(() => [props.turn.identity, props.timingLabel] as const, ([identity, label
 }, {immediate: true, flush: "sync"});
 const preloading = computed(() => nativeLiveProgress.value && !outputObserved.value);
 // Starting the answer closes the pre-answer view once. A reader can then reopen it as text streams.
-const processChoiceKey = computed(() => answerIdentity.value ? `${answerIdentity.value}:turn-process` : props.turn.identity);
-const processExpanded = computed(() => choices.get(processChoiceKey.value, nativeLiveProgress.value && !answerIdentity.value));
+const processChoiceKey = computed(() => answerStarted.value ? `${props.turn.identity}:process-after-final` : props.turn.identity);
+watch([() => props.turn.identity, nativeLiveProgress], ([id, live]) => {
+  if (live && !choices.has(id)) choices.set(id, true);
+}, {immediate: true, flush: "sync"});
+const processExpanded = computed(() => choices.get(processChoiceKey.value, false));
 const summaryVisible = computed(() => !hasProcess.value || processExpanded.value);
 const currentStatus = computed(() => traceCurrentStatus(props.turn, props.hasDeliveredArtifact));
 const plan = computed(() => props.turn.plan ? {...props.turn.plan, defaultExpanded: false} : null);

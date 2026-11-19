@@ -1464,6 +1464,7 @@ impl HostBridge {
         let mut request = self
             .bearer_request(method, mapped.as_deref().unwrap_or(path_and_query))
             .await?;
+        request = request.header("X-Yijie-Publication", "2");
         if let Some(profile) = &self.model_profile {
             request = request.header("X-Yijie-Model-Profile", profile);
         }

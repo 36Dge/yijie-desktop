@@ -62,7 +62,8 @@ export interface NativeItem {
     | "fileChange"
     | "subAgentActivity"
     | "imageView"
-    | "unknown";
+    | "unknown"
+    | "unpublishedText";
   clientId?: string | null;
   text?: string;
   phase?: ("commentary" | "final_answer") | null;
@@ -112,6 +113,7 @@ export interface NativeItem {
    */
   commandActions?: NativeCommandActionDisplay[];
   toolDisplay?: NativeToolDisplay;
+  publication?: NativeMessagePublication;
 }
 /**
  * Display-only native MCP facts. No raw arguments/error/meta/resources/structuredContent and no business field parsing. Native list_mcp_resources/list_mcp_resource_templates may expose a validated resource count and redacted resource names/titles, never resource URIs, cursors or metadata. Empty resource lists are successful real results, not omitted content. For yijie_web/kimi_web_search_pro only, Host validates the closed built-in web result and projects the ordered source summaries from its native text block. Raw page content and chunks are excluded. Other tools retain their existing display policies. Limits do not change execution status; partial content availability must not suppress a known execution outcome. Host bounds total UTF-8 text at 256KiB and first 32 original content entries. Confidentiality may replace entire lines.
@@ -587,6 +589,26 @@ export interface NativeToolDisplay {
   provenance: "nativeAppContext" | "registeredTool" | "allowedTitle";
   sourceLabel?: string;
   title?: string;
+}
+/**
+ * Published by the negotiated Runtime. order is the original turn observation order. afterItemId anchors a delayed message. Undelivered text is never an agentMessage or an execution terminal.
+ */
+export interface NativeMessagePublication {
+  itemId: string;
+  order: number;
+  afterItemId?: string;
+  source:
+    | "provider"
+    | "declaration"
+    | "subsequent_work"
+    | "turn_commit"
+    | "progress_step"
+    | "final_step"
+    | "interrupted"
+    | "failed"
+    | "superseded"
+    | "display_limit";
+  truncated: boolean;
 }
 export interface NativePlanStep {
   step: string;

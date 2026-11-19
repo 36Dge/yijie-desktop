@@ -47,6 +47,7 @@ export type ConversationTimelineItemKind =
   | "tool"
   | "web_search"
   | "artifact"
+  | "unpublished_text"
   | "unknown";
 export type ConversationTimelineItemPresentation =
   | "context_update"
@@ -59,6 +60,7 @@ export type ConversationTimelineItemPresentation =
   | "tool"
   | "web_search"
   | "artifact"
+  | "unpublished_text"
   | "unknown";
 export type ConversationTimelineContentMode = "rich" | "plain";
 export type ConversationTimelineCopyPolicy = "text_and_code" | "none";
@@ -156,6 +158,7 @@ export type ConversationTimelinePlanViewModel = Readonly<{
 }>;
 
 export type ConversationTimelineItemViewModel = Readonly<{
+  publication?: ConversationItem["publication"];
   contextUpdateState?: "in_progress" | "completed" | "interrupted" | "unknown";
   webSearch?: ConversationItem["webSearch"];
   identity: string;
@@ -260,6 +263,7 @@ const ITEM_KINDS: Readonly<Record<ConversationItemKind, ConversationTimelineItem
     command: "command",
     tool: "tool",
     web_search: "web_search",
+    unpublished_text: "unpublished_text",
     approval: "unknown",
     artifact: "artifact",
     unknown: "unknown",
@@ -417,6 +421,8 @@ function relatedItems(
 
 function itemPresentation(item: ConversationItem): ConversationTimelineItemPresentation {
   switch (item.kind) {
+    case "unpublished_text":
+      return "unpublished_text";
     case "user_message":
       return "user_message";
     case "assistant_message":
@@ -504,6 +510,7 @@ function projectItem(
   return Object.freeze({
     identity,
     busy, activityLabel, availability: item.availability,
+    ...(item.publication && {publication: item.publication}),
     ...(item.webSearch ? {webSearch: item.webSearch} : {}),
     threadId: item.threadId,
     turnId: item.turnId,

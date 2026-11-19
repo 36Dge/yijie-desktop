@@ -167,7 +167,8 @@
         "schemaVersion": {
           "type": "integer",
           "enum": [
-            6
+            6,
+            7
           ]
         },
         "contextId": {
