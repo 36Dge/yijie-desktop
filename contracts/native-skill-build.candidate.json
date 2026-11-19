@@ -3,7 +3,7 @@
   "feature": "FEAT-174",
   "mode": "local_worktree_candidate",
   "release": false,
-  "host_base_commit": "6b7846e190acfd01aebddc44c6e387497b3e40bb",
+  "host_base_commit": "7ed07607f7bf308deae8a1b08bfa6340dbdb9b08",
   "host_sources": {
     "api/README.md": "d270ca2dabf257b528ee2f178ba03e3d7fb3f1e04ffc8b4414247d4c47c50807",
     "api/artifact-media.candidate.json": "6d3ba9477e73b9e04a76e5933ba1d87e68076c62a97d28d2941b5d005c0f9864",
@@ -607,7 +607,7 @@
     "internal/session/media_generation_test.go": "b67504f96d5dec866eac9e5029ab6d8fcbe69d9f84c098b7e718df663f781778",
     "internal/session/multimodal.go": "e0e7d5958285acc75c6eae8bbb3af83e2c5d9b4ddc2c11396231cf53cb8c7276",
     "internal/session/multimodal_test.go": "0ce1944402d4fd4837732d41a07ec7b4689a62ada84d4bb222bb301be1d21fcc",
-    "internal/session/native_conversation.go": "49312bc6c284f309293b764de6cc0354eaf9e7972af06ca875d22c3197caf52f",
+    "internal/session/native_conversation.go": "3350c6e0d818394b0ebee37a51338ec2e26514df1cddfeffc83c4a3ee46bfc7c",
     "internal/session/native_conversation_test.go": "f664a95a8828d2c925ce9bed6c2ff15746fd61eed9a99b114720efe7b5d9f99b",
     "internal/session/native_deep_web_search.go": "39bb1d1838d6c46796e4a73a2c046b22b674af03a39b2e2c2e2b6189940e1a26",
     "internal/session/native_deep_web_search_test.go": "2ec3c0c3f570195050125e7282b303e5bb359b920c9772f2732fbff923783142",
