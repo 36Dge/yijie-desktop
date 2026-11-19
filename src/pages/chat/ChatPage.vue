@@ -39,8 +39,10 @@ import { useChatAttachmentPresentation } from "../../composables/useChatAttachme
 import ChatShopControl from "../../components/chat/ChatShopControl.vue";
 import ChatConnectorControl from "../../components/chat/ChatConnectorControl.vue";
 import ChatSkillControl from "../../components/chat/ChatSkillControl.vue";
+import ChatSkillNotice from "../../components/chat/ChatSkillNotice.vue";
 import ChatExpertControl from "../../components/chat/ChatExpertControl.vue";
 import { explicitExpertInvocation } from "../../domain/explicit-expert";
+import { explicitSkillInvocation } from "../../domain/explicit-invocation";
 import { useChatExpertPicker } from "../../composables/useChatExpertPicker";
 import type { CatalogEntry } from "../../domain/experts-v2.generated";
 import { skillMarketplaceUiEnabled } from "../../authorization/skill-marketplace-ui-config";
@@ -129,7 +131,7 @@ import { browserChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
 
 import { CHAT_AUTHORITY_RETRY_KEY } from "../../authorization/chat-authority-recovery";
 import { locateChatTurn } from "../../domain/locate-chat-turn";
-import { compileSkillInput, compileSelectedSkillRefs, nativeSkillInputEnabled, selectedSkillIssue, skillSelectionIssue, type ChatSkillChip } from "../../domain/chat-skills";
+import { compileSkillInput, compileSelectedSkillRefs, namedSkillIssue, nativeSkillInputEnabled, selectedSkillIssue, skillSelectionIssue, type ChatSkillChip } from "../../domain/chat-skills";
 
 const route = useRoute();
 const router = useRouter();
@@ -408,6 +410,7 @@ const reasoningItems = ref<Readonly<Record<string, readonly ChatReasoningItem[]>
 const reasoningLoading = ref<ReadonlySet<string>>(new Set());
 const reasoningFailed = ref<ReadonlySet<string>>(new Set());
 const conversationScroller = ref<HTMLElement | null>(null);
+const conversationColumn = ref<HTMLElement | null>(null);
 const renderedConversationView = shallowRef(readingConversation.value);
 let dragDropUnlisten: UnlistenFn | null = null;
 let dragDropDisposed = false;
@@ -419,7 +422,7 @@ const {
   scrollToSubmittedTurn,
   followNewContent,
   preservePositionWhile,
-} = useChatScroll(conversationScroller);
+} = useChatScroll(conversationScroller, conversationColumn);
 const submittedTurnAnchor = ref<{ sessionId: string; turnId: string; contextId: string | undefined } | null>(null);
 
 const isSessionRoute = computed(() => routeSessionId.value !== null);
@@ -618,7 +621,13 @@ const skillChips = computed<readonly ChatSkillChip[]>(() => skillSelection.value
   ...selected,
   unavailableReason: skills.operations[selected.id] ? "技能正在更新，请稍后重试" : skills.phase === "ready" || skills.phase === "empty" ? selectedSkillIssue(selected, skills.skills) : null,
 })));
-const skillNotice = computed(() => skillChips.value.find(skill => skill.unavailableReason)?.unavailableReason ?? null);
+const skillFeedback = ref("");
+const skillNotice = computed(() => {
+  const unavailable = skillChips.value.find(skill => skill.unavailableReason);
+  return skillFeedback.value || (unavailable?.unavailableReason ? namedSkillIssue(unavailable.displayName, unavailable.unavailableReason) : "");
+});
+watch([composerDraftTargetKey, () => chatStore.context?.contextId, prompt, skillSelection], () => { skillFeedback.value = ""; });
+watch(skillNotice, message => { if (message && isSessionRoute.value) void nextTick(() => scrollToBottom(true)); });
 function toggleSkill(id: string): void {
   if (modelBusy.value || submitting.value || expertSubmission.value || isDraftMode.value || chatStore.selectedAccessMode === "history-only") return;
   const target = composerDraftTargetKey.value, current = sharedDrafts.skillSelection(target);
@@ -965,9 +974,9 @@ async function pickProject(): Promise<void> {
   }
 }
 
-let resolvingNamedExpert = false;
+let resolvingResource = false;
 async function submit(recoverExpert = false): Promise<void> {
-  if (resolvingNamedExpert || submitting.value || (!recoverExpert && !models.ready.value)) return;
+  if (resolvingResource || submitting.value || (!recoverExpert && !models.ready.value)) return;
   if (isDraftMode.value) {
     const target = composerDraftTargetKey.value;
     const result = await draft.submit(prompt.value, models.intent.value);
@@ -982,19 +991,61 @@ async function submit(recoverExpert = false): Promise<void> {
   if (!recoverExpert && !expertSendReady.value) return;
   if (recoverExpert && !expertSubmission.value) return;
   if (!recoverExpert && !workspaceSelectionValid.value) { transientNotice.value = "所选工作空间已不可用，请重新选择或取消工作空间后发送。"; return; }
-  if (!recoverExpert && expertsUiEnabled) {
-    const text = prompt.value;
-    const target = composerDraftTargetKey.value;
-    const contextId = chatStore.context?.contextId;
-    const named = explicitExpertInvocation(text, expertResources.entries, selectedExpert.value);
+  const draftTargetAtStart = composerDraftTargetKey.value;
+  const draftTextAtStart = prompt.value;
+  const contextAtStart = chatStore.context?.contextId;
+  const pickedSkills = skillSelection.value;
+  const routeAtStart = route.fullPath;
+  const profileAtStart = models.profile.value;
+  const projectAtStart = availableProjectId.value;
+  const attachmentIds = () => chatStore.draftAttachments.map(item => item.attachmentId).join(",");
+  const attachmentsAtStart = attachmentIds();
+  const currentDraft = () => route.fullPath === routeAtStart && composerDraftTargetKey.value === draftTargetAtStart &&
+    chatStore.context?.contextId === contextAtStart && prompt.value === draftTextAtStart && skillSelection.value === pickedSkills &&
+    models.profile.value === profileAtStart && availableProjectId.value === projectAtStart && attachmentIds() === attachmentsAtStart;
+  const turnSkills = [...pickedSkills];
+  let addressesSkill = false;
+  transientNotice.value = null;
+  if (!recoverExpert && skillMarketplaceUiEnabled) {
+    const resolve = () => explicitSkillInvocation(draftTextAtStart, skills.skills, pickedSkills);
+    const initial = resolve();
+    const catalogReady = () => skills.phase === "ready" || skills.phase === "empty";
+    const hasSkillRequest = Boolean(pickedSkills.length || initial.mentions.length || initial.nativeMentions.length || initial.issue);
+    if (hasSkillRequest || skills.phase === "loading" || skills.phase === "idle" || (!catalogReady() && initial.directed)) {
+      resolvingResource = true;
+      try {
+        await skills.open(false);
+        if (!currentDraft()) return;
+        if ((skills.lastFailure || !catalogReady()) && (hasSkillRequest ||
+          (expertsUiEnabled && explicitExpertInvocation(draftTextAtStart, expertResources.entries, selectedExpert.value).kind === "ambiguous"))) {
+          skillFeedback.value = "暂时无法核对技能状态，请重试。";
+          return;
+        }
+        const named = resolve();
+        if (named.issue) { skillFeedback.value = named.issue; return; }
+        addressesSkill = named.addressesFirst;
+        // A picker choice fixes the identity and version even if the text also names it.
+        const removed = [...initial.mentions, ...initial.nativeMentions].filter(skill => !skills.skills.some(current => current.id === skill.id));
+        for (const skill of named.mentions) {
+          if (!turnSkills.some(picked => picked.id === skill.id)) turnSkills.push(skill);
+        }
+        for (const skill of [...turnSkills, ...named.nativeMentions, ...removed]) {
+          const issue = skills.operations[skill.id] ? "技能正在更新，请稍后重试" : selectedSkillIssue(skill, skills.skills);
+          if (issue) { skillFeedback.value = namedSkillIssue(skill.displayName, issue); return; }
+        }
+      } finally {
+        resolvingResource = false;
+      }
+    }
+  }
+  if (!recoverExpert && expertsUiEnabled && !addressesSkill) {
+    const named = explicitExpertInvocation(draftTextAtStart, expertResources.entries, selectedExpert.value);
     if (named.kind === "ambiguous") {
       transientNotice.value = "请从专家选择器中选定要使用的专家，再发送这条消息。";
       return;
     }
     if (named.kind === "select") {
-      const profile = models.profile.value;
-      const attachments = chatStore.draftAttachments.map(item => item.attachmentId).join(",");
-      resolvingNamedExpert = true;
+      resolvingResource = true;
       try {
         if (!await expertPicker.select(named.entry)) {
           transientNotice.value = expertPicker.error.value ?? "专家选择未完成，请检查专家状态后再发送。";
@@ -1005,47 +1056,36 @@ async function submit(recoverExpert = false): Promise<void> {
         // freezing the new turn. No model call occurs during a catalog read.
         await nextTick();
         if (!models.ready.value) await models.refresh();
-        if (composerDraftTargetKey.value !== target || chatStore.context?.contextId !== contextId ||
-          text !== prompt.value || chatStore.draftAttachments.map(item => item.attachmentId).join(",") !== attachments ||
-          !expertSendReady.value || !permissionCanSend.value || !models.ready.value || models.profile.value !== profile ||
+        if (!currentDraft() || !expertSendReady.value || !permissionCanSend.value || !models.ready.value ||
           selectedExpert.value?.expertId !== named.entry.display.expertId ||
           selectedExpert.value.version !== named.entry.display.version) {
           transientNotice.value = "已保留草稿，请核对当前专家、模型和附件后发送。";
           return;
         }
       } finally {
-        resolvingNamedExpert = false;
+        resolvingResource = false;
       }
     }
   }
+  if (!recoverExpert && (!currentDraft() || !normalPurposeReady.value ||
+    !workspaceSelectionValid.value || !permissionCanSend.value || !models.ready.value || !expertSendReady.value)) return;
   if (!recoverExpert && !prepareConnectorSubmit()) return;
   const focusSnapshot: ChatComposerFocusSnapshot | null = composer.value?.captureInputFocus() ?? null;
   submitting.value = true;
   actionErrorCode.value = null;
   transientNotice.value = null;
-  const draftTargetAtStart = composerDraftTargetKey.value;
+  skillFeedback.value = "";
   let focusRestoreTarget = draftTargetAtStart;
-  const draftTextAtStart = prompt.value;
-  const selectedSkillsAtStart = [...skillSelection.value];
-  const contextAtStart = chatStore.context?.contextId;
   let input = draftTextAtStart.trim();
   const frozenExpert = recoverExpert ? expertSubmission.value : undefined;
   const turnExpert = frozenExpert ? { expectedBindingRevision: frozenExpert.expectedBindingRevision, expert: frozenExpert.expert } : expertIntent.value;
   const marketSelection = frozenExpert?.submission.selection ?? (marketConnectorsEnabled && (connectorSelection.value.length > 0 || marketChat.managed.value)
     ? connectorSelection.value.map(item => ({ ...item.reference })) : undefined);
   try {
-    if (!recoverExpert && selectedSkillsAtStart.length) {
-      await skills.open(canManageSkills.value);
-      if (composerDraftTargetKey.value !== draftTargetAtStart || chatStore.context?.contextId !== contextAtStart || prompt.value !== draftTextAtStart || JSON.stringify(skillSelection.value) !== JSON.stringify(selectedSkillsAtStart)) return;
-      if (skills.lastFailure || (skills.phase !== "ready" && skills.phase !== "empty")) {
-        transientNotice.value = "暂时无法确认所选技能状态，请重试。";
-        return;
-      }
-      const issue = selectedSkillsAtStart.map(skill => skills.operations[skill.id] ? "技能正在更新，请稍后重试" : selectedSkillIssue(skill, skills.skills)).find(Boolean);
-      if (issue) { transientNotice.value = issue; return; }
-      if (import.meta.env.VITE_YIJIE_FEAT174_NATIVE_SKILLS !== "true" || !nativeSkillInputEnabled()) input = compileSkillInput(input, selectedSkillsAtStart);
+    if (!recoverExpert && turnSkills.length && (import.meta.env.VITE_YIJIE_FEAT174_NATIVE_SKILLS !== "true" || !nativeSkillInputEnabled())) {
+      input = compileSkillInput(input, turnSkills);
     }
-    const selectedRefs = nativeSkillInputEnabled() && !recoverExpert ? compileSelectedSkillRefs(selectedSkillsAtStart) : undefined;
+    const selectedRefs = nativeSkillInputEnabled() && !recoverExpert ? compileSelectedSkillRefs(turnSkills) : undefined;
     if (isSessionRoute.value) {
       const result = await (selectedRefs?.length
         ? chatStore.submitTurnWithResult(input, frozenExpert?.submission.intent ?? models.intent.value ?? undefined, marketSelection, turnExpert, selectedRefs)
@@ -1306,9 +1346,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section v-if="!isSessionRoute" class="chat-entry" aria-labelledby="new-task-title" @focusin="handleEntryFocus" @pointerdown="homeOpening?.finish()">
+  <section v-if="!isSessionRoute" class="chat-entry" :class="{ 'chat-entry--conversation': skillNotice }" :aria-label="skillNotice ? '新对话' : undefined" :aria-labelledby="skillNotice ? undefined : 'new-task-title'" @focusin="handleEntryFocus" @pointerdown="homeOpening?.finish()">
     <div class="chat-entry__content">
-      <ChatHomeOpening ref="homeOpening" :skip-animation="prompt.length > 0 || chatStore.draftAttachments.length > 0 || submitting || dragActive || Boolean(stableError)" @started="homeOpeningDone = false" @settled="homeOpeningDone = true" />
+      <section v-if="skillNotice" class="chat-entry__skill-conversation" role="log" aria-label="任务对话记录">
+        <ChatSkillNotice :message="skillNotice" @manage="manageSkills" />
+      </section>
+      <ChatHomeOpening v-else ref="homeOpening" :skip-animation="prompt.length > 0 || chatStore.draftAttachments.length > 0 || submitting || dragActive || Boolean(stableError)" @started="homeOpeningDone = false" @settled="homeOpeningDone = true" />
 
       <div v-if="stableError" class="chat-notice" :class="`chat-notice--${stableError.tone}`" role="alert">
         <YjIcon :name="stableError.tone === 'error' ? 'warning' : 'pending'" size="lg" :tone="stableError.tone === 'error' ? 'error' : 'warning'" />
@@ -1326,7 +1369,6 @@ onBeforeUnmount(() => {
       <p v-if="!isDraftMode && !workspaceSelectionValid" class="chat-workspace__composer-error" role="alert">所选工作空间已不可用，请重新选择或取消工作空间后发送。</p>
       <ScheduledDraftPanel v-if="isDraftMode" ref="draftPanel" :model="draft" @accepted="openDraftConversation" @view-plan="viewDraftPlan" @recover="recoverDraft" />
       <p v-if="chatModelsEnabled && models.error.value" class="chat-workspace__composer-error" role="alert">{{ models.error.value }}</p>
-      <p v-if="skillNotice" class="chat-workspace__composer-error" role="status">{{ skillNotice }}</p>
       <p v-if="expertNotice" class="chat-workspace__composer-error" role="status">{{ expertNotice }} <button type="button" class="yj-control" :disabled="submitting" @click="refreshExpert">{{ expertSubmission ? "确认原提交" : "重新读取" }}</button><template v-if="expertRecoveryOperation">恢复会重新应用原选择，不发送消息。<button type="button" class="yj-control" :disabled="expertRecoveryBlocked" @click="recoverExpertBinding">恢复原操作</button></template></p>
       <p v-if="uncertainLocalSubmission" class="chat-workspace__composer-error" role="status">原提交结果尚未确认，请勿重复发送。<button type="button" class="yj-control" :disabled="submitting || chatStore.phase === 'resyncing' || !chatStore.hasAction('read_sessions')" @click="chatStore.resyncSelected">重新读取原提交</button></p>
       <ChatDeliveryControl v-if="kimiK31Candidate && chatModelsEnabled && !isDraftMode && normalPurposeReady && routeSessionId && chatStore.hasAction('read_sessions')" :states="delivery.states.value" :loading="delivery.loading.value" :cancelling="delivery.cancelling.value" :can-cancel="chatStore.hasAction('interrupt_turn')" :error="delivery.error.value" :notice="delivery.notice.value" @refresh="delivery.refresh" @cancel="delivery.cancel" />
@@ -1428,7 +1470,7 @@ onBeforeUnmount(() => {
         :aria-busy="isHistoryLoading || chatStore.phase === 'binding-pending' || chatStore.phase === 'resyncing'"
         @scroll="updateScrollPosition"
       >
-        <div class="chat-workspace__column">
+        <div ref="conversationColumn" class="chat-workspace__column">
           <button
             v-if="chatStore.history?.nextCursor"
             class="chat-workspace__load-history"
@@ -1556,6 +1598,7 @@ onBeforeUnmount(() => {
             <button v-if="cleanup.actionLabel" class="chat-notice__action yj-control" type="button" @click="refreshCleanup">{{ cleanup.actionLabel }}</button>
           </div>
           <MarketChatActivity v-if="!isDraftMode && marketConnectorsEnabled" :observation="marketChat.observation.value" :connected="marketChat.connected.value" :refreshing="marketChat.refreshing.value" :deciding="marketChat.deciding.value" :error="marketChat.error.value" :actionable="marketChat.actionable" :tool-observation="marketChat.toolObservation.value" :selected-turn-id="marketChat.selectedTurnId.value" :history-refreshing="marketChat.historyRefreshing.value" :history-error="marketChat.historyError.value" @refresh="marketChat.refresh" @decision="marketChat.decide" @select-turn="marketChat.selectTurn" />
+          <ChatSkillNotice v-if="skillNotice" :message="skillNotice" @manage="manageSkills" />
         </div>
       </div>
 
@@ -1585,7 +1628,6 @@ onBeforeUnmount(() => {
       <p v-if="!isDraftMode && !workspaceSelectionValid" class="chat-workspace__composer-error" role="alert">所选工作空间已不可用，请重新选择或取消工作空间后发送。</p>
       <ScheduledDraftPanel v-if="isDraftMode" ref="draftPanel" :model="draft" @accepted="openDraftConversation" @view-plan="viewDraftPlan" @recover="recoverDraft" />
       <p v-if="chatModelsEnabled && models.error.value" class="chat-workspace__composer-error" role="alert">{{ models.error.value }}</p>
-      <p v-if="skillNotice" class="chat-workspace__composer-error" role="status">{{ skillNotice }}</p>
       <p v-if="expertNotice" class="chat-workspace__composer-error" role="status">{{ expertNotice }} <button type="button" class="yj-control" :disabled="submitting" @click="refreshExpert">{{ expertSubmission ? "确认原提交" : "重新读取" }}</button><template v-if="expertRecoveryOperation">恢复会重新应用原选择，不发送消息。<button type="button" class="yj-control" :disabled="expertRecoveryBlocked" @click="recoverExpertBinding">恢复原操作</button></template></p>
       <p v-if="uncertainLocalSubmission" class="chat-workspace__composer-error" role="status">原提交结果尚未确认，请勿重复发送。<button type="button" class="yj-control" :disabled="submitting || chatStore.phase === 'resyncing' || !chatStore.hasAction('read_sessions')" @click="chatStore.resyncSelected">重新读取原提交</button></p>
       <ChatComposer
@@ -1639,7 +1681,7 @@ onBeforeUnmount(() => {
           <ChatSkillControl :entries="skills.skills" :selected-ids="skillSelection.map(skill => skill.id)" :disabled="submitting || Boolean(expertSubmission) || modelBusy || chatStore.selectedAccessMode === 'history-only'" :loading="skills.phase === 'loading'" :refreshing="skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @select="toggleSkill" @manage="manageSkills" @close="close" />
         </template>
         <template v-if="chatModelsEnabled" #model-control>
-          <ChatContextWindow :sample="contextWindow.sample.value" />
+          <ChatContextWindow :sample="contextWindow.sample.value" :last-model="contextWindow.lastModel.value" />
           <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" :error="models.error.value" :retry-label="models.retryLabel.value" @select="models.select" @retry="models.retry" />
         </template>
         <template v-if="!isDraftMode && runtimePermissionsEnabled" #permission-control>
@@ -1709,6 +1751,8 @@ onBeforeUnmount(() => {
 }
 
 .chat-entry__unsupported { width: min(100%, var(--yj-layout-chat-composer-max)); margin: 0 0 var(--yj-space-3); color: var(--yj-color-semantic-error-ink); font-size: var(--yj-font-size-caption); }
+.chat-entry--conversation .chat-entry__content { align-self: stretch; margin-top: 0; }
+.chat-entry__skill-conversation { flex: 1; width: 100%; }
 
 .chat-workspace {
   --yj-layout-chat-column-max: var(--yj-layout-chat-entry-max);

@@ -1,19 +1,36 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { activityItemTitle } from "../../domain/conversation-activity-summary";
+import { formatToolDuration } from "../../domain/chat-ui";
+import { readDeepSearchPreview } from "../../domain/web-retrieval-display";
+import { useWebSources } from "../../composables/useWebSources";
 import { browserChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
 import ChatCopyAction from "./ChatCopyAction.vue";
 import WebRetrievalResult from "./WebRetrievalResult.vue";
 import type { ConversationNativeToolExecution } from "../../domain/conversation-view";
+import { activityNativeItem, deepSearchEvidence, deepSearchReceipt } from "../../domain/conversation-activity-entry";
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
 import ChatTimelineItemShell, { type ChatTimelineDisclosureChange } from "./ChatTimelineItemShell.vue";
 
-const props = defineProps<{ item: ConversationTimelineItemViewModel; execution: ConversationNativeToolExecution; processPresentation?: boolean }>();
+const props = defineProps<{ item: ConversationTimelineItemViewModel; execution: ConversationNativeToolExecution; processPresentation?: boolean; searchCalls?: readonly ConversationTimelineItemViewModel[] }>();
 const emit = defineEmits<{ "disclosure-change": [change: ChatTimelineDisclosureChange] }>();
-const native = computed(() => props.execution.native.item);
+const evidence = computed(() => deepSearchEvidence(props.item, props.searchCalls));
+const { open, openError } = useWebSources(() => evidence.value);
+const native = computed(() => activityNativeItem(evidence.value) ?? props.execution.native.item);
 const nativeOperation = computed(() => ["fileChange", "subAgentActivity"].includes(native.value.type));
 const mcp = computed(() => native.value.mcp);
 const builtinWeb = computed(() => mcp.value?.server === "yijie_web" && ["kimi_web_search", "kimi_web_search_pro", "kimi_web_fetch"].includes(mcp.value.tool ?? ""));
+const deepSearch = computed(() => builtinWeb.value && mcp.value?.tool === "kimi_web_search_pro");
+const query = computed(() => deepSearch.value && !mcp.value?.diagnostics.some(code => code === "arguments_unavailable")
+  ? native.value.argumentsSummary?.trim() : undefined);
+const searchResult = computed(() => {
+  const receipt = mcp.value;
+  if (!deepSearch.value || receipt?.resultKind !== "text" || receipt.texts.length !== 1 || receipt.texts[0]?.index !== 0) return null;
+  return readDeepSearchPreview(receipt.texts[0].text);
+});
+const hasDetails = computed(() => !deepSearch.value || Boolean(query.value || searchResult.value || (props.searchCalls?.length ?? 0) > 1));
+const title = computed(() => [activityItemTitle(props.item), query.value].filter(Boolean).join(" · "));
+const elapsed = computed(() => native.value.durationMs == null ? null : formatToolDuration(native.value.durationMs));
 const identity = computed(() => mcp.value?.server && mcp.value.tool ? `${mcp.value.server} / ${mcp.value.tool}` : "工具身份信息不完整");
 const status = computed(() => {
   if (native.value.type === "subAgentActivity") return props.item.busy ? "处理中" : "已记录";
@@ -25,6 +42,35 @@ const status = computed(() => {
     default: return "状态信息不完整";
   }
 });
+const fact = computed(() => deepSearchReceipt(evidence.value));
+const reuses = computed(() => (props.searchCalls ?? [props.item]).filter(item => deepSearchReceipt(item)?.relation === "reused").length);
+const joins = computed(() => (props.searchCalls ?? [props.item]).filter(item => deepSearchReceipt(item)?.relation === "joined").length);
+function callLabel(item: ConversationTimelineItemViewModel) {
+  const r = deepSearchReceipt(item);
+  if (r?.dispatch === "not_dispatched") return "未派发";
+  if (r?.relation === "joined") return "并发合并";
+  if (r?.relation === "reused") return "复用原结果";
+  return r?.dispatch === "responded" ? "已收到服务响应" : "派发状态待确认";
+}
+const summaryStatus = computed(() => {
+  if (!deepSearch.value) return status.value;
+  if (fact.value?.dispatch === "not_dispatched") return fact.value.error_code === "busy" ? "未派发 · 繁忙" : "未派发";
+  if (fact.value?.availability === "unavailable") {
+    return fact.value.dispatch === "responded" ? "原搜索已执行，结果详情不可用" : "结果详情不可用";
+  }
+  if (fact.value?.outcome === "failed") return "搜索失败";
+  if (fact.value?.outcome === "unknown") return "结果待确认";
+  if (fact.value?.outcome === "empty") return "0 条结果";
+  if (!hasDetails.value) return [status.value, elapsed.value].filter(Boolean).join(" · ");
+  const result = searchResult.value;
+  if ((evidence.value.execution?.status === "completed") && result && "results" in result && (result.results.length || !result.truncated)) {
+    return fact.value?.outcome === "partial"
+      ? `${result.results.length} 条结果 · 部分资料`
+      : `${result.results.length} 条结果`;
+  }
+  return status.value;
+});
+const headerStatus = computed(() => [summaryStatus.value, reuses.value ? `已复用 ${reuses.value} 次` : "", joins.value ? `并发合并 ${joins.value} 次` : ""].filter(Boolean).join(" · "));
 const resultMessage = computed(() => {
   switch (mcp.value?.resultKind) {
     case "absent": return "原生记录未提供结果字段。";
@@ -50,15 +96,30 @@ const diagnosticLabels = {
 
 <template>
   <ChatTimelineItemShell
+    :class="{ 'deep-search-row': deepSearch }"
     :process-presentation="processPresentation"
-    :item="item" :label="activityItemTitle(item)" :status-label="status" icon="skillOperations"
+    :item="item" :label="title" :status-label="headerStatus" :icon="deepSearch ? 'scanSearch' : 'skillOperations'"
     :status-icon="item.busy ? 'pending' : native.type === 'subAgentActivity' || execution.status === 'completed' ? 'check' : 'warning'"
     :status-tone="item.busy ? 'primary' : native.type === 'subAgentActivity' ? 'muted' : execution.status === 'completed' ? 'success' : 'muted'"
-    collapsible :default-expanded="processPresentation ? false : item.busy"
+    :collapsible="hasDetails" :show-availability="!deepSearch" :default-expanded="!deepSearch && !processPresentation && item.busy"
     @disclosure-change="emit('disclosure-change', $event)"
   >
+    <template v-if="hasDetails" #default>
     <div class="native-tool" :aria-busy="item.busy">
-      <template v-if="nativeOperation">
+      <template v-if="deepSearch">
+        <p v-if="query" class="native-tool__query">搜索词 {{ query }}</p>
+        <WebRetrievalResult v-if="searchResult" :key="item.identity" :preview="searchResult" @open-source="open" />
+        <p v-else-if="!item.busy && execution.status === 'completed'" role="note">本次搜索的结果详情不可用。</p>
+        <details v-if="searchCalls && searchCalls.length > 1" class="native-tool__calls">
+          <summary>调用明细（{{ searchCalls.length }} 次）</summary>
+          <ol><li v-for="call in searchCalls" :key="call.identity">
+            本轮第 {{ call.ordinal + 1 }} 项 · {{ callLabel(call) }} <code>{{ call.itemId }}</code>
+          </li></ol>
+        </details>
+        <p v-if="openError" role="alert">{{ openError }}</p>
+        <p class="native-tool__source">易界网页检索<span v-if="elapsed"> · 耗时 {{ elapsed }}</span></p>
+      </template>
+      <template v-else-if="nativeOperation">
         <p v-if="native.text">{{ native.text }}</p>
         <pre v-if="native.outputText">{{ native.outputText }}</pre>
         <p v-if="native.availability !== 'available'" role="note">部分记录未完整展示。</p>
@@ -86,6 +147,7 @@ const diagnosticLabels = {
       <p v-else-if="native.availability !== 'available'" role="note">该项内容信息不完整；这不改变原生执行结果。</p>
       </template>
     </div>
+    </template>
   </ChatTimelineItemShell>
 </template>
 
@@ -93,6 +155,26 @@ const diagnosticLabels = {
 .native-tool { display:grid; gap:var(--yj-space-3); color:var(--yj-color-text-primary); }
 .native-tool h3 { font-size:var(--yj-font-size-caption); margin:0 0 var(--yj-space-2); }
 .native-tool p { margin:0; }
+.native-tool__query { overflow-wrap: anywhere; white-space: pre-wrap; }
+.deep-search-row :deep(.chat-timeline-item-shell__disclosure) { grid-template-columns: minmax(0, 1fr) auto auto; }
+.deep-search-row :deep(.chat-timeline-item-shell__static-header) { grid-template-columns: minmax(0, 1fr) auto; }
+.deep-search-row :deep(.chat-timeline-item-shell__identity),
+.deep-search-row :deep(.chat-timeline-item-shell__status) {
+  color: var(--deep-search-label-color, var(--yj-color-chat-timing));
+  font-size: var(--yj-font-size-body);
+  line-height: var(--yj-line-height-body);
+  font-weight: var(--yj-font-weight-regular);
+}
+.deep-search-row :deep(.chat-timeline-item-shell__disclosure:hover) { --deep-search-label-color: var(--yj-color-text-primary); }
+.deep-search-row :deep(.chat-timeline-item-shell__identity strong) { font-weight: inherit; }
+.deep-search-row :deep(.chat-timeline-item-shell__identity .yj-icon) { width: 1em; height: 1em; color: inherit; stroke-width: 1.5; }
+.deep-search-row .native-tool {
+  color: var(--yj-color-text-secondary);
+  font-size: var(--yj-font-size-caption);
+  line-height: var(--yj-line-height-caption);
+  font-weight: var(--yj-font-weight-regular);
+}
 .native-tool pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:28rem; overflow:auto; margin:0; font:inherit; }
 .native-tool__source { color:var(--yj-color-text-secondary); font-size:var(--yj-font-size-caption); }
+.native-tool__calls code { overflow-wrap: anywhere; color: var(--yj-color-text-muted); }
 </style>

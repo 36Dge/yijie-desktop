@@ -720,8 +720,8 @@ it("places native turn duration after user input and before model output", () =>
 
 it("shows turn duration while waiting for the first model item", () => {
   const turn = projectedTurn({ status: "in_progress", items: [message("user", 0, "user_message", "用户输入")] });
-  const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: { turn, position: 1, timingLabel: "已处理 7s" } });
-  expect(wrapper.get(".chat-turn-group__items").element.lastElementChild!.textContent).toBe("已处理 7s");
+  const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: { turn, position: 1, timingLabel: "执行 7s" } });
+  expect(wrapper.get(".chat-turn-group__items").element.lastElementChild!.textContent).toBe("执行 7s");
   wrapper.unmount();
 });
 
@@ -736,10 +736,10 @@ it("uses elapsed time to reveal the entire process while leaving answers and lat
     {...message("unclassified", 4, "assistant_message", "兼容模型的回答"), agentMessagePhase: "unknown"},
     message("final", 5, "assistant_message", "**最终结果**"),
   ]});
-  const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: {turn, position: 1, timingLabel: "已完成 104s"}});
+  const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: {turn, position: 1, timingLabel: "已完成 5m13s"}});
   const toggle = wrapper.get(".chat-turn-group__process-toggle");
   expect(toggle.element.tagName).toBe("BUTTON");
-  expect(toggle.text()).toBe("已完成 104s");
+  expect(toggle.text()).toBe("已完成 5m13s");
   expect(toggle.attributes("aria-expanded")).toBe("false");
   const controlled = toggle.attributes("aria-controls")!.split(" ");
   expect(controlled).toHaveLength(2);
@@ -762,11 +762,11 @@ it("follows live Turn state until the user chooses expansion, without resetting 
     message("context-after-progress", 1, "reasoning", "后续处理"),
   ]});
   const active = {...base, source: "native_observed" as const, statusSource: "runtime_notification" as const, liveObserved: true, items: base.items.map(item => ({...item, busy: true, activityLabel: undefined}))};
-  const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: {turn: active, position: 1, timingLabel: "已处理 7s"}});
+  const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: {turn: active, position: 1, timingLabel: "执行 7s"}});
   const toggle = wrapper.get(".chat-turn-group__process-toggle");
   expect(toggle.attributes("aria-expanded")).toBe("true");
   await toggle.trigger("click");
-  await wrapper.setProps({timingLabel: "已处理 8s", turn: {...active, items: [...active.items, {...active.items[0]!, identity: "new-process", itemId: "new"}]}});
+  await wrapper.setProps({timingLabel: "执行 8s", turn: {...active, items: [...active.items, {...active.items[0]!, identity: "new-process", itemId: "new"}]}});
   expect(toggle.attributes("aria-expanded")).toBe("false");
   expect(wrapper.findAll("[data-process-item]").every(item => !item.isVisible())).toBe(true);
   const ended = {...active, domainStatus: "completed" as const, terminalStatus: "completed" as const, phase: "complete" as const};
@@ -784,7 +784,7 @@ it("keeps pending approvals and failed or incomplete process records outside the
   const approved = turnWithApproval();
   const normal = projectedTurn({items: [{...message("commentary", 1, "assistant_message", "普通过程"), agentMessagePhase: "commentary"}]}).items[0]!;
   const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: {
-    turn: {...approved, items: [...approved.items.map(item => ({...item, approval: null, activityLabel: undefined})), normal]}, position: 1, timingLabel: "已处理 7s",
+    turn: {...approved, items: [...approved.items.map(item => ({...item, approval: null, activityLabel: undefined})), normal]}, position: 1, timingLabel: "执行 7s",
   }});
   expect(wrapper.get(".chat-turn-group__process-toggle").attributes("aria-expanded")).toBe("false");
   expect(wrapper.get(".chat-turn-group__item--command").isVisible()).toBe(false);

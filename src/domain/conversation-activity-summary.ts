@@ -1,6 +1,6 @@
 import type { ConversationTimelineItemViewModel as Item } from "./conversation-timeline";
 import type { ConversationActivityGroup } from "./conversation-activity-presentation";
-import { activityEntriesForItem, activityNativeItem, activityToolSourceLabel, activityToolTitle, activityWebTitle } from "./conversation-activity-entry";
+import { deepSearchEvidence, deepSearchReceipt, activityEntriesForItem, activityNativeItem, activityToolSourceLabel, activityToolTitle, activityWebTitle } from "./conversation-activity-entry";
 
 export function activityItemTitle(item: Item): string {
   if (item.presentation === "web_search") return activityWebTitle(item);
@@ -19,6 +19,16 @@ export function summarizeActivity(group: ConversationActivityGroup, live: boolea
     return label ? [label] : [];
   }))];
   const sources = new Set(calls.flatMap(item => item.webSearch?.sources?.map(source => source.url) ?? []));
+  const typed = group.entries.filter(e => deepSearchReceipt(e.item));
+  const facts = typed.map(entry => deepSearchReceipt(deepSearchEvidence(entry.item, entry.searchCalls))!);
+  const dispatched = facts.filter(fact => fact.dispatch === "responded").length;
+  const attempted = facts.filter(fact => fact.dispatch === "attempted").length;
+  const notSent = facts.filter(fact => fact.dispatch === "not_dispatched").length;
+  const uncertain = facts.length - dispatched - attempted - notSent;
+  const receipts = typed.flatMap(entry => entry.searchCalls ?? [entry.item]).map(deepSearchReceipt);
+  const reused = receipts.filter(fact => fact?.relation === "reused").length;
+  const joined = receipts.filter(fact => fact?.relation === "joined").length;
+  const ordinary = calls.length - typed.length;
   const actions = calls.reduce((count, item) => count + (activityNativeItem(item)?.commandActions?.length ?? 0), 0);
   const failures = calls.filter(item => item.execution?.status === "failed").length;
   const unsupported = group.items.filter(item => item.presentation === "unknown").length;
@@ -40,6 +50,6 @@ export function summarizeActivity(group: ConversationActivityGroup, live: boolea
     key: state.kind === "active" ? `active:${state.entry.identity}` : state.kind,
     icon: categories.has("tool") ? "skillOperations" as const : categories.has("web_search") ? "globe" as const : "terminal" as const,
     callCount: calls.length, actionCount: actions, sourceCount: sources.size,
-    counts: [calls.length ? `${calls.length} 次调用` : "", actions ? `${actions} 个命令动作` : "", sources.size ? `${sources.size} 个来源` : "", failures ? `${failures} 次失败` : "", unsupported ? `${unsupported} 项暂不支持展示` : ""].filter(Boolean).join(" · "),
+    counts: [dispatched ? `${dispatched} 次实际搜索` : "", reused ? `复用 ${reused} 次` : "", joined ? `并发合并 ${joined} 次` : "", notSent ? `${notSent} 项未派发` : "", attempted ? `${attempted} 项已尝试发送` : "", uncertain ? `${uncertain} 项待确认` : "", ordinary ? `${ordinary} 次调用` : "", actions ? `${actions} 个命令动作` : "", sources.size ? `${sources.size} 个来源` : "", failures ? `${failures} 次失败` : "", unsupported ? `${unsupported} 项暂不支持展示` : ""].filter(Boolean).join(" · "),
   };
 }

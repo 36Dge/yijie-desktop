@@ -70,7 +70,7 @@ export interface components {
             exitCode?: number | null;
             /** Format: int64 */
             durationMs?: number | null;
-            /** @description Metadata display only; raw native arguments never leave Host. */
+            /** @description Metadata display only; raw native arguments never leave Host. For yijie_web/kimi_web_search_pro this may contain the validated, displayable query alone. */
             argumentsSummary?: string;
             /** @description Metadata display only, omitted when native result is absent or null. */
             resultSummary?: string;
@@ -176,10 +176,10 @@ export interface components {
         NativeMcpText: {
             /** @description Original native content array index; never renumber after filtering. */
             index: number;
-            /** @description Complete native text block after existing whole-line confidentiality projection, then UTF-8 truncation. Plain text only; links remain inert. */
+            /** @description Plain text after confidentiality projection and UTF-8 truncation. At index 0, built-in deep search may project SearchSuccess (title, url and snippet) or a validated public retrieval error. For newly observed results, url preserves the public HTTP(S) article address permitted by the native source URL policy, falling back to its displayable origin when necessary. Existing site-only receipts retain their origin. Desktop may open an exact result URL after user activation and independent native history authorization. */
             text: string;
         };
-        /** @description Display-only native MCP facts. No raw arguments/error/meta/resources/structuredContent and no business field parsing. Native list_mcp_resources/list_mcp_resource_templates may expose a validated resource count and redacted resource names/titles, never resource URIs, cursors or metadata. Empty resource lists are successful real results, not omitted content. Other tools retain their existing display policies. Limits do not change execution status; partial content availability must not suppress a known execution outcome. Host bounds total UTF-8 text at 256KiB and first 32 original content entries. Confidentiality may replace entire lines. */
+        /** @description Display-only native MCP facts. No raw arguments/error/meta/resources/structuredContent and no business field parsing. Native list_mcp_resources/list_mcp_resource_templates may expose a validated resource count and redacted resource names/titles, never resource URIs, cursors or metadata. Empty resource lists are successful real results, not omitted content. For yijie_web/kimi_web_search_pro only, Host validates the closed built-in web result and projects the ordered source summaries from its native text block. Raw page content and chunks are excluded. Other tools retain their existing display policies. Limits do not change execution status; partial content availability must not suppress a known execution outcome. Host bounds total UTF-8 text at 256KiB and first 32 original content entries. Confidentiality may replace entire lines. */
         NativeMcpDisplay: {
             server?: string;
             tool?: string;
@@ -187,6 +187,7 @@ export interface components {
             resultKind: "absent" | "null" | "empty" | "text" | "unsupported" | "omitted";
             texts: components["schemas"]["NativeMcpText"][];
             diagnostics: ("identity_unavailable" | "arguments_unavailable" | "unsupported_content" | "content_redacted" | "content_truncated" | "content_limit" | "result_unavailable" | "display_limit")[];
+            searchReceipt?: components["schemas"]["DeepSearchReceipt"];
         };
         /** @description Current thread/read(includeTurns=false) status only. This ephemeral observation has no history watermark and must not change saved Item or Turn facts, infer their completion, or be persisted as a history format. */
         NativeThreadStatusSnapshot: {
@@ -230,6 +231,21 @@ export interface components {
             sourceLabel?: string;
             title?: string;
         };
+        DeepSearchReceipt: {
+            version: number;
+            /** Format: uuid */
+            operation_id?: string;
+            /** @enum {string} */
+            relation: "first" | "joined" | "reused";
+            /** @enum {string} */
+            dispatch: "not_dispatched" | "uncertain" | "attempted" | "responded";
+            /** @enum {string} */
+            outcome: "pending" | "results" | "empty" | "partial" | "failed" | "unknown";
+            /** @enum {string} */
+            availability: "pending" | "available" | "unavailable";
+            /** @enum {string} */
+            error_code?: "invalid_arguments" | "session_expired" | "not_entitled" | "quota_exceeded" | "busy" | "upstream_unavailable" | "timeout" | "no_content" | "response_too_large" | "invalid_response" | "cancelled" | "outcome_unknown" | "operation_conflict" | "operation_expired" | "result_unavailable";
+        };
     };
     responses: never;
     parameters: never;
@@ -242,7 +258,10 @@ export interface operations {
     readNativeThreadProcess: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Opt in to typed receipt projection for the builtin deep-search tool. */
+                "X-Yijie-Search-Receipt"?: "2";
+            };
             path: {
                 agent_session_id: string;
             };
@@ -286,6 +305,8 @@ export interface operations {
             };
             header?: {
                 "Last-Event-ID"?: string;
+                /** @description Opt in to typed receipt projection for the builtin deep-search tool. */
+                "X-Yijie-Search-Receipt"?: "2";
             };
             path: {
                 agent_session_id: string;

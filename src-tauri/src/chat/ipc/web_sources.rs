@@ -1,6 +1,7 @@
 //! Desktop-owned access to user-selected search sources. Display metadata alone
 //! never grants access: every request resolves against authorized native history.
 use super::*;
+use crate::chat::native_conversation_generated::NativeItem;
 use base64::Engine;
 use std::{
     collections::HashMap,
@@ -106,22 +107,7 @@ pub async fn chat_web_source_v1(
     let supplied = history.views.iter().any(|view| {
         view.items.iter().any(|entry| {
             entry.item.id == target.item_id
-                && if matches!(request.payload.action, Action::OpenMessageLink) {
-                    message_contains_link(
-                        &entry.item.kind,
-                        entry.item.text.as_deref(),
-                        entry.item.summary.as_deref(),
-                        entry.item.content.as_deref(),
-                        &target.url,
-                    )
-                } else {
-                    entry
-                        .item
-                        .web_search
-                        .as_ref()
-                        .and_then(|s| s.sources.as_ref())
-                        .is_some_and(|sources| sources.iter().any(|s| s.url == target.url))
-                }
+                && item_contains_target(&entry.item, request.payload.action, &target.url)
         })
     });
     if !supplied {
@@ -165,6 +151,56 @@ pub async fn chat_web_source_v1(
     };
     serde_json::to_value(CommandResponse::new(request.request_id, data))
         .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request.request_id)))
+}
+
+fn item_contains_target(item: &NativeItem, action: Action, url: &str) -> bool {
+    if matches!(action, Action::OpenMessageLink) {
+        return message_contains_link(
+            &item.kind,
+            item.text.as_deref(),
+            item.summary.as_deref(),
+            item.content.as_deref(),
+            url,
+        );
+    }
+    item.web_search
+        .as_ref()
+        .and_then(|search| search.sources.as_ref())
+        .is_some_and(|sources| sources.iter().any(|source| source.url == url))
+        || matches!(action, Action::Open) && deep_search_contains_url(item, url)
+}
+
+fn deep_search_contains_url(item: &NativeItem, url: &str) -> bool {
+    let Some(mcp) = &item.mcp else { return false };
+    if item.kind != "mcpToolCall"
+        || mcp.server.as_deref() != Some("yijie_web")
+        || mcp.tool.as_deref() != Some("kimi_web_search_pro")
+        || mcp.result_kind != "text"
+    {
+        return false;
+    }
+    let [block] = mcp.texts.as_slice() else {
+        return false;
+    };
+    if block.index != 0 {
+        return false;
+    }
+    // Match the optional Runtime timing line accepted by the preview renderer.
+    let text = block
+        .text
+        .strip_prefix("Wall time: ")
+        .and_then(|rest| rest.split_once(" seconds\nOutput:\n"))
+        .filter(|(time, _)| {
+            !time.is_empty() && time.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+        })
+        .map_or(block.text.as_str(), |(_, body)| body);
+    let Ok(preview) = serde_json::from_str::<Value>(text) else {
+        return false;
+    };
+    crate::builtin_web::valid("SearchSuccess", &preview)
+        && preview["results"]
+            .as_array()
+            .is_some_and(|rows| rows.iter().any(|row| row["url"].as_str() == Some(url)))
 }
 
 /// Resolve an exact destination in the already-authorized model Item. The
@@ -427,6 +463,40 @@ async fn favicon(url: Url) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn deep_search_open_uses_the_recorded_source_address() {
+        let site = "https://example.org";
+        let article = "https://example.org/guide?city=hangzhou#route";
+        let preview = json!({"results": [
+            {"title": "站点", "url": site, "snippet": "旅行资料"},
+            {"title": "路线", "url": article, "snippet": "杭州攻略"}
+        ], "truncated": false});
+        for text in [
+            preview.to_string(),
+            format!("Wall time: 0.2 seconds\nOutput:\n{preview}"),
+        ] {
+            let item: NativeItem = serde_json::from_value(json!({
+                "id": "deep-search", "type": "mcpToolCall", "availability": "available",
+                "mcp": {"server": "yijie_web", "tool": "kimi_web_search_pro", "resultKind": "text",
+                        "texts": [{"index": 0, "text": text}], "diagnostics": []}
+            }))
+            .unwrap();
+            assert!(item_contains_target(&item, Action::Open, site));
+            assert!(item_contains_target(&item, Action::Open, article));
+            assert!(!item_contains_target(
+                &item,
+                Action::Open,
+                "https://example.org/other"
+            ));
+            assert!(!item_contains_target(&item, Action::Icon, site));
+            assert!(!item_contains_target(
+                &item,
+                Action::OpenMessageLink,
+                article
+            ));
+        }
+    }
+
     #[test]
     fn message_links_match_the_exact_model_destination_without_rewriting_history() {
         let url = "https://example.org/Guide_(city)?q=1#overview";

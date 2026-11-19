@@ -30,6 +30,32 @@ afterEach(() => {
 });
 
 describe("ChatCopyAction", () => {
+  it("shows only the checkmark for 1.5 seconds after the latest successful user-message copy", async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn<ChatClipboardAdapter["writeText"]>().mockResolvedValue();
+    const wrapper = mount(ChatCopyAction, { props: { adapter: adapter(writeText), text: "用户原文", kind: "user-message" } });
+    try {
+      const button = wrapper.get("button");
+      const original = button.get("svg").html();
+      await button.trigger("click");
+      await flushPromises();
+      const check = button.get("svg").html();
+      expect(check).not.toBe(original);
+      expect(wrapper.find(".chat-copy-action__feedback").exists()).toBe(false);
+      expect(wrapper.get("[role=status]").text()).toBe("文本已复制。");
+      await vi.advanceTimersByTimeAsync(900);
+      await button.trigger("click");
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(1_499);
+      expect(button.get("svg").html()).toBe(check);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(button.get("svg").html()).toBe(original);
+      expect(writeText).toHaveBeenCalledTimes(2);
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
+  });
   it.each([
     ["text" as const, "  可复制文本\n第二行  ", "复制文本", "文本已复制。"],
     ["code" as const, "const value = 1;\n", "复制代码", "代码已复制。"],

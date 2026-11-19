@@ -425,7 +425,7 @@ function handlePaste(event: ClipboardEvent): void {
           ref="textareaElement"
           id="chat-task-input"
           class="chat-composer__textarea"
-          :rows="compactLayout ? 1 : undefined"
+          rows="1"
           :value="modelValue"
           :readonly="submissionBusy || textLocked"
           :placeholder="hasSkillPrefix ? '' : textOnly ? '描述计划内容、时间、时区和运行方式…' : mode === 'new' ? '描述你想完成的事，或添加相关文件…' : '继续输入任务需求…'"
@@ -725,7 +725,7 @@ function handlePaste(event: ClipboardEvent): void {
   z-index: 1;
   min-width: 0;
   overflow: hidden;
-  border: var(--yj-border-width) solid var(--yj-color-border-default);
+  border: var(--yj-border-width) solid var(--yj-color-border-subtle);
   border-radius: var(--yj-radius-chat-composer);
   background: var(--yj-color-bg-card);
   box-shadow: var(--chat-composer-field-shadow, none);
@@ -825,7 +825,7 @@ function handlePaste(event: ClipboardEvent): void {
 .chat-composer__textarea {
   display: block;
   width: 100%;
-  min-height: calc(136px - var(--chat-composer-action-row-height));
+  min-height: calc(130px - var(--chat-composer-action-row-height));
   max-height: calc(min(calc(var(--yj-ui-viewport-height, 100vh) * 0.36), 280px) - var(--chat-composer-action-row-height));
   overflow-y: hidden;
   overscroll-behavior: contain;
@@ -842,8 +842,12 @@ function handlePaste(event: ClipboardEvent): void {
   line-height: var(--yj-line-height-body);
 }
 
-.chat-composer--reply .chat-composer__textarea { min-height: calc(112px - var(--chat-composer-action-row-height)); }
-.chat-composer__attachments + .chat-composer__input .chat-composer__textarea { min-height: calc(96px - var(--chat-composer-action-row-height)); }
+.chat-composer--reply .chat-composer__textarea {
+  min-height: calc(116px - var(--chat-composer-action-row-height));
+}
+.chat-composer--new .chat-composer__attachments + .chat-composer__input .chat-composer__textarea {
+  min-height: calc(122px - var(--chat-composer-action-row-height));
+}
 .chat-composer__input { position: relative; min-width: 0; border-radius: inherit; }
 .chat-composer__connector-prefix { width: max-content; max-width: calc(100% - var(--yj-space-8)); margin: var(--yj-space-4) var(--yj-space-4) 0; }
 .chat-composer__connector-prefix + .chat-composer__textarea { padding-top: var(--yj-space-2); }

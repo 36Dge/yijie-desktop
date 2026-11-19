@@ -12,7 +12,7 @@ describe("native reasoning summary reading", () => {
     ["第一行\n最后的 **可读摘要**", "最后的 可读摘要"],
     ["```text\n# 代码中的标题\n```\n\n正常说明", "正常说明"],
   ])("derives a readable heading from allowed summary: %s", (summary, heading) => {
-    expect(conversationReasoningSummary(traceTurn([reasoning("r", [summary])], true), true)?.title).toBe(`正在思考 · ${heading}`);
+    expect(conversationReasoningSummary(traceTurn([reasoning("r", [summary])], true), true)).toMatchObject({state: "thinking", heading});
   });
 
   it("keeps raw content out and preserves separate native identities and equal summary text", () => {
@@ -57,7 +57,7 @@ describe("native reasoning summary reading", () => {
   it("bounds heading length while keeping full summary content", () => {
     const text = "城市生活".repeat(100);
     const summary = conversationReasoningSummary(traceTurn([reasoning("r", [text])]), false)!;
-    expect(Array.from(summary.title.replace("思考摘要 · ", ""))).toHaveLength(81);
+    expect(Array.from(summary.heading)).toHaveLength(81);
     expect(summary.items[0]!.contentBlocks[0]).toMatchObject({text});
   });
 });

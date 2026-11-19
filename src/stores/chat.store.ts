@@ -7,6 +7,7 @@ import type { SelectionRef, SelectedSkillRef } from "../domain/market-selection-
 import { chatModelClient, executionModelIntent, type ModelIntent } from "../api/chat-model-client";
 import { chatWorkspaceClient } from "../api/chat-workspace-client";
 import type { WorkspaceCreation } from "../domain/chat-workspace";
+import { isChatSessionRunning } from "../domain/chat-sidebar-history";
 import type { SessionPurpose } from "../domain/chat-session-purpose.generated";
 import {conversationMessageItemId} from "../api/chat-conversation-adapter";
 import {selectConversationItem, type ConversationItemSnapshot} from "../domain/conversation-view";
@@ -394,6 +395,9 @@ export function createChatStoreDefinition(
     const sessions = shallowRef<readonly ChatSession[]>(Object.freeze([]));
     const sessionsCursor = ref<string | null>(null);
     const selectedSessionId = ref<string | null>(null);
+    const backgroundTurns = computed(() => sessions.value.filter(session =>
+      session.sessionId !== selectedSessionId.value && (session.latestTurnStatus === "queued" ||
+        isChatSessionRunning(session.latestTurnStatus) || session.latestTurnStatus === "stopping")));
     const selectedSessionPurpose = shallowRef<SessionPurpose | null>(null);
     const selectedAccessMode = ref<ChatSelectedAccessMode | null>(null);
     const history = shallowRef<ChatHistoryAuthority | null>(null);
@@ -4091,6 +4095,34 @@ export function createChatStoreDefinition(
       sessionsCursor.value = page.nextCursor;
     }
 
+    async function refreshBackgroundTurnStatuses(signal: AbortSignal): Promise<void> {
+      const bound = context.value;
+      if (!bound || !hasAction("read_sessions") || signal.aborted || !backgroundTurns.value.length) return;
+      const pending = new Map(backgroundTurns.value.map(session => [session.sessionId, session]));
+      const updates = new Map<ChatSession, ChatSession>();
+      let cursor: string | undefined;
+      // Only the selected conversation receives live turn events. Read list metadata
+      // for the other active rows without changing selection or the user's pagination.
+      do {
+        const page = await client.listSessions(bound.contextId, cursor, 50, signal);
+        if (signal.aborted || context.value?.contextId !== bound.contextId || !hasAction("read_sessions")) return;
+        for (const fresh of page.sessions) {
+          const previous = pending.get(fresh.sessionId);
+          if (!previous) continue;
+          pending.delete(fresh.sessionId);
+          if (fresh.latestTurnStatus !== previous.latestTurnStatus) {
+            updates.set(previous, { ...previous, latestTurnStatus: fresh.latestTurnStatus, lastActivityAt: fresh.lastActivityAt });
+          }
+        }
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor && pending.size > 0);
+      if (updates.size) {
+        // A newer read, a selection or a new turn can supersede the captured row.
+        sessions.value = sessions.value.map(session =>
+          session.sessionId === selectedSessionId.value ? session : updates.get(session) ?? session);
+      }
+    }
+
     async function loadMoreSessions(): Promise<void> {
       const bound = context.value;
       const cursor = sessionsCursor.value;
@@ -4499,6 +4531,8 @@ export function createChatStoreDefinition(
       projects,
       sessions,
       sessionsCursor,
+      hasBackgroundTurns: computed(() => backgroundTurns.value.length > 0),
+      refreshBackgroundTurnStatuses,
       selectedSessionId,
       selectedAccessMode,
       selectedSessionPurpose,

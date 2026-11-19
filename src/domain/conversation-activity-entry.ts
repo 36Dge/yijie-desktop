@@ -5,12 +5,36 @@ export type ConversationActivityEntry = Readonly<{
   identity: string;
   item: Item;
   actionIndex?: number;
+  searchCalls?: readonly Item[];
   category: "command" | "read" | "listFiles" | "search" | "tool" | "web_search" | "unknown";
   title: string;
 }>;
 
 export function activityNativeItem(item: Item) {
   return item.execution && "native" in item.execution ? item.execution.native.item : null;
+}
+
+export function deepSearchReceipt(item: Item) {
+  const mcp = activityNativeItem(item)?.mcp;
+  return mcp?.server === "yijie_web" && mcp.tool === "kimi_web_search_pro" && mcp.searchReceipt?.version === 2 ? mcp.searchReceipt : undefined;
+}
+
+/** Pick the best settled evidence for the primary card without moving its position. */
+export function deepSearchEvidence(item: Item, calls?: readonly Item[]): Item {
+  function rank(candidate: Item) {
+    const receipt = deepSearchReceipt(candidate);
+    if (!receipt) return 0;
+    const terminal = ["results", "empty", "partial", "failed"].includes(receipt.outcome);
+    return (receipt.dispatch === "responded" ? 8 : receipt.dispatch === "attempted" ? 4 : 0) +
+      (terminal ? 2 : 0) + (receipt.availability === "available" ? 1 : 0);
+  }
+  let best = item;
+  let score = rank(item);
+  for (const candidate of calls ?? []) {
+    const next = rank(candidate);
+    if (next > score) { best = candidate; score = next; }
+  }
+  return best;
 }
 
 const genericCommandLabels = new Set(["执行命令", "命令执行", "运行命令", "读取工作区内容", "列出工作区文件", "搜索工作区内容"]);
@@ -35,7 +59,7 @@ const brokerWebTitles = new Map([
 ]);
 function knownBrokerWebTitle(item: Item): string | undefined {
   const mcp = activityNativeItem(item)?.mcp;
-  if(mcp?.server === "yijie_web") return new Map([["kimi_web_search", "采集网页资料"], ["kimi_web_search_pro", "研究网页资料"], ["kimi_web_fetch", "读取指定网页"]]).get(mcp.tool ?? "");
+  if(mcp?.server === "yijie_web") return new Map([["kimi_web_search", "采集网页资料"], ["kimi_web_search_pro", "网页深度搜索"], ["kimi_web_fetch", "读取指定网页"]]).get(mcp.tool ?? "");
   return mcp?.server === "yijie_market" ? brokerWebTitles.get(mcp.tool ?? "") : undefined;
 }
 export function activityToolSourceLabel(item: Item): string | undefined {

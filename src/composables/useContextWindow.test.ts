@@ -20,24 +20,51 @@ describe("context observation lifecycle", () => {
     vi.useFakeTimers(); read.mockResolvedValue(value());
     const h = setup(); await flushPromises();
     expect(h.state.sample.value?.used_tokens).toBe(143000);
-    expect(read).toHaveBeenLastCalledWith("scope", "session-a", true);
+    expect(read).toHaveBeenLastCalledWith("scope", "session-a", true, true);
     read.mockResolvedValue({ ...value(), sample: null, compactions: [{ turn_id: "turn", item_id: "native-compact", state: "in_progress" }] });
     await vi.advanceTimersByTimeAsync(1000);
-    expect(read).toHaveBeenLastCalledWith("scope", "session-a", false);
+    expect(read).toHaveBeenLastCalledWith("scope", "session-a", false, true);
     expect(h.state.sample.value).toBeNull();
     expect(h.state.compactionSnapshot.value?.compactions[0]?.state).toBe("in_progress");
     h.wrapper.unmount(); await vi.advanceTimersByTimeAsync(5000);
     expect(read).toHaveBeenCalledTimes(2);
   });
-  it("clears on model selection and rejects old profile/revision values", async () => {
+  it("keeps the measured source through model selection until the new model reports its own usage", async () => {
     vi.useFakeTimers(); read.mockResolvedValue(value());
     const h = setup(); await flushPromises();
     h.switching.value = true;
-    expect(h.state.sample.value).toBeNull();
+    expect(h.state.sample.value).toEqual(value().sample);
+    expect(h.state.lastModel.value).toBe("first");
     h.model.value = "second"; h.revision.value = 2; h.switching.value = false;
-    await flushPromises(); expect(h.state.sample.value).toBeNull();
-    read.mockResolvedValue(value("second", 2)); await vi.advanceTimersByTimeAsync(1000);
-    expect(h.state.sample.value?.used_tokens).toBe(143000);
+    await flushPromises();
+    expect(h.state.lastModel.value).toBe("first");
+    expect(read).toHaveBeenCalledTimes(1);
+    read.mockResolvedValue({ ...value("second", 2), sample: null, last_observation: { model: "first", sample: value().sample! } });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(h.state.sample.value).toEqual(value().sample);
+    expect(h.state.lastModel.value).toBe("first");
+    read.mockResolvedValue({ ...value("second", 2), sample: { ...value().sample!, used_tokens: 18000, capacity_tokens: 950000 } });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(h.state.sample.value).toMatchObject({ used_tokens: 18000, capacity_tokens: 950000 });
+    expect(h.state.lastModel.value).toBeNull();
+    h.wrapper.unmount();
+  });
+  it("restores a prior observation on first read and discards it on a real window invalidation or loss of scope", async () => {
+    vi.useFakeTimers();
+    const previous = { ...value().sample!, used_tokens: 0, capacity_tokens: null };
+    const restored = { ...value("second", 2), sample: null, last_observation: { model: "first", sample: previous } };
+    read.mockResolvedValue(restored);
+    const h = setup(); await flushPromises();
+    expect(h.state.sample.value).toEqual(previous);
+    expect(h.state.lastModel.value).toBe("first");
+    read.mockResolvedValue({ ...value("second", 2), sample: null, compactions: [{turn_id:"turn", item_id:"compact", state:"in_progress"}] });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(h.state.sample.value).toBeNull();
+    read.mockResolvedValue(restored);
+    await vi.advanceTimersByTimeAsync(1000);
+    h.session.value = null;
+    expect(h.state.sample.value).toBeNull();
+    expect(h.state.lastModel.value).toBeNull();
     h.wrapper.unmount();
   });
   it("rejects late responses after switching chat and reports read errors as unknown", async () => {

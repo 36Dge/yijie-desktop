@@ -2,10 +2,11 @@
 import { computed, onBeforeUnmount, ref, useId } from "vue";
 import { NPopover } from "naive-ui";
 import type { ContextWindowSample } from "../../api/context-window-client";
-import { contextWindowPresentation } from "../../domain/context-window";
+import { contextModelLabel, contextWindowPresentation } from "../../domain/context-window";
 
-const props = defineProps<{ sample: ContextWindowSample | null }>();
+const props = defineProps<{ sample: ContextWindowSample | null; lastModel?: string | null }>();
 const text = computed(() => contextWindowPresentation(props.sample));
+const source = computed(() => props.sample && props.lastModel ? `上次统计 · ${contextModelLabel(props.lastModel)}` : null);
 const id = useId();
 const overlay = ref<HTMLElement | null>(null);
 const hovered = ref(false), focused = ref(false), dismissed = ref(false);
@@ -23,7 +24,7 @@ onBeforeUnmount(() => clearTimeout(leaveTimer));
     @mouseenter="enter" @mouseleave="leave">
     <template #trigger>
       <button type="button" class="context-window__trigger yj-control yj-control--icon"
-        :aria-label="`上下文窗口，${text.summary}`" :aria-describedby="open ? id : undefined"
+        :aria-label="['上下文窗口', source, text.summary].filter(Boolean).join('，')" :aria-describedby="open ? id : undefined"
         @mouseenter="enter" @mouseleave="leave" @focus="focus" @blur="focused = false"
         @keydown.esc.stop="dismissed = true">
         <svg class="context-window__ring" width="18" height="18" viewBox="0 0 20 20" aria-hidden="true" focusable="false">

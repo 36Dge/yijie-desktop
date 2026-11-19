@@ -50,7 +50,7 @@ const iconTone = computed(() => {
 const unavailable = computed(() => props.text.length === 0 || outcome.value === "pending");
 
 watch(
-  () => [props.text, props.adapter] as const,
+  () => [props.text, props.adapter, props.kind] as const,
   () => {
     operationEpoch += 1;
     clearReset();
@@ -71,7 +71,13 @@ async function copy(): Promise<void> {
     if (epoch !== operationEpoch) return;
     outcome.value = "success";
     announcement.value = props.kind === "code" ? "代码已复制。" : "文本已复制。";
-    if (props.compact) resetTimer = setTimeout(() => { if (operationEpoch === epoch) {outcome.value = "idle"; announcement.value = "";} }, 2000);
+    if (props.kind === "user-message" || props.compact) {
+      resetTimer = setTimeout(() => {
+        if (operationEpoch !== epoch) return;
+        outcome.value = "idle";
+        announcement.value = "";
+      }, props.kind === "user-message" ? 1_500 : 2_000);
+    }
   } catch {
     if (epoch !== operationEpoch) return;
     outcome.value = "error";
@@ -87,6 +93,7 @@ async function copy(): Promise<void> {
   >
     <ChatActionButton v-if="compact || kind === 'user-message'"
       :label="compact ? '复制' : actionLabel" :tooltip="compact && feedback ? feedback : undefined"
+      :tooltip-disabled="kind === 'user-message' && outcome === 'success'"
       :icon="outcome === 'success' ? 'checkmark' : icon" :error="outcome === 'error'"
       :busy="outcome === 'pending'" :disabled="unavailable" preserve-selection @click="copy" />
     <YjTooltip v-else :text="actionLabel"><button
@@ -103,7 +110,7 @@ async function copy(): Promise<void> {
       <YjIcon :name="icon" size="sm" :tone="iconTone" />
     </button></YjTooltip>
     <span
-      v-if="feedback && !compact"
+      v-if="feedback && !compact && (kind !== 'user-message' || outcome === 'error')"
       class="chat-copy-action__feedback"
       aria-hidden="true"
     >{{ feedback }}</span>

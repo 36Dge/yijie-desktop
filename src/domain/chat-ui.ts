@@ -10,6 +10,12 @@ export const CHAT_FOLLOW_THRESHOLD_PX = 48;
 export const CHAT_BOTTOM_BUTTON_THRESHOLD_PX = 160;
 export const CHAT_INPUT_MAX_BYTES = 64 * 1024;
 
+const toolSeconds = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 });
+export function formatToolDuration(durationMs: number): string {
+  if (durationMs < 1_000) return `${durationMs} 毫秒`;
+  return `${toolSeconds.format(durationMs / 1_000)} 秒`;
+}
+
 export type ChatUiTone = "neutral" | "success" | "warning" | "error";
 
 export interface ChatUiNotice {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatToolDuration } from "../../domain/chat-ui";
 import { computed, useId } from "vue";
 import { browserChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
 import type {
@@ -62,7 +63,7 @@ const identityState = computed(() => props.execution.identity.resolution === "kn
   : "工具身份尚未解析");
 const durationLabel = computed(() => props.execution.durationMs === null
   ? null
-  : formatDuration(props.execution.durationMs));
+  : formatToolDuration(props.execution.durationMs));
 const resultStateMessage = computed(() => {
   if (props.execution.resultSummary !== null) return "工具返回的结果摘要为空。";
   return props.item.busy === true
@@ -76,11 +77,6 @@ function truncationReasonLabel(reason: ConversationTruncationReason | null): str
 
 function safeTextTruncation(summary: ConversationSafeText): string | null {
   return summary.truncated ? `内容已截断；${truncationReasonLabel(summary.truncationReason)}。` : null;
-}
-
-function formatDuration(durationMs: number): string {
-  if (durationMs < 1_000) return `${durationMs} 毫秒`;
-  return `${new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 }).format(durationMs / 1_000)} 秒`;
 }
 
 function forwardDisclosure(change: ChatTimelineDisclosureChange): void {

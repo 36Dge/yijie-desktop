@@ -66,7 +66,7 @@ export interface NativeItem {
   exitCode?: number | null;
   durationMs?: number | null;
   /**
-   * Metadata display only; raw native arguments never leave Host.
+   * Metadata display only; raw native arguments never leave Host. For yijie_web/kimi_web_search_pro this may contain the validated, displayable query alone.
    */
   argumentsSummary?: string;
   /**
@@ -102,7 +102,7 @@ export interface NativeItem {
   toolDisplay?: NativeToolDisplay;
 }
 /**
- * Display-only native MCP facts. No raw arguments/error/meta/resources/structuredContent and no business field parsing. Native list_mcp_resources/list_mcp_resource_templates may expose a validated resource count and redacted resource names/titles, never resource URIs, cursors or metadata. Empty resource lists are successful real results, not omitted content. Other tools retain their existing display policies. Limits do not change execution status; partial content availability must not suppress a known execution outcome. Host bounds total UTF-8 text at 256KiB and first 32 original content entries. Confidentiality may replace entire lines.
+ * Display-only native MCP facts. No raw arguments/error/meta/resources/structuredContent and no business field parsing. Native list_mcp_resources/list_mcp_resource_templates may expose a validated resource count and redacted resource names/titles, never resource URIs, cursors or metadata. Empty resource lists are successful real results, not omitted content. For yijie_web/kimi_web_search_pro only, Host validates the closed built-in web result and projects the ordered source summaries from its native text block. Raw page content and chunks are excluded. Other tools retain their existing display policies. Limits do not change execution status; partial content availability must not suppress a known execution outcome. Host bounds total UTF-8 text at 256KiB and first 32 original content entries. Confidentiality may replace entire lines.
  */
 export interface NativeMcpDisplay {
   server?: string;
@@ -491,6 +491,7 @@ export interface NativeMcpDisplay {
           | "display_limit"
         )
       ];
+  searchReceipt?: DeepSearchReceipt;
 }
 export interface NativeMcpText {
   /**
@@ -498,9 +499,33 @@ export interface NativeMcpText {
    */
   index: number;
   /**
-   * Complete native text block after existing whole-line confidentiality projection, then UTF-8 truncation. Plain text only; links remain inert.
+   * Plain text after confidentiality projection and UTF-8 truncation. At index 0, built-in deep search may project SearchSuccess (title, url and snippet) or a validated public retrieval error. For newly observed results, url preserves the public HTTP(S) article address permitted by the native source URL policy, falling back to its displayable origin when necessary. Existing site-only receipts retain their origin. Desktop may open an exact result URL after user activation and independent native history authorization.
    */
   text: string;
+}
+export interface DeepSearchReceipt {
+  version: number;
+  operation_id?: string;
+  relation: "first" | "joined" | "reused";
+  dispatch: "not_dispatched" | "uncertain" | "attempted" | "responded";
+  outcome: "pending" | "results" | "empty" | "partial" | "failed" | "unknown";
+  availability: "pending" | "available" | "unavailable";
+  error_code?:
+    | "invalid_arguments"
+    | "session_expired"
+    | "not_entitled"
+    | "quota_exceeded"
+    | "busy"
+    | "upstream_unavailable"
+    | "timeout"
+    | "no_content"
+    | "response_too_large"
+    | "invalid_response"
+    | "cancelled"
+    | "outcome_unknown"
+    | "operation_conflict"
+    | "operation_expired"
+    | "result_unavailable";
 }
 /**
  * Safe display of the native WebSearchAction only. No execution or lifecycle inference. Queries/pattern are bounded and redacted; pageLabel is a hostname only, never an actionable URL. Optional sources are actual search hits, never inferred citations. Absence means no source metadata observed.

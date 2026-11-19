@@ -68,13 +68,13 @@ def workflow_ready(root=ROOT):
     daily.workflow_ready({"workflow": {"infra_root": str(root.parent / "yijie-infra")}})
 
 
-def workflow_session(action):
+def workflow_session(action, *, include_web=True):
     controller = ROOT.parent / "yijie-infra/scripts/workflow-session.py"
     web = ROOT.parent / "yijie-infra/scripts/builtin-web-session.py"
     if action == "stop":
         subprocess.run([sys.executable,"-B",str(web),"stop"],cwd=web.parent.parent,check=True)
     subprocess.run([sys.executable, "-B", str(controller), action], cwd=controller.parent.parent, check=True)
-    if action == "ensure":
+    if action == "ensure" and include_web:
         subprocess.run([sys.executable,"-B",str(web),"ensure"],cwd=web.parent.parent,check=True)
 
 
@@ -183,7 +183,9 @@ def start(bundle_for_ui=False, tool_search_meter=False, document_meter=False, me
         previous = {sig: signal.signal(sig, pending) for sig in (signal.SIGINT, signal.SIGTERM)}
         try:
             env["YIJIE_DEVELOPMENT_STARTUP_ID"] = preflight.prepare(ROOT, env, cache)
-            workflow_session("ensure")
+            # The executor opens its immutable worker artifact at startup. Start
+            # it from the launcher after the canonical worker build.
+            workflow_session("ensure", include_web=False)
             workflow_ready()
             child = subprocess.Popen(command, cwd=ROOT, env=env, start_new_session=True)
             code = child.wait()

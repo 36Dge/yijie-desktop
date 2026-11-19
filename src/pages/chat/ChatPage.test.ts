@@ -365,7 +365,7 @@ it.skipIf(!process.env.YIJIE_PROMPT_BOUNDARY_SETUP)("selected skill continuous N
   await flushPromises();
   const menu = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent?.trim() === "技能");
   expect(menu).toBeDefined(); await new DOMWrapper(menu!).trigger("click"); await flushPromises();
-  const choice = document.querySelector<HTMLElement>('[aria-label="已安装的技能"] [role="checkbox"]');
+  const choice = document.querySelector<HTMLElement>('[aria-label="已启用的技能"] [role="checkbox"]');
   expect(choice).not.toBeNull(); await new DOMWrapper(choice!).trigger("click"); await flushPromises();
   expect(useChatComposerDraftStore(pinia).skillSelection("new").map(s => s.id)).toEqual([skill.id]);
   await wrapper.get("textarea").setValue("请简短说明六乘七。");
@@ -784,7 +784,8 @@ describe("FEAT-126 ChatPage", () => {
     await userCopy.trigger("click");
     await flushPromises();
     expect(writeText).toHaveBeenCalledExactlyOnceWith("检查标题");
-    expect(wrapper.get(".chat-timeline-item-shell__user-meta .chat-copy-action__feedback").text()).toBe("已复制");
+    expect(wrapper.find(".chat-timeline-item-shell__user-meta .chat-copy-action__feedback").exists()).toBe(false);
+    expect(userCopy.get("svg").html()).not.toBe(answerCopy.get("svg").html());
     await answerCopy.trigger("click");
     await flushPromises();
     expect(writeText).toHaveBeenNthCalledWith(2, "标题检查完成");
@@ -1588,7 +1589,7 @@ describe("FEAT-126 ChatPage", () => {
     await flushPromises();
     expect(router.currentRoute.value.path).toBe("/plugins");
     expect(router.currentRoute.value.query.tab).toBe("skills");
-    expect(document.querySelector('[aria-label="已安装的技能"]')).toBeNull();
+    expect(document.querySelector('[aria-label="已启用的技能"]')).toBeNull();
     wrapper.unmount();
   });
 
@@ -1617,6 +1618,100 @@ describe("FEAT-126 ChatPage", () => {
     wrapper.unmount();
   });
 
+  it.each([false, true])("sends a named skill ending in 专家 as one native skill, without changing the expert (reply=%s)", async reply => {
+    skillFlag.enabled = expertFlag.enabled = true;
+    vi.stubEnv("VITE_YIJIE_NATIVE_SKILL_INPUT_ENABLED", "true");
+    vi.stubEnv("VITE_YIJIE_FEAT174_NATIVE_SKILLS", "true");
+    const skill = { ...installedSkill, runtimeName: "sales-negotiator", displayName: "销售谈判专家" };
+    vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "", skills: [skill] });
+    const { wrapper, store, pinia } = await mountPage(reply ? `/chat/${SESSION_ID}` : "/chat", reply);
+    if (reply) useChatComposerDraftStore(pinia).setSkills(`session:${SESSION_ID}`, [skill]);
+    const send = reply ? vi.spyOn(store, "submitTurnWithResult").mockResolvedValue(acceptedSubmission(SESSION_ID, chatSessionDraftTarget(SESSION_ID)))
+      : vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
+    const text = "调用销售谈判专家，给我生成一个谈判策略";
+    await wrapper.get("textarea").setValue(text);
+    await wrapper.get('[aria-label="发送任务"]').trigger("click");
+    await flushPromises();
+    expect(send).toHaveBeenCalledOnce();
+    const args = send.mock.calls[0]!;
+    expect(args[reply ? 0 : 1]).toBe(text);
+    expect(args[reply ? 4 : 5]).toEqual([{ id: skill.id, version: skill.version }]);
+    expect(args[reply ? 3 : 4]).toEqual(reply ? { expectedBindingRevision: 1, expert: { expertId: expertDisplay.expertId, version: expertDisplay.version } } : undefined);
+    expect(wrapper.text()).not.toContain("请从专家选择器");
+    wrapper.unmount();
+  });
+
+  it.each([{reply:false, installed:false}, {reply:true, installed:true}])("shows a named unavailable skill inside the conversation and preserves the unsent draft (%j)", async ({reply,installed}) => {
+    skillFlag.enabled = expertFlag.enabled = true;
+    const skill = { ...installedSkill, displayName: "销售谈判专家", enabled: false, runtimeVisible: false,
+      installationStatus: installed ? "installed" as const : "not_installed" as const };
+    vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "", skills: [skill] });
+    const { wrapper, store } = await mountPage(reply ? `/chat/${SESSION_ID}` : "/chat", reply);
+    const send = reply ? vi.spyOn(store, "submitTurnWithResult") : vi.spyOn(store, "createSessionWithResult");
+    const text = "请调用“销售谈判专家”技能，给我准备一份策略。";
+    await wrapper.get("textarea").setValue(text);
+    await wrapper.get('[aria-label="发送任务"]').trigger("click");
+    await flushPromises();
+    const notice = wrapper.get('[aria-label="任务对话记录"] [aria-label="技能使用提示"]');
+    expect(notice.text()).toContain(skill.displayName);
+    expect(notice.text()).toContain(installed ? "已停用" : "尚未安装");
+    expect(wrapper.find('footer.chat-workspace__composer [aria-label="技能使用提示"]').exists()).toBe(false);
+    expect(wrapper.get("textarea").element.value).toBe(text);
+    expect(wrapper.text()).not.toContain("请从专家选择器");
+    expect(send).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("leaves an ordinary negotiation task to the native model without selecting a skill or expert", async () => {
+    skillFlag.enabled = expertFlag.enabled = true;
+    const skill = { ...installedSkill, displayName: "销售谈判专家" };
+    vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "", skills: [skill] });
+    const { wrapper, store, pinia } = await mountPage("/chat");
+    const refresh = vi.spyOn(useSkillStore(pinia), "open");
+    const send = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
+    const text = "根据双方的报价，帮我准备谈判策略";
+    await wrapper.get("textarea").setValue(text);
+    await wrapper.get('[aria-label="发送任务"]').trigger("click");
+    await flushPromises();
+    expect(send).toHaveBeenCalledWith(null, text);
+    expect(refresh).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("continues to bind a genuine named expert while skills are enabled", async () => {
+    skillFlag.enabled = expertFlag.enabled = true;
+    vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "", skills: [installedSkill] });
+    const { wrapper, store } = await mountPage("/chat");
+    const send = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
+    const text = `请调用${expertDisplay.displayName}，整理资料。`;
+    await wrapper.get("textarea").setValue(text);
+    await wrapper.get('[aria-label="发送任务"]').trigger("click");
+    await flushPromises();
+    expect(send).toHaveBeenCalledWith(null, text, undefined, undefined, { expectedBindingRevision: 0, expert: { expertId: expertDisplay.expertId, version: expertDisplay.version } });
+    wrapper.unmount();
+  });
+
+  it("abandons skill preflight when the draft changes and ignores a second submit while reading", async () => {
+    skillFlag.enabled = expertFlag.enabled = true;
+    const skill = { ...installedSkill, displayName: "销售谈判专家" };
+    vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "", skills: [skill] });
+    const { wrapper, store, pinia } = await mountPage("/chat");
+    let finish!: () => void;
+    const refresh = vi.spyOn(useSkillStore(pinia), "open").mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+    const send = vi.spyOn(store, "createSessionWithResult");
+    await wrapper.get("textarea").setValue("请用销售谈判专家准备草案");
+    const composer = wrapper.getComponent(ChatComposer);
+    composer.vm.$emit("submit");
+    composer.vm.$emit("submit");
+    await wrapper.get("textarea").setValue("换个问题");
+    finish();
+    await flushPromises();
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(send).not.toHaveBeenCalled();
+    expect(wrapper.get("textarea").element.value).toBe("换个问题");
+    wrapper.unmount();
+  });
+
   it("preserves selected skills on failed sends and blocks stale selections after revalidation", async () => {
     skillFlag.enabled = true;
     vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "2026-10-20T00:00:00Z", skills: [installedSkill] });
@@ -1633,7 +1728,7 @@ describe("FEAT-126 ChatPage", () => {
     refresh.mockImplementation(async () => { skillStore.skills = [{ ...installedSkill, enabled: false, runtimeVisible: false }]; });
     await wrapper.getComponent(ChatComposer).vm.$emit("submit"); await flushPromises();
     expect(submit).not.toHaveBeenCalled();
-    expect(wrapper.text()).toContain("技能已停用");
+    expect(wrapper.text()).toContain("跨境营销文案”已停用");
     expect(drafts.skillSelection("new")).toHaveLength(1);
     wrapper.unmount();
   });

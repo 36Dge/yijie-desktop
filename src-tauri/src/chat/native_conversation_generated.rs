@@ -276,6 +276,12 @@ pub struct NativeMcpDisplay {
     pub texts: Vec<NativeMcpText>,
     #[serde(rename = "diagnostics")]
     pub diagnostics: Vec<String>,
+    #[serde(
+        rename = "searchReceipt",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub search_receipt: Option<DeepSearchReceipt>,
 }
 impl std::fmt::Debug for NativeMcpDisplay {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -370,6 +376,38 @@ pub struct NativeToolDisplay {
 impl std::fmt::Debug for NativeToolDisplay {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("NativeToolDisplay([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeepSearchReceipt {
+    #[serde(rename = "version")]
+    pub version: i64,
+    #[serde(
+        rename = "operation_id",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub operation_id: Option<String>,
+    #[serde(rename = "relation")]
+    pub relation: String,
+    #[serde(rename = "dispatch")]
+    pub dispatch: String,
+    #[serde(rename = "outcome")]
+    pub outcome: String,
+    #[serde(rename = "availability")]
+    pub availability: String,
+    #[serde(
+        rename = "error_code",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub error_code: Option<String>,
+}
+impl std::fmt::Debug for DeepSearchReceipt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DeepSearchReceipt([REDACTED])")
     }
 }
 

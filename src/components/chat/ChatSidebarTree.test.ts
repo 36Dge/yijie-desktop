@@ -6,6 +6,8 @@ import { NDropdown, NModal } from "naive-ui";
 import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { chatClient } from "../../api/chat-client";
+import type { ChatSessionPage } from "../../domain/chat-ipc";
 import { useChatStore } from "../../stores/chat.store";
 import { useSidebarStore } from "../../stores/sidebar.store";
 import { useChatReadingStore } from "../../stores/chat-reading.store";
@@ -61,6 +63,7 @@ async function mountTree(prepare?: (store: ReturnType<typeof useChatStore>) => v
 afterEach(() => {
   document.body.innerHTML = "";
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("ChatSidebarTree", () => {
@@ -135,8 +138,8 @@ describe("ChatSidebarTree", () => {
     expect(wrapper.find(".chat-tree__more--session").exists()).toBe(false);
   });
 
-  it("marks only the latest completed turn, including when the session is not selected", async () => {
-    const statuses = ["completed", "queued", "pending", "streaming", "inProgress", "waiting_approval", "failed", "interrupted", "unknown", null];
+  it("describes running and unread completed rows independently of selection", async () => {
+    const statuses = ["completed", "queued", "pending", "streaming", "inProgress", "waiting_approval", "stopping", "failed", "interrupted", "unknown", null];
     const { wrapper } = await mountTree(store => {
       const original = store.sessions[0]!;
       store.sessions = statuses.map((status, index) => ({
@@ -151,8 +154,12 @@ describe("ChatSidebarTree", () => {
     expect(rows).toHaveLength(statuses.length);
     for (const [index, status] of statuses.entries()) {
       const row = rows.find(entry => entry.text() === `Session ${index}`)!;
+      const running = status === "streaming" || status === "inProgress";
+      expect(row.find(".chat-tree__session-running").exists()).toBe(running);
       expect(row.find(".chat-tree__session-completed").exists()).toBe(status === "completed");
-      expect(Boolean(row.attributes("aria-describedby"))).toBe(status === "completed");
+      const description = row.attributes("aria-describedby");
+      expect(Boolean(description)).toBe(running || status === "completed");
+      if (description) expect(document.getElementById(description)?.textContent).toBe(running ? "任务执行中" : "任务已完成，尚未查看");
     }
     wrapper.unmount();
   });
@@ -164,10 +171,65 @@ describe("ChatSidebarTree", () => {
       await flushPromises();
       const selected = wrapper.get('[aria-current="page"]');
       expect(selected.text()).toBe("Synthetic Session");
+      expect(selected.find(".chat-tree__session-running").exists()).toBe(status === "streaming");
       expect(selected.find(".chat-tree__session-completed").exists()).toBe(status === "completed");
     }
     await wrapper.setProps({ currentPath: "/chat" });
     expect(wrapper.find(".chat-tree__session-completed").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("follows a background task from queue to completion without switching conversations or dropping loaded pages", async () => {
+    vi.useFakeTimers();
+    const { wrapper, store } = await mountTree(store => {
+      const session = store.sessions[0]!;
+      store.selectedSessionId = session.sessionId;
+      store.sessions = [
+        { ...session, latestTurnStatus: "streaming" },
+        { ...session, sessionId: "background", projectId: null, title: "后台任务", latestTurnStatus: "queued" },
+      ];
+      store.sessionsCursor = "next-visible-page";
+    });
+    const [selected, background] = store.sessions;
+    let latestTurnStatus = "streaming";
+    const list = vi.spyOn(chatClient, "listSessions").mockImplementation(async (_, cursor) => cursor
+      ? { sessions: [{ ...background!, latestTurnStatus }], nextCursor: null }
+      : { sessions: [{ ...selected!, latestTurnStatus: "completed" }], nextCursor: "second-page" });
+    const row = wrapper.findAll(".chat-tree__session-link").find(button => button.text() === "后台任务")!;
+    expect(row.find(".chat-tree__session-running").exists()).toBe(false);
+    await wrapper.setProps({ visible: false });
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(list).not.toHaveBeenCalled();
+    await wrapper.setProps({ visible: true });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(row.find(".chat-tree__session-running").exists()).toBe(true);
+    latestTurnStatus = "completed";
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(row.find(".chat-tree__session-running").exists()).toBe(false);
+    expect(row.find(".chat-tree__session-completed").exists()).toBe(true);
+    expect(store.sessions[0]).toBe(selected);
+    expect(store.selectedSessionId).toBe(SESSION_ID);
+    expect(store.sessionsCursor).toBe("next-visible-page");
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(list).toHaveBeenCalledTimes(4);
+    wrapper.unmount();
+  });
+
+  it("discards a background status read when its conversation is opened", async () => {
+    vi.useFakeTimers();
+    const { wrapper, store } = await mountTree(store => {
+      store.sessions = [{ ...store.sessions[0]!, latestTurnStatus: "streaming" }];
+    });
+    let finish!: (page: ChatSessionPage) => void;
+    const list = vi.spyOn(chatClient, "listSessions").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    await vi.advanceTimersByTimeAsync(3000);
+    const signal = list.mock.calls[0]![3]!;
+    store.selectedSessionId = SESSION_ID;
+    await flushPromises();
+    expect(signal.aborted).toBe(true);
+    finish({ sessions: [{ ...store.sessions[0]!, latestTurnStatus: "completed" }], nextCursor: null });
+    await flushPromises();
+    expect(wrapper.get('[aria-current="page"]').find(".chat-tree__session-running").exists()).toBe(true);
     wrapper.unmount();
   });
 

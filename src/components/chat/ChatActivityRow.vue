@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, useTemplateRef } from "vue";
 import type { ConversationActivityEntry } from "../../domain/conversation-activity-entry";
 import { hasReadableProcessContent, showConversationItemActions } from "../../domain/conversation-process";
 import type {
@@ -29,6 +29,7 @@ import ChatTimelineItemShell, {
 const props = withDefaults(defineProps<{
   item: ConversationTimelineItemViewModel;
   activityEntry?: ConversationActivityEntry;
+  searchCalls?: readonly ConversationTimelineItemViewModel[];
   answerCandidate?: boolean;
   turn: ConversationTimelineTurnViewModel;
   processPresentation?: boolean;
@@ -64,6 +65,11 @@ const slots = defineSlots<{
     language: string | null;
   }): unknown;
 }>();
+
+const messageContent = useTemplateRef<InstanceType<typeof ChatSafeContent>>("messageContent");
+const actionsVisible = computed(() => showConversationItemActions(props.item, props.turn, props.processPresentation, Boolean(slots["structured-answer"])) &&
+  !messageContent.value?.revealPending);
+defineExpose({ actionsVisible });
 
 function itemLabel(item: ConversationTimelineItemViewModel): string {
   if (props.processPresentation && item.presentation === "assistant_unclassified") return "模型消息";
@@ -226,7 +232,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange) { emit("app
             @approval-decision="forwardApprovalDecision"
           />
 
-          <ChatNativeToolItem
+          <ChatNativeToolItem :search-calls="activityEntry?.searchCalls ?? searchCalls"
             v-else-if="item.presentation === 'tool' && item.execution?.kind === 'tool' && 'native' in item.execution"
             :item="item"
             :process-presentation="processPresentation"
@@ -273,6 +279,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange) { emit("app
             <slot v-if="(item.presentation === 'final_answer' || item.presentation === 'assistant_unclassified') && slots['structured-answer']" name="structured-answer" :turn-id="turn.turnId" />
             <ChatSafeContent
               v-else-if="item.presentation !== 'unknown' && item.presentation !== 'command' && item.presentation !== 'tool' && item.contentBlocks.length > 0"
+              ref="messageContent"
               :blocks="skillMessages.get(item.identity)?.blocks ?? item.contentBlocks"
               :file-links="item.kind === 'assistant_message'"
               :link-target="item.kind === 'assistant_message' ? {sessionId: item.threadId, turnId: item.turnId, itemId: item.itemId} : undefined"
@@ -312,7 +319,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange) { emit("app
             </ChatSafeContent>
 
             <template
-              v-if="showConversationItemActions(item, turn, processPresentation, Boolean(slots['structured-answer'])) && slots['item-actions']"
+              v-if="actionsVisible && slots['item-actions']"
               #actions
             >
               <slot name="item-actions" :item="item" />

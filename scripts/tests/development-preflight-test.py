@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 import sys
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -16,6 +17,31 @@ spec.loader.exec_module(preflight)
 
 
 class StartupFreshnessTest(unittest.TestCase):
+    def test_workflow_provenance_reconstructs_the_recorded_tree_and_checks_copied_inputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp).resolve()
+            def git(*args):
+                return subprocess.check_output(["git", "-C", str(folder), *args])
+            git("init", "-q")
+            (folder / "web.go").write_text("package web\n")
+            (folder / "workflow").mkdir()
+            copied = folder / "workflow/flow.go"
+            copied.write_text("package workflow\n")
+            (folder / "Dockerfile.workflow-local").write_text("FROM scratch\nCOPY workflow /src/workflow\n")
+            git("add", ".")
+            git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "workflow source")
+            expected = preflight.candidate_digest(preflight.repository_hashes(folder))
+            (folder / "web.go").write_text("package retrieval\n")
+            (folder / "new-web.go").write_text("package web\n")
+            revision = preflight.recorded_revision(folder, preflight.repository_hashes(folder), expected)
+            self.assertEqual(revision, git("rev-parse", "HEAD").decode().strip())
+            inputs = preflight.workflow_api_inputs(folder)
+            self.assertEqual(git("diff", "--name-only", revision, "--", *inputs), b"")
+            copied.write_text("package updated\n")
+            self.assertIn(b"workflow/flow.go", git("diff", "--name-only", revision, "--", *inputs))
+            (folder / "workflow/new.go").write_text("package workflow\n")
+            self.assertIn(b"workflow/new.go", git("ls-files", "--others", "--exclude-standard", "--", *inputs))
+
     def test_existing_repository_document_links_include_their_content(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()

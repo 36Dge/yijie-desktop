@@ -76,7 +76,7 @@ FEAT-144 canonical 首次启动发现并修正：固定 Runtime 的 `config/read
 
 来源检查确认 `yijie-codex/codex-rs/core/src/turn_timing.rs` 已有 `TurnTimingState`：开始时记录 Unix 时间和单调时钟，完成时产生 `completedAt` 与 `durationMs`；后者为整轮经过时间，包含等待，不是模型推理时间或工具耗时求和。Host 已通过稳定 `thread/read` 暴露这些事实，定时任务已有使用，本次仅把它们接到普通对话。
 
-Native 以 scoped 本地 session/turn 查精确 Host session、Runtime thread/turn 绑定；读取前后均验证权限和绑定，删除中的会话不返回计时。UI 只在当前有效订阅的活跃轮次依据原生 `started_at` 刷新“已处理 N秒”，完成/失败/中断后使用原生 `duration_ms` 显示“用时 N秒”，取整与 Codex CLI 一致。绝不以计时结果推断 phase、终态或业务成功，也不以本地发送时间、消息到达时间或两个秒级时间戳相减替代最终耗时。
+Native 以 scoped 本地 session/turn 查精确 Host session、Runtime thread/turn 绑定；读取前后均验证权限和绑定，删除中的会话不返回计时。UI 在当前有效订阅的活跃轮次依据原生 `started_at` 刷新“执行”耗时。整轮成功完成后以原生 `duration_ms` 显示“已完成”耗时，失败和中断使用“用时”。绝不以计时结果推断 phase、终态或业务成功，也不以本地发送时间、消息到达时间或两个秒级时间戳相减替代最终耗时。
 
 读取按生命周期键去重，最多两路并发；数据暂缺最多三次有限读取（重试间隔 1秒、2秒），结束状态触发重新读取，秒数刷新仅在前端显示层执行，无每秒 IPC/Host 轮询。切换会话/权限失效/卸载取消请求并隔离迟到结果。原生零值保留；unknown、invalid、旧记录无计时或临时读取失败都不伪造 0秒，不影响正常正文阅读。所有计时事实只保留在当前页面内存。
 
@@ -112,7 +112,7 @@ Host 为新派发轮次选择已有 `high` effort，复用已有 `show_raw_agent
 
 ## 完成耗时文案与重复状态（2026-09-29）
 
-`contract-impact = none`：仅变更前端呈现，Host/Runtime 接口、原生计时、权限及持久化不变。确认整轮 completed 且原生 duration 已知时，时间行显示“已完成 Ns”（总秒数向下取整），使用 body 14px，较原 caption 12px 增大 2px。失败、中断、未知或仍在运行的轮次不因计时返回而显示成功。
+`contract-impact = none`，换算与排版均在 Desktop 展示层完成。确认整轮 completed 且原生 duration 已知时，时间行使用对话正文的 15px 字号。执行和成功完成共用时长格式。60 秒以内（含 60 秒）显示总秒数，超过 60 秒显示总分钟数和剩余秒数，如“执行 6m30s”和“已完成 6m30s”。秒数向下取整。失败、中断、未知或仍在运行的轮次不因计时返回而显示成功。
 
 完成的模型回答移除右侧重复“已完成”和空标题行，同时移除失去目标的 aria-describedby；进行中/异常/活动提示保持可见。既有耗时展开箭头、鼠标与键盘操作、正文及复制保持。
 

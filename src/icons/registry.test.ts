@@ -65,6 +65,7 @@ describe("iconRegistry", () => {
       "knowledge",
       "listView",
       "loading",
+      "taskRunning",
       "message",
       "modelDeepSeek",
       "modelGlm",

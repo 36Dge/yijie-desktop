@@ -440,6 +440,7 @@ impl HostBridge {
                 &format!("/v6/agent-sessions/{session_id}/native-thread"),
             )
             .await?
+            .header("X-Yijie-Search-Receipt", "2")
             .timeout(REQUEST_TIMEOUT)
             .send()
             .await
@@ -953,6 +954,9 @@ impl HostBridge {
             format!("{path}?event_schema_version={schema_version}")
         };
         let mut request = self.authorized_request(Method::GET, &path).await?;
+        if schema_version == 13 {
+            request = request.header("X-Yijie-Search-Receipt", "2");
+        }
         if let Some(cursor) = cursor {
             let value = HeaderValue::from_str(&format!("{}:{}", cursor.stream_id, cursor.sequence))
                 .map_err(|_| protocol_error())?;
@@ -2714,15 +2718,27 @@ mod tests {
             "model_revision": 1, "sample": null,
             "compactions": [{"item_id": "native-item", "turn_id": "native-turn", "state": "in_progress"}]
         });
-        let (port, server) = serve(vec![ready_response(NONCE), json_response("200 OK", &row.to_string())]).await;
+        let mut switched = row.clone();
+        switched["last_observation"] = serde_json::json!({
+            "model":"MiniMax-M3", "sample":{"used_tokens":19638, "capacity_tokens":950000, "turn_id":"measured-turn",
+            "window_id":"10000000-0000-4000-8000-000000000001", "observed_at":"2026-11-08T08:54:33Z"}
+        });
+        let (port, server) = serve(vec![ready_response(NONCE), json_response("200 OK", &row.to_string()),
+            ready_response(NONCE), json_response("200 OK", &switched.to_string())]).await;
         let token = TestToken::new(0o600);
         let client = bridge(port, token.path.clone(), NONCE);
-        let value = client.context_window(session, true).await.unwrap();
+        let value = client.context_window(session, true, false).await.unwrap();
         assert!(value.sample.is_none());
         assert_eq!(value.compactions[0].state, "in_progress");
+        let value = client.context_window(session, false, true).await.unwrap();
+        assert!(value.sample.is_none());
+        let measured = value.last_observation.unwrap();
+        assert_eq!(measured.model, "MiniMax-M3");
+        assert_eq!(measured.sample.used_tokens, 19638);
         let requests = server.await.unwrap();
-        assert_eq!(requests.len(), 2);
+        assert_eq!(requests.len(), 4);
         assert!(requests[1].starts_with(&format!("GET /v1/agent-sessions/{session}/context-window?include_history=true ")));
+        assert!(requests[3].starts_with(&format!("GET /v1/agent-sessions/{session}/context-window?include_history=false&include_last_observation=true ")));
     }
 
     #[tokio::test]
@@ -4231,10 +4247,12 @@ impl HostBridge {
         &self,
         session: Uuid,
         include_history: bool,
+        include_last_observation: bool,
     ) -> Result<super::context_window_generated::ContextWindowSnapshot, HostBridgeError> {
         require_non_nil(session)?;
+        let last = if include_last_observation { "&include_last_observation=true" } else { "" };
         let response = self
-            .authorized_request(Method::GET, &format!("/v1/agent-sessions/{session}/context-window?include_history={include_history}"))
+            .authorized_request(Method::GET, &format!("/v1/agent-sessions/{session}/context-window?include_history={include_history}{last}"))
             .await?
             .timeout(REQUEST_TIMEOUT)
             .send()
@@ -4246,6 +4264,9 @@ impl HostBridge {
         let value: super::context_window_generated::ContextWindowSnapshot =
             serde_json::from_slice(&read_json_body(response).await?).map_err(|_| protocol_error())?;
         value.validate().map_err(|_| protocol_error())?;
+        if value.last_observation.is_some() && (!include_last_observation || value.sample.is_some() || value.thread_id.as_deref().is_none_or(str::is_empty)) {
+            return Err(protocol_error());
+        }
         Ok(value)
     }
 

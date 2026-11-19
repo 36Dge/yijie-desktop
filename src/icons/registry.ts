@@ -11,6 +11,7 @@ import {
 } from "./skill-category-icons";
 import { Hand as PermissionHand, ShieldAlert as PermissionAlert, Check as PermissionCheck } from "@lucide/vue";
 import {
+  createLucideIcon,
   ArrowDown,
   ArrowRight,
   ArrowUp,
@@ -132,6 +133,13 @@ import {
   ZoomOut,
 } from "@lucide/vue";
 
+const horizontalSpokes = "M2 12h5 M17 12h5";
+const TaskRunning = createLucideIcon("task-running", [
+  ["path", { d: horizontalSpokes }],
+  ["path", { d: horizontalSpokes, transform: "rotate(60 12 12)" }],
+  ["path", { d: horizontalSpokes, transform: "rotate(120 12 12)" }],
+]);
+
 export const iconRegistry = {
   contextUpdate: ListCollapse,
   modelDeepSeek: ModelDeepSeek,
@@ -199,6 +207,7 @@ export const iconRegistry = {
   listView: List,
   lightbulb: Lightbulb,
   loading: LoaderCircle,
+  taskRunning: TaskRunning,
   search: Search,
   shoppingBag: ShoppingBag,
   image: Image,

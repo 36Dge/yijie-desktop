@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { h } from "vue";
+import { h, nextTick } from "vue";
 import type { NativeConversationView } from "../../api/generated/native-conversation-private.gen";
 import { composeConversationView, type ConversationItemSnapshot } from "../../domain/conversation-view";
 import { selectConversationTimeline, type ConversationTimelineItemViewModel, type ConversationTimelineArtifactReferenceContentBlock } from "../../domain/conversation-timeline";
@@ -77,6 +77,7 @@ describe("turn output stays inside the response", () => {
     const original = JSON.stringify({turn, view: input.view});
     const callbacks = slotsFor(input.artifacts);
     const wrapper = mount(ChatTurnGroup, {props: {turn, position: 1}, slots: callbacks.slots});
+    await nextTick();
     const response = wrapper.get(".chat-turn-output");
     const body = response.get(".chat-turn-output__body");
     const footer = response.get(".chat-turn-output__actions");
@@ -113,6 +114,8 @@ describe("turn output stays inside the response", () => {
     expect(wrapper.find(".answer-action").exists()).toBe(false);
     await wrapper.setProps({turn: timeline({count: 1}).timeline.turns[0]!});
     expect(wrapper.getComponent(ChatArtifactList).vm.$).toBe(instance);
+    expect(wrapper.find(".chat-turn-output__actions").exists()).toBe(false);
+    await vi.waitFor(() => expect(wrapper.find(".chat-turn-output__actions").exists()).toBe(true), {timeout: 3_000});
     expect(wrapper.get(".chat-turn-output__actions").text()).toBe("复制回答");
   });
 
@@ -128,6 +131,7 @@ describe("turn output stays inside the response", () => {
     expect(wrapper.findAll(".answer-action")).toHaveLength(1);
     wrapper.unmount();
     const restored = mount(ChatTurnGroup, {props: {turn: timeline({count: 9, source: "native_rebuilt"}).timeline.turns[0]!, position: 1}, slots: callbacks.slots});
+    await nextTick();
     expect(restored.get(".chat-turn-output__body").findAll(".chat-artifact-document-card")).toHaveLength(9);
     expect(restored.get(".chat-turn-output__actions").text()).toBe("复制回答");
   });

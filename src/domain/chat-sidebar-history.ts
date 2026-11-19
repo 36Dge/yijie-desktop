@@ -1,6 +1,10 @@
 import type { ChatProject, ChatSession } from "./chat-ipc";
 import type { TaskDirectoryPreference } from "./task-directory-preference";
 
+export function isChatSessionRunning(status: ChatSession["latestTurnStatus"]): boolean {
+  return status === "streaming" || status === "inProgress";
+}
+
 export interface ChatHistoryProjectGroup {
   readonly projectId: string;
   readonly project: ChatProject | null;

@@ -14,13 +14,22 @@ export function useContextWindow(
   let epoch = 0, disposed = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let includeHistory = true;
-  const sample = computed(() => !switching() && snapshot.value?.model_profile === model() && snapshot.value.model_revision === revision() ? snapshot.value.sample : null);
+  const observation = computed(() => {
+    const value = snapshot.value;
+    if (!value?.thread_id) return null;
+    if (value.sample && value.model_profile) {
+      const current = !switching() && value.model_profile === model() && value.model_revision === revision();
+      return { sample: value.sample, lastModel: current ? null : value.model_profile };
+    }
+    const last = value.last_observation;
+    return last ? { sample: last.sample, lastModel: last.model } : null;
+  });
 
   async function refresh(generation: number) {
     const c = context(), s = session();
     if (disposed || generation !== epoch || !c || !s) return;
     try {
-      const result = await readContextWindow(c, s, includeHistory);
+      const result = await readContextWindow(c, s, includeHistory, true);
       if (disposed || generation !== epoch) return;
       includeHistory = false;
       snapshot.value = result;
@@ -39,13 +48,15 @@ export function useContextWindow(
       if (!disposed && generation === epoch) timer = setTimeout(() => { void refresh(generation); }, 1000);
     }
   }
-  watch([context, session, model, revision, switching], (value, previous) => {
+  // Model selection changes attribution, not ownership of the conversation read.
+  watch([context, session], () => {
     const generation = ++epoch;
     clearTimeout(timer);
     snapshot.value = null;
-    if (value[0] !== previous?.[0] || value[1] !== previous?.[1]) { includeHistory = true; compactionSnapshot.value = null; }
+    includeHistory = true;
+    compactionSnapshot.value = null;
     void refresh(generation);
   }, { immediate: true, flush: "sync" });
   onBeforeUnmount(() => { disposed = true; epoch++; clearTimeout(timer); });
-  return { sample, snapshot, compactionSnapshot };
+  return { sample: computed(() => observation.value?.sample ?? null), lastModel: computed(() => observation.value?.lastModel ?? null), snapshot, compactionSnapshot };
 }

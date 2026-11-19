@@ -161,6 +161,61 @@ def candidate_digest(files):
     return value.hexdigest()
 
 
+def recorded_revision(folder, hashes, expected):
+    # Compare the immutable tree to the recorded complete candidate, including
+    # worktree edits and untracked files. Read changed blobs in one Git batch.
+    extra = set(git(folder, "ls-files", "--others", "--exclude-standard", "-z").decode().split("\0"))
+    tracked = {name: value for name, value in hashes.items() if name not in extra}
+    for candidate in git(folder, "log", "-32", "--format=%H").decode().splitlines():
+        old = tracked.copy()
+        changed = [name for name in git(folder, "diff", "--no-renames", "--name-only", "-z", candidate, "--").decode().split("\0") if name]
+        if changed:
+            batch = subprocess.check_output(["git", "-C", str(folder), "cat-file", "--batch", "-z"],
+                input=b"".join((candidate + ":" + name).encode() + b"\0" for name in changed))
+            offset = 0
+            for name in changed:
+                end = batch.index(b"\n", offset)
+                header = batch[offset:end]
+                offset = end + 1
+                if header.endswith(b" missing"):
+                    old.pop(name, None)
+                    continue
+                _, kind, length = header.split()
+                if kind != b"blob":
+                    break
+                size = int(length)
+                old[name] = hashlib.sha256(batch[offset:offset + size]).digest()
+                offset += size + 1
+            else:
+                if candidate_digest(old) == expected:
+                    return candidate
+        elif candidate_digest(old) == expected:
+            return candidate
+    return None
+
+
+def workflow_api_inputs(folder):
+    recipe = "Dockerfile.workflow-local"
+    inputs = [recipe, ".dockerignore", recipe + ".dockerignore"]
+    # Local compiler sources only enter this immutable recipe through literal
+    # COPY instructions. Unsupported context access requires a canonical rebuild.
+    for raw in (folder / recipe).read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        tokens = shlex.split(line)
+        directive = tokens[0].upper()
+        require(directive not in {"ADD", "ONBUILD", "INCLUDE"} and not line.endswith(chr(92)) and
+                not (directive == "RUN" and any(t.startswith("--mount") for t in tokens)),
+                "工作流镜像包含新的构建上下文输入，需要标准构建。")
+        if directive == "COPY" and not tokens[1].startswith("--from="):
+            paths = tokens[1:-1]
+            require(paths and all(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", name) and
+                                  ".." not in Path(name).parts for name in paths), "工作流镜像输入需要标准构建。")
+            inputs.extend(paths)
+    return inputs
+
+
 def workflow_sources_current(root):
     # The daily session deliberately reuses existing containers and never runs
     # migrations. Check their actual source identity too, including the editor,
@@ -174,21 +229,11 @@ def workflow_sources_current(root):
         current = candidate_digest(hashes)
         revision = None
         if current != built["source_digest"]:
-            # Common case: only AGENTS/README changed after a recorded build.
-            # Reconstruct exact Git content; timestamps are not provenance.
-            for candidate in git(folder, "log", "-32", "--format=%H").decode().splitlines():
-                old = hashes.copy()
-                changes = git(folder, "diff", "--name-only", "HEAD", candidate).decode().splitlines()
-                for file in changes:
-                    blob = subprocess.run(["git", "-C", str(folder), "show", candidate + ":" + file], capture_output=True)
-                    if blob.returncode == 0: old[file] = hashlib.sha256(blob.stdout).digest()
-                    else: old.pop(file, None)
-                if candidate_digest(old) == built["source_digest"]:
-                    revision = candidate
-                    break
+            revision = recorded_revision(folder, hashes, built["source_digest"])
             require(revision is not None, "工作流镜像来源需要核对；未启动旧版本，请先完成标准工作流构建。")
-            changed = git(folder, "diff", "--name-only", revision, "--", *INPUTS[repository]).decode().splitlines()
-            untracked = git(folder, "ls-files", "--others", "--exclude-standard", "--", *INPUTS[repository]).decode().splitlines()
+            inputs = workflow_api_inputs(folder) if name == "api" else INPUTS[repository]
+            changed = git(folder, "diff", "--name-only", revision, "--", *inputs).decode().splitlines()
+            untracked = git(folder, "ls-files", "--others", "--exclude-standard", "--", *inputs).decode().splitlines()
             require(not changed and not untracked, "工作流代码尚未进入固定镜像；请先完成标准工作流构建及数据兼容检查。")
         proof.append({"repository": repository, "image_id": built["image_id"], "source_digest": built["source_digest"], "equivalent_source_commit": revision, "code_current": True})
     editor = state["editor"]

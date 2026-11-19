@@ -12,9 +12,10 @@ import YjIcon from "../yijie/YjIcon.vue";
 import YjTooltip from "../yijie/YjTooltip.vue";
 import ChatSidebarSessionRow from "./ChatSidebarSessionRow.vue";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   currentPath: string;
-}>();
+  visible?: boolean;
+}>(), { visible: true });
 
 const chatStore = useChatStore();
 const sidebarStore = useSidebarStore();
@@ -37,6 +38,21 @@ let lastDialogTrigger: HTMLElement | null = null;
 let knownProjectIds = new Set<string>();
 
 watch(() => chatStore.sessions, sessions => readingStore.observeSessions(sessions), { immediate: true, flush: "sync" });
+
+watch(() => props.visible && chatStore.hasBackgroundTurns && chatStore.hasAction("read_sessions") ? chatStore.context?.contextId : null,
+  (contextId, _, onCleanup) => {
+    if (!contextId) return;
+    const controller = new AbortController();
+    const interval = 3_000;
+    let timer = setTimeout(refresh, interval);
+    async function refresh() {
+      try {
+        if (!document.hidden) await chatStore.refreshBackgroundTurnStatuses(controller.signal);
+      } catch { /* Keep the last observed state until the next list read succeeds. */ }
+      if (!controller.signal.aborted) timer = setTimeout(refresh, interval);
+    }
+    onCleanup(() => { clearTimeout(timer); controller.abort(); });
+  }, { immediate: true });
 
 const history = computed(() => buildChatSidebarHistory(chatStore.projects, chatStore.sessions, sidebarStore.taskDirectoryPreferences));
 const historyGroups = computed(() => history.value.groups);

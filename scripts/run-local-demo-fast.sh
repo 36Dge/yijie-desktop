@@ -713,6 +713,9 @@ if [[ "$workflow_requested" == "true" && "$prepare_only" != "true" && "$migrate_
 fi
 
 if [[ "$development_app" == "true" ]]; then
+  # Both the gateway and the service executor must open this generation of
+  # the worker. A running executor cannot adopt a replaced manifest.
+  python3 -B "$workspace_root/yijie-infra/scripts/builtin-web-session.py" ensure
   # UI qualification uses the exact daily executable/profile too. Switching
   # between Cargo build and dev profiles changes the linker signing identity
   # and can make existing app-scoped workspace bookmarks unusable.

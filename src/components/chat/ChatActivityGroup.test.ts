@@ -6,7 +6,7 @@ import ChatTurnGroup from "./ChatTurnGroup.vue";
 import ChatTraceNotices from "./ChatTraceNotices.vue";
 
 enableAutoUnmount(afterEach);
-it("keeps group and turn choices while final text arrives, with readable native detail", async () => {
+it("folds the process at the first answer and restores the chosen inner group on reopening", async () => {
   const items = [traceItem("u", "userMessage", {text: "Read the project"}), traceItem("p", "agentMessage", {phase: "commentary", text: "I will read the project."}), traceItem("c", "commandExecution", {status: "completed", exitCode: 0, commandActions: [{index: 0, kind: "read", label: "README.md"}]}), traceItem("r", "reasoning", {summary: ["Process detail"]})];
   const wrapper = mount(ChatTurnGroup, {attachTo: document.body, props: {turn: traceTurn(items, true), position: 1}});
   const group = wrapper.get(".chat-activity-group__toggle");
@@ -16,11 +16,11 @@ it("keeps group and turn choices while final text arrives, with readable native 
   expect(group.attributes("aria-expanded")).toBe("true");
   const final = traceItem("f", "agentMessage", {phase: "final_answer", text: "Final result"});
   await wrapper.setProps({turn: traceTurn([...items, final])});
-  expect(wrapper.get(".chat-turn-group__process-toggle").attributes("aria-expanded")).toBe("true");
-  expect(group.attributes("aria-expanded")).toBe("true");
-  expect(wrapper.text()).toContain("Final result");
+  expect(wrapper.get(".chat-turn-group__process-toggle").attributes("aria-expanded")).toBe("false");
+  expect(group.isVisible()).toBe(false);
   await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
-  expect(wrapper.get(".chat-activity-group").isVisible()).toBe(false);
+  expect(group.isVisible()).toBe(true);
+  expect(group.attributes("aria-expanded")).toBe("true");
   expect(wrapper.text()).toContain("Final result");
 });
 it("folds ordinary cold history, preserves errors and shows retry intent without turning it into failure", () => {

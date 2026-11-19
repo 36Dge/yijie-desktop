@@ -43,6 +43,8 @@ const inherited = inject(chatTextRevealKey, null);
 const reveal = props.parsedNodes && inherited ? inherited
   : useChatTextReveal(() => documentView.value.text, () => props.streaming, () => props.animate, root);
 provide(chatTextRevealKey, reveal);
+const revealPending = computed(() => reveal.frame.value.cursor < documentView.value.text.length || reveal.frame.value.ranges.length > 0);
+defineExpose({ revealPending });
 if (!props.parsedNodes) provide(messageLinkTargetKey, () => props.linkTarget);
 const nodes = computed(() => documentView.value.nodes);
 const inputImages = computed(() => props.mode === "plain" ? nodes.value.filter(node => node.kind === "attachment_reference" && node.block.mediaType.startsWith("image/")) : []);

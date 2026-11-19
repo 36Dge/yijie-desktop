@@ -76,7 +76,7 @@ function handleEntryClick(entry: AppNavEntry): void {
             v-show="!collapsed"
             class="yj-sidebar__chat-tree-container"
           >
-            <ChatSidebarTree :current-path="currentPath" />
+            <ChatSidebarTree :current-path="currentPath" :visible="!collapsed" />
           </div>
         </li>
       </ul>

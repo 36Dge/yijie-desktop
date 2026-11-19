@@ -189,9 +189,10 @@ it("coalesces automatic follow into one frame and cancels it on upward reading i
   const wrapper = mount(Harness); await nextTick();
   const element = wrapper.get("div").element as HTMLElement;
   const smooth = vi.fn(); let top = 600; let height = 1000;
+  const writeTop = vi.fn((value: number) => { top = value; });
   Object.defineProperties(element, {
     scrollHeight: {configurable: true, get: () => height}, clientHeight: {configurable: true, value: 400},
-    scrollTop: {configurable: true, get: () => top, set: value => { top = Number(value); }},
+    scrollTop: {configurable: true, get: () => top, set: writeTop},
     scrollTo: {configurable: true, value: smooth},
   });
   wrapper.vm.update(); height = 1400; wrapper.vm.update();
@@ -200,6 +201,9 @@ it("coalesces automatic follow into one frame and cancels it on upward reading i
   expect(callbacks.size).toBe(1);
   for (const callback of callbacks.values()) callback(16); callbacks.clear();
   expect(top).toBe(1000); expect(smooth).not.toHaveBeenCalled();
+  await wrapper.vm.followNewContent();
+  for (const callback of callbacks.values()) callback(32); callbacks.clear();
+  expect(writeTop).toHaveBeenCalledTimes(1);
   await wrapper.vm.followNewContent();
   element.dispatchEvent(new WheelEvent("wheel", {deltaY: -1}));
   expect(callbacks.size).toBe(0); expect(wrapper.vm.following).toBe(false);

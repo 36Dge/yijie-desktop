@@ -28,6 +28,7 @@ describe("one expandable reasoning summary per turn", () => {
     expect(wrapper.find(toggle).exists()).toBe(false);
     await wrapper.setProps({turn: project(saved([reason("r", "## 城市定位\n\n已有摘要内容")], true), true)});
     expect(wrapper.get(toggle).text()).toBe("正在思考 · 城市定位");
+    expect(wrapper.get(toggle).get(".chat-thinking--active").text()).toBe("正在思考");
     expect(wrapper.get(toggle).attributes("aria-expanded")).toBe("false");
     const controlledId = wrapper.get(toggle).attributes("aria-controls");
     expect(wrapper.get(`[id="${controlledId}"]`).isVisible()).toBe(false);
@@ -69,23 +70,29 @@ describe("one expandable reasoning summary per turn", () => {
     await wrapper.get(toggle).trigger("click");
     expect(wrapper.findAll('[data-reasoning-item]').map(row => row.attributes('data-reasoning-item'))).toEqual(["r1", "r2", "r3"]);
     await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
-    expect(wrapper.get(toggle).isVisible()).toBe(true);
-    expect(wrapper.get('[aria-label="思考摘要内容"]').isVisible()).toBe(true);
+    expect(wrapper.get(toggle).isVisible()).toBe(false);
+    expect(wrapper.get('[aria-label="思考摘要内容"]').isVisible()).toBe(false);
     expect(JSON.stringify(input)).toBe(before);
   });
 
-  it.each(["final_answer", undefined] as const)("keeps answer text visible and user choice intact when phase=%s begins", async phase => {
+  it.each(["final_answer", undefined] as const)("folds the open summary when readable phase=%s starts and allows reopening it", async phase => {
     const wrapper = render(saved([reason("r", "## 整理城市资料")], true), true);
     await wrapper.get(toggle).trigger("click");
     const input = saved([reason("r", "## 整理城市资料"), {id: "answer", type: "agentMessage", text: "这是可读正文。", availability: "available", ...(phase ? {phase} : {})}], true);
+    input.items[1]!.lastMethod = "item/started";
     await wrapper.setProps({turn: project(input, true)});
     expect(wrapper.get(toggle).text()).toBe("思考摘要 · 整理城市资料");
     expect(wrapper.get(toggle).attributes("aria-expanded")).toBe("true");
     expect(wrapper.get('.chat-turn-group__reasoning-summary .chat-thinking').classes()).not.toContain('chat-thinking--active');
     const answer = wrapper.get(phase ? '.chat-turn-group__item--final_answer' : '.chat-turn-group__item--assistant_unclassified');
-    await wrapper.get(toggle).trigger("click");
+    const process = wrapper.get(".chat-turn-group__process-toggle");
+    expect(process.attributes("aria-expanded")).toBe("false");
+    expect(wrapper.get(toggle).isVisible()).toBe(false);
     expect(answer.isVisible()).toBe(true);
-    expect(answer.text()).toContain("这是可读正文。");
+    await vi.waitFor(() => expect(answer.text()).toContain("这是可读正文。"));
+    await process.trigger("click");
+    expect(wrapper.get(toggle).isVisible()).toBe(true);
+    expect(wrapper.get('[aria-label="思考摘要内容"]').isVisible()).toBe(true);
     expect(input.items[1]!.item.phase).toBe(phase);
   });
 

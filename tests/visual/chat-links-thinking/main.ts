@@ -3,6 +3,7 @@ import { NConfigProvider, darkTheme } from "naive-ui";
 import { createNaiveThemeOverrides } from "../../../src/design/theme/naive-theme";
 import { composeConversationView } from "../../../src/domain/conversation-view";
 import { selectConversationTimeline } from "../../../src/domain/conversation-timeline";
+import { turnTimingLabel } from "../../../src/domain/chat-turn-timing";
 import type { NativeConversationView } from "../../../src/api/generated/native-conversation-private.gen";
 import { webSourceActionsKey } from "../../../src/composables/useWebSources";
 import ChatTurnGroup from "../../../src/components/chat/ChatTurnGroup.vue";
@@ -27,6 +28,15 @@ createApp(defineComponent({setup() {
     const view: NativeConversationView = {sessionId:"preview",turnId:"turn",runtimeThreadId:"preview",runtimeTurnId:"turn",source:"native_observed",revision:phase.value,status:phase.value === "completed" ? "completed" : "inProgress",statusSource:"runtime_notification",terminalObserved:phase.value === "completed",availability:"available",items};
     return selectConversationTimeline(composeConversationView({threads:[{threadId:"preview",status:"active"}],turns:[],items:[]},[view]),"preview",undefined,{liveTurnId:"turn",protectApprovalProcessContent:false})!.turns[0]!;
   });
+  const timing = computed(() => {
+    const completed = phase.value === "completed";
+    return turnTimingLabel({
+      schema_version: 1, agent_session_id: "preview", thread_id: "preview", turn_id: "turn", source: "runtime_read",
+      started_at: { state: "known", value: 100 },
+      completed_at: completed ? { state: "known", value: 490 } : { state: "unknown" },
+      duration_ms: completed ? { state: "known", value: 390_000 } : { state: "unknown" },
+    }, !completed, 490_000, turn.value.domainStatus);
+  });
   function theme() { dark.value = !dark.value; document.documentElement.dataset.theme = dark.value ? "dark" : "light"; }
   const overrides = computed(() => { void dark.value; return createNaiveThemeOverrides(name => getComputedStyle(document.documentElement).getPropertyValue(name)); });
   return () => h(NConfigProvider, {theme:dark.value ? darkTheme : null, themeOverrides:overrides.value}, () => h("main", [
@@ -37,7 +47,7 @@ createApp(defineComponent({setup() {
     ]),
     h("section",{class:"preview-window",style:{width:"min(1180px, 100%)",height:"760px"}},[
       h("header",{class:"preview-title"},"普通本地样例 · 生产组件与原生进度投影"),
-      h("div",{class:"preview-conversation"},[h(ChatTurnGroup,{turn:turn.value,position:1,timingLabel:phase.value === "completed" ? "已完成 8s" : "已处理 8s"})]),
+      h("div",{class:"preview-conversation"},[h(ChatTurnGroup,{turn:turn.value,position:1,timingLabel:timing.value})]),
       h("div",{class:"preview-composer"},"输入区域"),
     ]),
     h("p",{"aria-label":"打开记录"},opened.value ? `已请求打开：${opened.value}` : "尚未点击链接"),

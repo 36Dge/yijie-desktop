@@ -77,7 +77,7 @@ createApp(defineComponent({setup() {
     h("button", {onClick: () => {dark.value = !dark.value; document.documentElement.dataset.theme = dark.value ? "dark" : "light";}}, "切换亮暗色"),
   ]), h("section", {class: "preview-window", style: {width: "min(1180px, 100%)", height: "760px"}}, [
     h("header", {class: "preview-title"}, "普通本地演示 · 与生产共用投影、组件、滚动和渐显"),
-    h("div", {class: "preview-conversation-frame"}, [h("div", {ref: scroller, class: "preview-conversation", tabindex: 0, onScroll: update}, [h(ChatTimeline, {key: run.value, timeline: timeline.value, turnTimingLabels: {live: live.value ? "已处理 8s" : "已完成 8s"}})]), showBottomButton.value ? h(ChatScrollToBottomButton, {class: "preview-bottom-button", onClick: () => scrollToBottom(true)}) : null]),
+    h("div", {class: "preview-conversation-frame"}, [h("div", {ref: scroller, class: "preview-conversation", tabindex: 0, onScroll: update}, [h(ChatTimeline, {key: run.value, timeline: timeline.value, turnTimingLabels: {live: live.value ? "执行 8s" : "已完成 8s"}})]), showBottomButton.value ? h(ChatScrollToBottomButton, {class: "preview-bottom-button", onClick: () => scrollToBottom(true)}) : null]),
     h("div", {class: "preview-composer"}, "输入区域（演示）"),
   ]), h("pre", {"aria-label": "性能采样", style: {whiteSpace: "pre-wrap", fontSize: "var(--yj-font-size-caption)"}}, stats.value)]);
 }})).mount("#app");

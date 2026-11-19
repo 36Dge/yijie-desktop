@@ -23,7 +23,7 @@ async function paint() { await nextTick(); await vi.advanceTimersByTimeAsync(20)
 describe("deep thinking disclosure and scroll ownership", () => {
   it("reuses the thinking sweep only for active reasoning and pauses inside a folded process", async () => {
     const wrapper = mount(ChatDeepThinking, {props: {item: item(), visible: true, live: true, thinking: true, stateMessage: null}});
-    expect(wrapper.get(".chat-thinking").text()).toBe("深度思考");
+    expect(wrapper.get(".chat-thinking").text()).toBe("正在思考");
     expect(wrapper.get(".chat-thinking").classes()).toContain("chat-thinking--active");
     await wrapper.setProps({visible: false});
     expect(wrapper.get(".chat-thinking").classes()).toContain("chat-thinking--paused");

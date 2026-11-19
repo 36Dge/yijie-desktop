@@ -15,7 +15,15 @@ describe("context window indicator", () => {
     await w.setProps({ sample: { used_tokens: 143000, capacity_tokens: 730000, turn_id: "turn", window_id: "window", observed_at: "2026-11-08T12:00:00Z" } });
     expect(document.querySelector('[role="tooltip"]')?.textContent).toContain("20% 已用（剩余 80%）");
     expect(document.querySelector('[role="tooltip"]')?.textContent).toContain("上下文窗口：");
-    expect(document.querySelector('[role="tooltip"]')?.textContent).not.toContain("最近一次统计");
+    await w.setProps({ lastModel: "kimi-k3.1-pro" });
+    const popover = document.querySelector('[role="tooltip"]')!;
+    expect(Array.from(popover.children, line => line.textContent)).toEqual([
+      "上下文窗口：", "20% 已用（剩余 80%）", "已用 143k Token，共 730k",
+    ]);
+    expect(trigger.attributes("aria-label")).toContain("上次统计 · Kimi K3.1 Pro");
+    expect(w.get(".context-window__usage").attributes("stroke-dasharray")).toBe("20 100");
+    await w.setProps({ lastModel: null });
+    expect(trigger.attributes("aria-label")).not.toContain("上次统计");
     await trigger.trigger("keydown", { key: "Escape" });
     expect(trigger.attributes("aria-describedby")).toBeUndefined();
     await trigger.trigger("mouseleave");

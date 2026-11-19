@@ -10595,7 +10595,7 @@ pub async fn chat_context_window_v1(
         .map_err(|_| map_chat_error(ChatError::InvalidInput, Some(r.request_id)))?;
     let (_, app, _) = applications(&chat_runtime, r.request_id).await?;
     let value = app
-        .context_window(r.context_id, session, r.payload.include_history)
+        .context_window(r.context_id, session, r.payload.include_history, r.payload.include_last_observation.unwrap_or(false))
         .await
         .map_err(|e| map_chat_error(e, Some(r.request_id)))?;
     Ok(CommandResponse::new(r.request_id, value))

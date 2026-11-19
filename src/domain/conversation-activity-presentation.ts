@@ -1,7 +1,7 @@
 import { observedProgressMessages, tailCommentaryCandidate } from "./conversation-process";
 import { traceDiagnosticBlocksLive } from "./conversation-trace-liveness";
 import { reasoningSummaryIsCurrent } from "./conversation-reasoning-summary";
-import { activityEntriesForItem, type ConversationActivityEntry } from "./conversation-activity-entry";
+import { deepSearchEvidence, deepSearchReceipt, activityEntriesForItem, type ConversationActivityEntry } from "./conversation-activity-entry";
 import type { ConversationTimelineItemViewModel as Item, ConversationTimelineTurnViewModel as Turn } from "./conversation-timeline";
 
 export type ConversationActivityHeaderState =
@@ -10,7 +10,7 @@ export type ConversationActivityHeaderState =
 export type ConversationActivityGroup = Readonly<{ identity: string; items: readonly Item[]; entries: readonly ConversationActivityEntry[]; state: ConversationActivityHeaderState }>;
 export type ConversationReadingNode =
   | Readonly<{ kind: "activity"; identity: string; group: ConversationActivityGroup }>
-  | Readonly<{ kind: "message" | "attention"; identity: string; item: Item; process: boolean; answerCandidate: boolean }>;
+  | Readonly<{ kind: "message" | "attention"; identity: string; item: Item; searchCalls?: readonly Item[]; process: boolean; answerCandidate: boolean }>;
 
 /** Reading placement only. A finished turn alone does not establish recovery.
  * Require later successful execution followed by a readable public answer.
@@ -62,14 +62,40 @@ export function conversationActivityPresentation(turn: Turn, attentionIds: Reado
   const observed = preserveUnclassified ? new Set<string>() : observedProgressMessages(turn.items);
   const candidate = tailCommentaryCandidate(turn.items);
   const historical = historicalFailures(turn);
+  // Project the raw native items once per turn. Call IDs, including each
+  // follower, remain available in the original turn and the disclosure.
+  const searches = new Map<string, Map<string, Item>>();
+  for (const item of turn.items) {
+    const id = deepSearchReceipt(item)?.operation_id;
+    if (!id) continue;
+    const calls = searches.get(id) ?? new Map<string, Item>();
+    const existing = calls.get(item.identity);
+    calls.set(item.identity, existing ? deepSearchEvidence(existing, [item]) : item);
+    searches.set(id, calls);
+  }
+  const ordered = new Map(Array.from(searches, ([id, calls]) => [id, Array.from(calls.values())] as const));
+  const rendered = new Set<string>();
+  const searchCalls = (item: Item) => {
+    const id = deepSearchReceipt(item)?.operation_id;
+    return id ? ordered.get(id) : undefined;
+  };
   let pending: Item[] = [];
   const flush = () => {
     if (!pending.length) return;
     const identity = `${turn.identity}:activity:${pending[0]!.identity}`;
-    nodes.push({kind: "activity", identity, group: {identity, items: pending, entries: pending.flatMap(activityEntriesForItem), state: {kind: "summary"}}});
+    const entries = pending.flatMap(item => {
+      const related = searchCalls(item);
+      return activityEntriesForItem(item).map(entry => related ? {...entry, searchCalls: related} : entry);
+    });
+    nodes.push({kind: "activity", identity, group: {identity, items: pending, entries, state: {kind: "summary"}}});
     pending = [];
   };
   for (const item of turn.items) {
+    const related = searchCalls(item);
+    if (related) {
+      if (related[0]!.identity !== item.identity || rendered.has(item.identity)) continue;
+      rendered.add(item.identity);
+    }
     // Every fact stays in turn.items. Only explicit reasoning diagnostics are
     // attention rows; ordinary reasoning never anchors a tool group.
     if (item.presentation === "reasoning" && !["stream_gap", "runtime_error", "protocol_error", "host_shutdown", "limit_exceeded"].includes(item.reasoning?.reasonCode ?? "")) continue;
@@ -82,7 +108,7 @@ export function conversationActivityPresentation(turn: Turn, attentionIds: Reado
     if (attention || !["reasoning", "command", "tool", "web_search", "unknown"].includes(item.presentation)) {
       flush();
       const answerCandidate = item.identity === candidate;
-      nodes.push({kind: attention ? "attention" : "message", identity: item.identity, item, answerCandidate,
+      nodes.push({kind: attention ? "attention" : "message", identity: item.identity, item, answerCandidate, ...(related ? {searchCalls:related} : {}),
         process: !answerCandidate && (item.presentation === "commentary" || observed.has(item.identity))});
     } else pending.push(item);
   }

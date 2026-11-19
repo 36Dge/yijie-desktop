@@ -49,7 +49,7 @@ export function conversationReasoningSummary(turn: Turn, live: boolean) {
   return {
     identity: `${turn.identity}:reasoning-summary`,
     items,
-    title: `${active ? "正在思考" : "思考摘要"}${heading ? ` · ${heading}` : ""}`,
+    heading,
     key: latest.identity,
     state: active ? "thinking" as const : "summary" as const,
     stateMessage: items.some(item => item.availability === "partial") ? "部分思考摘要信息不完整，已保留可读内容。" : null,

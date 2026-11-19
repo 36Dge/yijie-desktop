@@ -1,17 +1,18 @@
 <script setup lang="ts">
+import { useTemplateRef } from "vue";
 import type { ConversationTurnOutput } from "../../domain/conversation-turn-output";
 import type { ConversationTimelineTurnViewModel } from "../../domain/conversation-timeline";
-import { showConversationItemActions } from "../../domain/conversation-process";
 import ChatActivityRow from "./ChatActivityRow.vue";
 
 defineProps<{ output: ConversationTurnOutput; turn: ConversationTimelineTurnViewModel }>();
 const slots = defineSlots<InstanceType<typeof ChatActivityRow>["$slots"]>();
+const answerRow = useTemplateRef<InstanceType<typeof ChatActivityRow>>("answerRow");
 </script>
 
 <template>
   <section class="chat-turn-output" :aria-label="output.answer ? '模型回答与生成内容' : '生成内容'">
     <div class="chat-turn-output__body">
-      <ChatActivityRow v-if="output.answer" :item="output.answer.item" :turn="turn" :answer-candidate="output.answer.answerCandidate">
+      <ChatActivityRow v-if="output.answer" :key="output.answer.identity" ref="answerRow" :item="output.answer.item" :turn="turn" :answer-candidate="output.answer.answerCandidate">
         <template v-if="slots['structured-answer']" #structured-answer="scope"><slot name="structured-answer" v-bind="scope" /></template>
         <template v-if="slots['artifact-reference']" #artifact-reference="scope"><slot name="artifact-reference" v-bind="scope" /></template>
         <template v-if="slots['attachment-reference']" #attachment-reference="scope"><slot name="attachment-reference" v-bind="scope" /></template>
@@ -26,7 +27,7 @@ const slots = defineSlots<InstanceType<typeof ChatActivityRow>["$slots"]>();
         </ChatActivityRow>
       </div>
     </div>
-    <div v-if="output.answer && slots['item-actions'] && showConversationItemActions(output.answer.item, turn, false, Boolean(slots['structured-answer']))"
+    <div v-if="output.answer && slots['item-actions'] && answerRow?.actionsVisible"
       class="chat-turn-output__actions" role="group" aria-label="模型回答操作">
       <slot name="item-actions" :item="output.answer.item" />
     </div>

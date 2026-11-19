@@ -19,15 +19,15 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ close: [reason?: "selection"]; manage: []; refresh: []; select: [id: string] }>();
 const query = ref("");
-const installed = computed(() => props.entries.filter(entry => entry.installationStatus === "installed"));
+const enabled = computed(() => props.entries.filter(entry => entry.installationStatus === "installed" && entry.enabled));
 const filtered = computed(() => {
   const search = query.value.trim().toLocaleLowerCase();
-  return installed.value.filter(entry => `${entry.displayName} ${entry.description} ${entry.runtimeName}`.toLocaleLowerCase().includes(search));
+  return enabled.value.filter(entry => `${entry.displayName} ${entry.description} ${entry.runtimeName}`.toLocaleLowerCase().includes(search));
 });
 function status(entry: ManagedSkillProjection): string {
   if (props.operations[entry.id]) return "正在同步…";
   return props.operationErrors[entry.id] ?? skillFailureMessage(entry.failureCode) ??
-    (entry.enabled && !entry.runtimeVisible ? "等待同步" : !entry.enabled ? "已停用" : "");
+    (!entry.runtimeVisible ? "等待同步" : "");
 }
 function selected(entry: ManagedSkillProjection): boolean { return props.selectedIds?.includes(entry.id) ?? false; }
 function unavailable(entry: ManagedSkillProjection): boolean { return props.disabled || Boolean(props.operations[entry.id]) || (!selected(entry) && skillSelectionIssue(entry) !== null); }
@@ -55,7 +55,7 @@ onMounted(() => emit("refresh"));
     <p v-if="loading" class="skill-menu__notice" role="status">正在读取技能状态…</p>
     <p v-else-if="refreshing" class="skill-menu__refresh-status" role="status">正在更新技能状态…</p>
     <div v-if="error" class="skill-menu__notice" role="alert"><p>{{ error }}</p><NButton size="small" :disabled="loading || refreshing" @click="$emit('refresh')">重试</NButton></div>
-    <ul v-if="filtered.length" class="skill-menu__list" aria-label="已安装的技能" @keydown="navigate">
+    <ul v-if="filtered.length" class="skill-menu__list" aria-label="已启用的技能" @keydown="navigate">
       <li v-for="entry in filtered" :key="entry.id" :aria-busy="Boolean(operations[entry.id])">
         <button type="button" class="skill-menu__option" role="checkbox" :aria-checked="selected(entry)" :disabled="unavailable(entry)"  @click="select(entry)">
         <img class="skill-menu__icon" :src="skillCardArtwork(entry)" alt="" aria-hidden="true" draggable="false" />
@@ -64,7 +64,7 @@ onMounted(() => emit("refresh"));
         </button>
       </li>
     </ul>
-    <div v-else-if="!loading && !error" class="skill-menu__empty"><span>{{ installed.length ? '没有找到匹配的技能' : '还没有安装技能' }}</span><NButton v-if="query" quaternary @click="query = ''">清空搜索</NButton></div>
+    <div v-else-if="!loading && !error" class="skill-menu__empty"><span>{{ enabled.length ? '没有找到匹配的技能' : '暂无已安装且启用的技能' }}</span><NButton v-if="query" quaternary @click="query = ''">清空搜索</NButton></div>
   </ChatResourcePanel>
 </template>
 

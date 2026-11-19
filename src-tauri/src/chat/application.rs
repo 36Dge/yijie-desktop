@@ -6433,6 +6433,7 @@ impl AuthorizedConversationApplication {
         context: Uuid,
         session: Uuid,
         include_history: bool,
+        include_last_observation: bool,
     ) -> Result<super::context_window_generated::ContextWindowSnapshot, ChatError> {
         self.authorize(context, ChatAction::ReadSessions)?;
         let id = self.application.database.runtime_approval_session_id(session).await?;
@@ -6444,10 +6445,11 @@ impl AuthorizedConversationApplication {
                 model_profile: None,
                 model_revision: 0,
                 sample: None,
+                last_observation: None,
                 compactions: Vec::new(),
             });
         };
-        let result = self.application.host()?.context_window(id, include_history).await.map_err(map_host_error)?;
+        let result = self.application.host()?.context_window(id, include_history, include_last_observation).await.map_err(map_host_error)?;
         self.authorize(context, ChatAction::ReadSessions)?;
         Ok(result)
     }

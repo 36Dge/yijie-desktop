@@ -10,7 +10,7 @@ function distanceFromBottom(element: HTMLElement): number {
   return Math.max(0, element.scrollHeight - element.scrollTop - element.clientHeight);
 }
 
-export function useChatScroll(scrollElement: Ref<HTMLElement | null>) {
+export function useChatScroll(scrollElement: Ref<HTMLElement | null>, contentElement?: Ref<HTMLElement | null>) {
   const following = ref(true);
   const bottomDistance = ref(0);
   const showBottomButton = computed(() => bottomDistance.value > CHAT_BOTTOM_BUTTON_THRESHOLD_PX);
@@ -99,7 +99,7 @@ export function useChatScroll(scrollElement: Ref<HTMLElement | null>) {
       if (!element || !following.value || selectionActive()) return;
       // Automatic follow tracks layout directly. Only the explicit bottom
       // button starts a smooth navigation animation.
-      element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+      if (distanceFromBottom(element) > 1) element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
       navigating = false; previousTop = element.scrollTop;
       bottomDistance.value = distanceFromBottom(element);
     });
@@ -160,12 +160,24 @@ export function useChatScroll(scrollElement: Ref<HTMLElement | null>) {
   }
   function progress() { void followNewContent(); }
   function selectionChanged() { if (selectionActive()) cancelFrame(); else progress(); }
+  // Follow actual layout changes (including the final actions row) once per frame.
+  // Text arriving on the same line does not move the conversation.
+  const observeContent = contentElement && typeof ResizeObserver !== "undefined";
+  if (observeContent) watch(contentElement, (content, _, onCleanup) => {
+    if (!content) return;
+    const resize = new ResizeObserver(() => {
+      if (scrollElement.value) bottomDistance.value = distanceFromBottom(scrollElement.value);
+      progress();
+    });
+    resize.observe(content);
+    onCleanup(() => resize.disconnect());
+  }, { immediate: true, flush: "post" });
   watch(scrollElement, (element, old, onCleanup) => {
     if (element === old) return;
     releaseSubmittedAnchor();
     cancelFrame(); previousTop = element?.scrollTop ?? 0; reading = false; navigating = false; following.value = true;
     if (!element) return;
-    element.addEventListener("chat-content-progress", progress);
+    if (!observeContent) element.addEventListener("chat-content-progress", progress);
     element.addEventListener("wheel", wheel, { passive: true });
     element.addEventListener("keydown", key);
     element.addEventListener("touchstart", touchStart, { passive: true });

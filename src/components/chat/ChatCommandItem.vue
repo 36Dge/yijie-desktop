@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatToolDuration } from "../../domain/chat-ui";
 import { activityItemTitle } from "../../domain/conversation-activity-summary";
 import type { ConversationActivityEntry } from "../../domain/conversation-activity-entry";
 import { computed } from "vue";
@@ -235,7 +236,7 @@ const outputTruncation = computed(() => {
 
 const durationLabel = computed(() => {
   const duration = native.value ? native.value.item.durationMs : legacy.value?.durationMs;
-  return duration == null ? null : formatDuration(duration);
+  return duration == null ? null : formatToolDuration(duration);
 });
 
 function completedOutputSections(output: ConversationCommandOutput): readonly OutputSection[] {
@@ -261,11 +262,6 @@ function truncationReasonLabel(reason: ConversationTruncationReason | null): str
 
 function safeTextTruncation(summary: ConversationSafeText): string | null {
   return summary.truncated ? `摘要已截断；${truncationReasonLabel(summary.truncationReason)}。` : null;
-}
-
-function formatDuration(durationMs: number): string {
-  if (durationMs < 1_000) return `${durationMs} 毫秒`;
-  return `${new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 }).format(durationMs / 1_000)} 秒`;
 }
 
 function forwardDisclosure(change: ChatTimelineDisclosureChange): void {

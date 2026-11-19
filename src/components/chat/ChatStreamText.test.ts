@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
 import { mount } from "@vue/test-utils";
-import { nextTick } from "vue";
+import { h, nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ChatStreamText from "./ChatStreamText.vue";
 import ChatSafeContent from "./ChatSafeContent.vue";
+import ChatTurnGroup from "./ChatTurnGroup.vue";
+import { traceItem, traceTurn } from "../../domain/conversation-activity-fixtures";
 let time = 0; let id = 0;
 const callbacks = new Map<number, FrameRequestCallback>();
 const wrappers: { unmount(): void }[] = [];
@@ -27,6 +29,46 @@ async function drain() {
 }
 const block = (text: string) => [{identity: "body", blockIndex: 0, type: "text" as const, text}];
 describe("message-wide stream presentation", () => {
+  it.each(["final_answer", undefined] as const)("folds the process at the first answer text and waits for the last fade before showing actions (%s)", async phase => {
+    const processItems = [
+      traceItem("opening", "agentMessage", {phase: "commentary", text: "先整理资料。"}),
+      traceItem("summary", "reasoning", {summary: ["整理重点"]}),
+      traceItem("tool", "webSearch", {webSearch: {action: "search", queries: ["资料"]}}),
+    ];
+    const text = "这是正式回答。".repeat(25);
+    const answerTurn = (body: string, live: boolean) => traceTurn([...processItems,
+      traceItem("answer", "agentMessage", {text: body, phase, status: live ? "inProgress" : "completed"}),
+    ], live);
+    const wrapper = mount(ChatTurnGroup, {
+      attachTo: document.body, props: {turn: answerTurn("", true), position: 1},
+      slots: {"item-actions": () => h("button", "回答操作")},
+    });
+    wrappers.push(wrapper);
+    const toggle = wrapper.get(".chat-turn-group__process-toggle");
+    await toggle.trigger("click");
+    await toggle.trigger("click");
+    expect(toggle.attributes("aria-expanded")).toBe("true");
+    await wrapper.setProps({turn: answerTurn(text, true)});
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    for (const selector of [".chat-turn-group__reasoning-summary", ".chat-activity-group", ".chat-turn-group__item--commentary"]) {
+      expect(wrapper.get(selector).isVisible()).toBe(false);
+    }
+    await advance(48);
+    const body = wrapper.get(".chat-safe-content--answer");
+    expect(body.text().length).toBeGreaterThan(0);
+    expect(body.text().length).toBeLessThan(text.length);
+    await toggle.trigger("click");
+    await wrapper.setProps({turn: answerTurn(text, false)});
+    expect(toggle.attributes("aria-expanded")).toBe("true");
+    const footer = ".chat-timeline-item-shell__answer-actions";
+    expect(wrapper.find(footer).exists()).toBe(false);
+    for (let i = 0; i < 500 && body.text() !== text; i++) await advance();
+    expect(body.text()).toBe(text);
+    expect(body.find(".chat-stream-text__fresh").exists()).toBe(true);
+    expect(wrapper.find(footer).exists()).toBe(false);
+    await drain();
+    expect(wrapper.get(footer).text()).toBe("回答操作");
+  });
   it("reveals a burst progressively, keeps its prefix and settles without animation events", async () => {
     const wrapper = mount(ChatStreamText, {props: {text: "前文", streaming: false}}); wrappers.push(wrapper);
     await wrapper.setProps({streaming: true});

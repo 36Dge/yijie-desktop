@@ -60,7 +60,14 @@ export type BuiltinWebRetrievalV1 =
   | WebAdmissionRequest
   | WebAdmissionReceipt
   | WebWorkerInstall
-  | LocalNativeCredential;
+  | LocalNativeCredential
+  | DeepSearchReceipt
+  | WebAdmissionReceiptV2
+  | DeepSearchRequest
+  | DeepSearchResponse
+  | WebWorkerFacts
+  | ClaimFinishV2
+  | WebWorkerEnvelopeV2;
 /**
  * Public HTTP(S) URL. Connector additionally parses authority, rejects userinfo/control characters and local/private literal destinations; no local request to this target is made.
  */
@@ -348,6 +355,60 @@ export interface LocalNativeCredential {
   schema_version: 1;
   run_epoch: string;
   token: string;
+}
+export interface DeepSearchReceipt {
+  version: number;
+  operation_id?: string;
+  relation: "first" | "joined" | "reused";
+  dispatch: "not_dispatched" | "uncertain" | "attempted" | "responded";
+  outcome: "pending" | "results" | "empty" | "partial" | "failed" | "unknown";
+  availability: "pending" | "available" | "unavailable";
+  error_code?:
+    | "invalid_arguments"
+    | "session_expired"
+    | "not_entitled"
+    | "quota_exceeded"
+    | "busy"
+    | "upstream_unavailable"
+    | "timeout"
+    | "no_content"
+    | "response_too_large"
+    | "invalid_response"
+    | "cancelled"
+    | "outcome_unknown"
+    | "operation_conflict"
+    | "operation_expired"
+    | "result_unavailable";
+}
+export interface WebAdmissionReceiptV2 {
+  operation_id: OperationId;
+  root_thread_id: NativeId;
+  root_turn_id: NativeId;
+  deadline_unix_ms: number;
+  scope_id: string;
+}
+export interface DeepSearchRequest {
+  scope_id: string;
+  deadline_unix_ms: number;
+  request: ProOperation;
+}
+export interface DeepSearchResponse {
+  call_id: OperationId;
+  receipt: DeepSearchReceipt;
+  result?: ToolOutput;
+}
+export interface WebWorkerFacts {
+  transport: "uncertain" | "attempted" | "responded";
+  outcome: "results" | "empty" | "partial" | "failed" | "unknown";
+  error_code?: AppErrorCode;
+}
+export interface ClaimFinishV2 {
+  finish: ClaimFinish;
+  facts: WebWorkerFacts;
+}
+export interface WebWorkerEnvelopeV2 {
+  result: ToolOutput;
+  facts: WebWorkerFacts;
 }
 
 export const RETIRED_SERVICE_ID = "kimi-web" as const;

@@ -1,4 +1,12 @@
 import type { ContextWindowSample } from "../api/context-window-client";
+import { modelDefinitions as legacyModels } from "./chat-models.generated";
+import { modelDefinitions as currentModels } from "./chat-models-v2.generated";
+
+const contextModels = [...currentModels, ...legacyModels];
+
+export function contextModelLabel(model: string): string {
+  return contextModels.find(definition => definition.model === model || definition.profile_id === model)?.label ?? model;
+}
 
 export function formatContextTokens(tokens: number): string {
   if (tokens < 1000) return String(tokens);

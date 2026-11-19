@@ -81,7 +81,7 @@ watch(() => [props.identity, props.text], () => { close(); vote.value = null; re
 </template>
 
 <style scoped>
-.chat-answer-actions { display: flex; align-items: center; flex-wrap: wrap; width: fit-content; max-width: 100%; gap: var(--yj-space-1); color: var(--yj-color-text-tertiary); }
+.chat-answer-actions { display: flex; align-items: center; flex-wrap: wrap; width: fit-content; max-width: 100%; gap: var(--yj-space-1) 0; color: var(--yj-color-text-tertiary); }
 .chat-answer-actions__trigger { display: inline-flex; }
 .chat-answer-actions__metadata { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--yj-space-2); margin-inline-start: var(--yj-space-2); min-height: var(--yj-space-8); font-size: var(--yj-font-size-body); line-height: var(--yj-line-height-body); }
 .chat-answer-actions__model { display: inline-flex; align-items: center; gap: var(--yj-space-1); white-space: nowrap; }

@@ -13,7 +13,7 @@ const props = withDefaults(defineProps<{
   items?: readonly ConversationTimelineItemViewModel[];
   disclosureIdentity?: string;
   label?: string;
-  title?: string;
+  heading?: string;
   expanded?: boolean;
   visible: boolean;
   live: boolean;
@@ -80,7 +80,7 @@ onBeforeUnmount(cancelScroll);
   <article class="chat-deep-thinking" :aria-label="label" :aria-busy="live ? 'true' : 'false'">
     <button class="chat-deep-thinking__toggle" type="button" :aria-expanded="expanded" :aria-controls="contentId"
       :aria-label="`${label}，${expanded ? '收起' : '展开'}`" @click="toggle">
-      <span class="chat-deep-thinking__title" ><ChatThinkingIndicator :label="title ?? label" :active="live && thinking === true" :paused="!visible" /></span>
+      <span class="chat-deep-thinking__title"><ChatThinkingIndicator :label="live && thinking ? '正在思考' : label" :active="live && thinking === true" :paused="!visible" /><template v-if="heading"> · {{ heading }}</template></span>
       <YjIcon class="chat-deep-thinking__chevron" :name="expanded ? 'chevronDown' : 'chevronRight'"
         size="xs" :stroke-width="1.5" tone="muted" />
     </button>
@@ -146,7 +146,7 @@ onBeforeUnmount(cancelScroll);
 .chat-deep-thinking__viewport {
   display: grid;
   max-height: var(--yj-layout-chat-thinking-max-height);
-  border-inline-start: var(--yj-border-width) dashed var(--yj-color-border-subtle);
+  border-inline-start: var(--yj-border-width) dashed var(--yj-color-border-default);
   overflow-y: auto;
   overscroll-behavior-y: contain;
   overflow-anchor: none;

@@ -5,6 +5,7 @@ import type { SelectedChatSkill } from "../../domain/chat-skills";
 import type { YjIconName } from "../../icons/registry";
 import { conversationActivityPresentation, traceCurrentStatus, traceIsLive } from "../../domain/conversation-activity-presentation";
 import { groupConversationTurnOutput, type ConversationTurnReadingNode } from "../../domain/conversation-turn-output";
+import { hasUnclassifiedToolContinuation } from "../../domain/conversation-process";
 import { chatTracePresentationKey, createChatTracePresentationStore } from "../../stores/chat-trace-presentation.store";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatActivityGroup from "./ChatActivityGroup.vue";
@@ -44,12 +45,25 @@ provide(chatTracePresentationKey, choices);
 const processId = `${useId()}-trace`;
 const attentionIds = computed(() => new Set(props.turn.items.filter(item => item.approval && ["submitting", "reconciling", "error"].includes(props.approvalTransients[item.approval.approvalRequestId]?.phase ?? "idle")).map(item => item.identity)));
 const nodes = computed(() => conversationActivityPresentation(props.turn, attentionIds.value, Boolean(slots["structured-answer"])));
-const hasProcess = computed(() => Boolean(props.turn.plan) || nodes.value.some(node => node.kind === "activity" || node.kind === "message" && node.process));
-const answerStarted = computed(() => props.turn.items.some(item => item.presentation === "final_answer" && item.contentBlocks.some(block => (block.type === "text" || block.type === "code") && block.text.trim())));
+const answerIdentity = computed<string | undefined>(previous => {
+  const answer = [...nodes.value].reverse().find(node => {
+    if (node.kind === "activity" || node.process) return false;
+    const item = node.item;
+    if (item.presentation !== "final_answer") {
+      // An unphased opening may still be followed by tools. Only use the displayed
+      // answer while it streams, across its completion, or in completed history.
+      if (item.presentation !== "assistant_unclassified" || hasUnclassifiedToolContinuation(item, props.turn.items)) return false;
+      if (!item.busy && props.turn.domainStatus !== "completed" && previous !== item.identity) return false;
+    }
+    return item.contentBlocks.some(block => (block.type === "text" || block.type === "code") && block.text.trim());
+  });
+  return answer?.identity;
+});
 const nativeLiveProgress = computed(() => traceIsLive(props.turn));
 const reasoningSummary = computed(() => conversationReasoningSummary(props.turn, nativeLiveProgress.value));
+const hasProcess = computed(() => Boolean(props.turn.plan || (answerIdentity.value && reasoningSummary.value)) || nodes.value.some(isProcess));
 const reasoningHeader = useActivitySummary(computed(() => ({
-  title: reasoningSummary.value?.title ?? "思考摘要",
+  heading: reasoningSummary.value?.heading,
   key: reasoningSummary.value?.key ?? "empty",
   state: reasoningSummary.value?.state ?? "summary",
 })), () => reasoningSummary.value?.identity ?? `${props.turn.identity}:no-summary`);
@@ -68,10 +82,17 @@ watch(() => [props.turn.identity, props.timingLabel] as const, ([identity, label
   timingObserved.value = previous?.[0] === identity ? timingObserved.value || Boolean(label) : Boolean(label);
 }, {immediate: true, flush: "sync"});
 const preloading = computed(() => nativeLiveProgress.value && !outputObserved.value);
-const processExpanded = computed(() => choices.get(props.turn.identity, nativeLiveProgress.value && !answerStarted.value));
+// Starting the answer closes the pre-answer view once. A reader can then reopen it as text streams.
+const processChoiceKey = computed(() => answerIdentity.value ? `${answerIdentity.value}:turn-process` : props.turn.identity);
+const processExpanded = computed(() => choices.get(processChoiceKey.value, nativeLiveProgress.value && !answerIdentity.value));
+const summaryVisible = computed(() => !hasProcess.value || processExpanded.value);
 const currentStatus = computed(() => traceCurrentStatus(props.turn, props.hasDeliveredArtifact));
 const plan = computed(() => props.turn.plan ? {...props.turn.plan, defaultExpanded: false} : null);
-const processControls = computed(() => nodes.value.filter(isProcess).map(node => `${processId}-${encodeURIComponent(node.identity)}`).concat(plan.value ? [`${processId}-plan`] : []).join(" "));
+const processControls = computed(() => [
+  ...nodes.value.filter(isProcess).map(node => `${processId}-${encodeURIComponent(node.identity)}`),
+  ...(plan.value ? [`${processId}-plan`] : []),
+  ...(reasoningSummary.value ? [`${processId}-reasoning`] : []),
+].join(" "));
 const entries = computed(() => {
   const list: (ConversationTurnReadingNode | {kind: "timing" | "plan" | "reasoning-summary"; identity: string})[] = [...groupConversationTurnOutput(props.turn, nodes.value)];
   const first = list.findIndex(node => node.kind !== "message" || node.item.presentation !== "user_message");
@@ -92,10 +113,10 @@ const entries = computed(() => {
 });
 function isProcess(node: (typeof nodes.value)[number]) { return node.kind === "activity" || node.kind === "message" && node.process; }
 function toggleProcess() {
-  choices.set(props.turn.identity, !processExpanded.value);
+  choices.set(processChoiceKey.value, !processExpanded.value);
   emit("disclosure-change", {itemIdentity: props.turn.identity, expanded: processExpanded.value});
 }
-function preserveProcess() { if (processExpanded.value) choices.set(props.turn.identity, true); }
+function preserveProcess() { if (processExpanded.value) choices.set(processChoiceKey.value, true); }
 function forwardDisclosure(change: ChatTimelineDisclosureChange) { preserveProcess(); emit("disclosure-change", change); }
 const emit = defineEmits<{
   "disclosure-change": [change: ChatTimelineDisclosureChange];
@@ -245,10 +266,10 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
           </button>
           <span v-else>{{ timingLabel || '耗时待确认' }}</span>
         </li>
-        <li v-else-if="node.kind === 'reasoning-summary' && reasoningSummary" class="chat-turn-group__reasoning-summary">
+        <li v-else-if="node.kind === 'reasoning-summary' && reasoningSummary" v-show="summaryVisible" :id="`${processId}-reasoning`" class="chat-turn-group__reasoning-summary">
           <ChatDeepThinking :item="reasoningSummary.items[0]!" :items="reasoningSummary.items" :disclosure-identity="reasoningSummary.identity"
-            label="思考摘要" :title="reasoningHeader.title" :expanded="reasoningExpanded" :visible="true" :live="nativeLiveProgress"
-            :thinking="reasoningSummary.state === 'thinking'" :state-message="reasoningSummary.stateMessage" @disclosure-change="toggleReasoning" />
+            label="思考摘要" :heading="reasoningHeader.heading" :expanded="reasoningExpanded" :visible="summaryVisible" :live="nativeLiveProgress"
+            :thinking="reasoningHeader.state === 'thinking'" :state-message="reasoningSummary.stateMessage" @disclosure-change="toggleReasoning" />
         </li>
         <li v-else-if="node.kind === 'plan' && plan" v-show="processExpanded" :id="`${processId}-plan`" @focusin="preserveProcess" @pointerdown="preserveProcess">
           <ChatTurnPlan :plan="plan" :ended="['completed', 'failed', 'interrupted'].includes(turn.domainStatus)" />
@@ -268,7 +289,7 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
               <ChatActivityRow :item="item" :activity-entry="entry" :turn="turn" process-presentation :visible="visible" :can-decide-approvals="canDecideApprovals" :approval-authority-revision="approvalAuthorityRevision" :approval-transients="approvalTransients" @disclosure-change="forwardDisclosure" @approval-decision="emit('approval-decision', $event)" />
             </template>
           </ChatActivityGroup>
-          <ChatActivityRow v-else :item="node.item" :turn="turn" :answer-candidate="node.answerCandidate" :process-presentation="node.process" :visible="!isProcess(node) || processExpanded" :skill-catalog="skillCatalog" :connector-names="connectorNames" :can-decide-approvals="canDecideApprovals" :approval-authority-revision="approvalAuthorityRevision" :approval-transients="approvalTransients" @disclosure-change="forwardDisclosure" @approval-decision="emit('approval-decision', $event)">
+          <ChatActivityRow v-else :search-calls="node.searchCalls" :item="node.item" :turn="turn" :answer-candidate="node.answerCandidate" :process-presentation="node.process" :visible="!isProcess(node) || processExpanded" :skill-catalog="skillCatalog" :connector-names="connectorNames" :can-decide-approvals="canDecideApprovals" :approval-authority-revision="approvalAuthorityRevision" :approval-transients="approvalTransients" @disclosure-change="forwardDisclosure" @approval-decision="emit('approval-decision', $event)">
             <template v-if="slots['structured-answer']" #structured-answer="slotProps"><slot name="structured-answer" v-bind="slotProps" /></template>
 <template v-if="slots['legacy-records']" #legacy-records="slotProps"><slot name="legacy-records" v-bind="slotProps" /></template>
 <template v-if="slots['artifact-reference']" #artifact-reference="slotProps"><slot name="artifact-reference" v-bind="slotProps" /></template>
@@ -316,6 +337,9 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
   font-variant-numeric: tabular-nums;
+}
+.chat-turn-group--complete .chat-turn-group__timing {
+  font-size: var(--yj-font-size-chat-body);
 }
 .chat-turn-group__timing .chat-turn-group__process-chevron { color: inherit; }
 .chat-turn-group__thinking { display: inline-block; padding-block: var(--yj-space-1); }

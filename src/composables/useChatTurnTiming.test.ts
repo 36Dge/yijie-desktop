@@ -40,19 +40,19 @@ describe("native turn duration", () => {
     expect(read).toHaveBeenCalledTimes(1); wrapper.unmount();
   });
   it("ticks from native start without polling, then freezes to native duration rather than timestamp difference", async () => {
-    vi.useFakeTimers(); vi.setSystemTime(107000);
-    const read = vi.fn().mockResolvedValueOnce(native()).mockResolvedValueOnce(native(51345));
+    vi.useFakeTimers(); vi.setSystemTime(160000);
+    const read = vi.fn().mockResolvedValueOnce(native()).mockResolvedValueOnce(native(81345));
     const { wrapper, turns } = harness(read);
     await flushPromises();
-    expect(wrapper.text()).toContain("已处理 7s");
+    expect(wrapper.text()).toContain("执行 60s");
     await vi.advanceTimersByTimeAsync(1000);
-    expect(wrapper.text()).toContain("已处理 8s");
+    expect(wrapper.text()).toContain("执行 1m1s");
     expect(read).toHaveBeenCalledTimes(1);
     turns.value = [turn("turn", true)]; await flushPromises();
-    expect(wrapper.text()).toContain("已完成 51s");
+    expect(wrapper.text()).toContain("已完成 1m21s");
     await vi.advanceTimersByTimeAsync(60000);
     expect(read).toHaveBeenCalledTimes(2);
-    expect(wrapper.text()).toContain("已完成 51s");
+    expect(wrapper.text()).toContain("已完成 1m21s");
     wrapper.unmount();
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -91,14 +91,26 @@ describe("native turn duration", () => {
     batch.wrapper.unmount();
   });
 
-  it("preserves native zero, missing, invalid and history semantics", () => {
-    expect(turnTimingLabel(native(0), false, 200000, "completed")).toBe("已完成 0s");
-    expect(turnTimingLabel(native(38999), false, 200000, "completed")).toBe("已完成 38s");
+  it.each([
+    [0, "0s"],
+    [38_999, "38s"],
+    [60_000, "60s"],
+    [60_001, "1m0s"],
+    [61_000, "1m1s"],
+    [81_000, "1m21s"],
+    [120_000, "2m0s"],
+    [313_000, "5m13s"],
+    [390_000, "6m30s"],
+    [3_661_000, "61m1s"],
+  ] as const)("formats a live or completed duration of %i ms as %s", (durationMs, expected) => {
+    expect(turnTimingLabel(native(), true, 100_000 + durationMs, "in_progress")).toBe(`执行 ${expected}`);
+    expect(turnTimingLabel(native(durationMs), false, 200000, "completed")).toBe(`已完成 ${expected}`);
+  });
+
+  it("preserves non-completed, missing, invalid and history timing semantics", () => {
     for (const status of ["failed", "interrupted", "unknown", "in_progress"] as const) {
       expect(turnTimingLabel(native(38000), false, 200000, status)).toBe("用时 38秒");
     }
-    expect(turnTimingLabel(native(3661000), false, 200000, "completed")).toBe("已完成 3661s");
-    expect(turnTimingLabel(native(), true, 3761000)).toBe("已处理 3661s");
     expect(turnTimingLabel(native(), false, 200000)).toBeNull();
     expect(turnTimingLabel(native(), true, 99000)).toBeNull();
     expect(turnTimingLabel({ ...native(), started_at: {state: "invalid"} }, true, 200000)).toBeNull();

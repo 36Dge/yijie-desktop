@@ -32,7 +32,7 @@ export function sourceInitial(raw: string): string {
   try { return new URL(raw).hostname.replace(/^www\./, "").charAt(0).toUpperCase() || "W"; }
   catch { return "W"; }
 }
-export function useWebSources(item: () => ConversationTimelineItemViewModel, visible: () => boolean) {
+export function useWebSources(item: () => ConversationTimelineItemViewModel, visible?: () => boolean) {
   const actions = inject(webSourceActionsKey, null);
   const icons = ref<Record<string, string | null>>({});
   const openError = ref<string | null>(null);
@@ -43,7 +43,7 @@ export function useWebSources(item: () => ConversationTimelineItemViewModel, vis
     return {sessionId: record.threadId, turnId: record.turnId, itemId: record.itemId, url};
   }
   watch(() => item().identity, () => { generation++; icons.value = {}; pending.clear(); openError.value = null; });
-  watch([visible, () => item().webSearch?.sources], () => {
+  if (visible) watch([visible, () => item().webSearch?.sources], () => {
     if (!visible() || !actions) return;
     const current = generation;
     for (const source of item().webSearch?.sources ?? []) {

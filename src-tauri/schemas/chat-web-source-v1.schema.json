@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "yijie:desktop:chat-web-source:v1",
-  "description": "Desktop-owned, user-requested access to a search source. The original display URL is only a locator; native must reauthorize the context, resolve exact membership in saved native history and validate HTTP(S) before opening or fetching an icon. open_message_link additionally opens an exact Markdown destination present in the authorized agentMessage text or reasoning summary/content; it does not fetch icons. Existing icon/open search-source membership remains unchanged. No source metadata or history format is changed.",
+  "description": "Desktop-owned access to public HTTP(S) destinations. Native reauthorizes the context and checks the exact URL against the requested item in saved native history. open accepts a webSearch source or a results[].url from the validated SearchSuccess display receipt of yijie_web/kimi_web_search_pro. icon accepts webSearch sources. open_message_link accepts Markdown destinations in agentMessage text or reasoning summary/content.",
   "definitions": {
     "WebSourceTarget": {"type":"object","additionalProperties":false,"required":["sessionId","turnId","itemId","url"],"properties":{"sessionId":{"type":"string","format":"uuid"},"turnId":{"type":"string","format":"uuid"},"itemId":{"type":"string","maxLength":512},"url":{"type":"string","maxLength":8192}}},
     "WebSourcePayload": {"type":"object","additionalProperties":false,"required":["action","target"],"properties":{"action":{"type":"string","enum":["icon","open","open_message_link"]},"target":{"$ref":"#/definitions/WebSourceTarget"}}},

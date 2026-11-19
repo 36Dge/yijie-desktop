@@ -28,7 +28,7 @@
 | `radius-md` | 8px | 按钮、输入框 |
 | `radius-lg` | 12px | 卡片、表格容器 |
 | `radius-xl` | 16px | 弹窗、抽屉、重要容器 |
-| `radius-chat-composer` | 24px | 新任务首页与活跃会话的输入框；不改变普通表单 |
+| `radius-chat-composer` | 24px | 新任务首页与活跃会话的输入框、配套问答卡 |
 | `radius-full` | 999px | 头像、圆形按钮、状态点 |
 
 ## 边框

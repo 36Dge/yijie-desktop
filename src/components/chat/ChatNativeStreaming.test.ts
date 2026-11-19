@@ -63,8 +63,7 @@ describe("FEAT-134 native streaming presentation", () => {
     expect(messageDone.turns[0]).toMatchObject({domainStatus: "in_progress", terminalStatus: null, progress: {phase: "active"}});
     expect(messageDone.turns[0]!.items[0]).toMatchObject({busy: false, domainStatus: "completed", assistantPhase: phase ?? "unknown"});
     expect(copyableTimelineItemText(messageDone.turns[0]!.items[0]!)).toBe("**原始正文**");
-    await wrapper.get('[aria-label="复制文本"]').trigger("click");
-    expect(copied).toEqual(["**原始正文**"]);
+    expect(wrapper.find('[aria-label="复制文本"]').exists()).toBe(false);
     if (phase === "commentary") expect(wrapper.get(".chat-turn-group__progress").text()).toContain("等待模型继续输出");
     else expect(wrapper.find(".chat-turn-group__progress").exists()).toBe(false);
 
@@ -73,6 +72,13 @@ describe("FEAT-134 native streaming presentation", () => {
     expect(turnDone.turns[0]).toMatchObject({domainStatus: "completed", terminalStatus: "completed", progress: null});
     expect(turnDone.turns[0]!.items[0]!.assistantPhase).toBe(phase ?? "unknown");
     expect(wrapper.find(".chat-turn-group__progress").exists()).toBe(false);
+    if (phase === "commentary") {
+      expect(wrapper.find('[aria-label="复制文本"]').exists()).toBe(false);
+    } else {
+      await vi.waitFor(() => expect(wrapper.find('[aria-label="复制文本"]').exists()).toBe(true), {timeout: 2_000});
+      await wrapper.get('[aria-label="复制文本"]').trigger("click");
+      expect(copied).toEqual(["**原始正文**"]);
+    }
     expect(started.items[0]!.item.phase).toBe(phase);
     expect(started.terminalObserved).toBe(false);
     wrapper.unmount();
@@ -167,7 +173,7 @@ it.each([undefined, "final_answer"] as const)("moves from thinking to timed stre
   const view = native({availability: "available", items: [
     {ordinal: 0, lastMethod: "item/completed", item: {id: "user", type: "userMessage", text: "请介绍一下", availability: "available"}},
   ]});
-  const wrapper = mount(ChatTimeline, {attachTo: document.body, props: {timeline: timeline(view, "turn"), turnTimingLabels: {turn: "已处理 2s"}}});
+  const wrapper = mount(ChatTimeline, {attachTo: document.body, props: {timeline: timeline(view, "turn"), turnTimingLabels: {turn: "执行 2s"}}});
   expect(wrapper.get('.chat-thinking').text()).toBe("正在思考");
   expect(wrapper.get('.chat-turn-group__timing').text()).toBe("正在思考");
   expect(wrapper.find('.chat-turn-group__header').exists()).toBe(false);
@@ -179,7 +185,7 @@ it.each([undefined, "final_answer"] as const)("moves from thinking to timed stre
   await wrapper.setProps({timeline: timeline(process, "turn")});
   expect(wrapper.find('.chat-turn-group__thinking .chat-thinking').exists()).toBe(false);
   expect(wrapper.find('.chat-activity-group').exists()).toBe(false);
-  expect(wrapper.get('.chat-turn-group__timing').text()).toBe("已处理 2s");
+  expect(wrapper.get('.chat-turn-group__timing').text()).toBe("执行 2s");
   expect(wrapper.find('.chat-turn-group__process-toggle').exists()).toBe(false);
   expect(wrapper.get('.chat-turn-group__progress').text()).toBe('正在思考');
   const answer: NativeConversationView = {...process, revision: "3", items: [...process.items.map(entry => ({...entry, lastMethod: "item/completed" as const})), {

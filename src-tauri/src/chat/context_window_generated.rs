@@ -6,6 +6,13 @@ where
 {
     <Option<T> as serde::Deserialize<'de>>::deserialize(d)
 }
+fn optional_non_null<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    T::deserialize(d).map(Some)
+}
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContextWindowQuery {
@@ -13,6 +20,13 @@ pub struct ContextWindowQuery {
     pub session_id: String,
     #[serde(rename = "includeHistory")]
     pub include_history: bool,
+    #[serde(
+        rename = "includeLastObservation",
+        default,
+        deserialize_with = "optional_non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub include_last_observation: Option<bool>,
 }
 impl ContextWindowQuery {
     pub fn validate(&self) -> Result<(), &'static str> {
@@ -84,6 +98,32 @@ impl ContextWindowSample {
 }
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ContextWindowObservation {
+    #[serde(rename = "model")]
+    pub model: String,
+    #[serde(rename = "sample")]
+    pub sample: ContextWindowSample,
+}
+impl ContextWindowObservation {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        {
+            let value = &self.model;
+            if value.chars().count() < 1 {
+                return Err("invalid context window");
+            }
+            if value.chars().count() > 128 {
+                return Err("invalid context window");
+            }
+        }
+        {
+            let value = &self.sample;
+            value.validate()?;
+        }
+        Ok(())
+    }
+}
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ContextCompaction {
     #[serde(rename = "item_id")]
     pub item_id: String,
@@ -136,6 +176,13 @@ pub struct ContextWindowSnapshot {
     pub sample: Option<ContextWindowSample>,
     #[serde(rename = "compactions")]
     pub compactions: Vec<ContextCompaction>,
+    #[serde(
+        rename = "last_observation",
+        default,
+        deserialize_with = "optional_non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub last_observation: Option<ContextWindowObservation>,
 }
 impl ContextWindowSnapshot {
     pub fn validate(&self) -> Result<(), &'static str> {
@@ -175,6 +222,9 @@ impl ContextWindowSnapshot {
             for entry in value {
                 entry.validate()?;
             }
+        }
+        if let Some(value) = &self.last_observation {
+            value.validate()?;
         }
         Ok(())
     }

@@ -39,17 +39,12 @@ describe("composer skills panel", () => {
     await wrapper.get('input').setValue('COPYWRITING');
     expect(wrapper.find('[role="checkbox"]').exists()).toBe(true);
   });
-  it("does not select disabled or unsynchronized skills but permits removing a stale selection", async () => {
+  it("hides disabled skills even when previously picked and shows enabled skills waiting for sync", async () => {
     const wrapper = setup([{ ...entry, enabled: false, runtimeVisible: false }]);
-    expect(wrapper.get('[role="checkbox"]').attributes('disabled')).toBeDefined();
-    expect(wrapper.text()).toContain('已停用');
-    await wrapper.get('[role="checkbox"]').trigger('click');
-    expect(wrapper.emitted('select')).toBeUndefined();
-    expect(wrapper.emitted('close')).toBeUndefined();
+    expect(wrapper.find('[role="checkbox"]').exists()).toBe(false);
+    expect(wrapper.get('.skill-menu__empty').text()).toContain('暂无已安装且启用的技能');
     await wrapper.setProps({ selectedIds: ['sample'] });
-    expect(wrapper.get('[role="checkbox"]').attributes('disabled')).toBeUndefined();
-    await wrapper.get('[role="checkbox"]').trigger('click');
-    expect(wrapper.emitted('select')).toEqual([["sample"]]);
+    expect(wrapper.find('[role="checkbox"]').exists()).toBe(false);
     await wrapper.setProps({ selectedIds: [], entries: [{ ...entry, runtimeVisible: false }] });
     expect(wrapper.get('.skill-menu__status').text()).toBe('等待同步');
     expect(wrapper.get('[role="checkbox"]').attributes('disabled')).toBeDefined();
@@ -67,7 +62,7 @@ describe("composer skills panel", () => {
   });
   it("supports recovery and management from empty and failed reads", async () => {
     const wrapper = setup([]);
-    expect(wrapper.text()).toContain('还没有安装技能');
+    expect(wrapper.text()).toContain('暂无已安装且启用的技能');
     await wrapper.get('footer button').trigger('click');
     expect(wrapper.emitted('close')).toEqual([[]]);
     expect(wrapper.emitted('manage')).toEqual([[]]);
@@ -95,7 +90,7 @@ describe("composer skills panel", () => {
     const empty = wrapper.get('.skill-menu__empty').element;
     await wrapper.setProps({ refreshing: true });
     expect(wrapper.get('.skill-menu__empty').element).toBe(empty);
-    expect(wrapper.text()).toContain('还没有安装技能');
+    expect(wrapper.text()).toContain('暂无已安装且启用的技能');
     await wrapper.setProps({ loading: true, refreshing: false });
     expect(wrapper.get('.skill-menu__notice[role="status"]').text()).toContain('正在读取技能状态');
     expect(wrapper.find('.skill-menu__empty').exists()).toBe(false);

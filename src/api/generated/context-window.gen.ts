@@ -28,6 +28,7 @@ export interface components {
             /** Format: uuid */
             sessionId: string;
             includeHistory: boolean;
+            includeLastObservation?: boolean;
         };
         ContextWindowSample: {
             /**
@@ -52,6 +53,11 @@ export interface components {
              */
             observed_at: string;
         };
+        /** @description Last measured native model and its complete sample in the same thread and context. Its capacity belongs to the measured model. */
+        ContextWindowObservation: {
+            model: string;
+            sample: components["schemas"]["ContextWindowSample"];
+        };
         /** @description Original native contextCompaction identity. This native item does not distinguish summarization from new_context; display neutral context-update copy, never invent assistant text/phase or an automatic/manual cause. */
         ContextCompaction: {
             item_id: string;
@@ -68,6 +74,7 @@ export interface components {
             model_revision: number;
             sample: components["schemas"]["ContextWindowSample"] | null;
             compactions: components["schemas"]["ContextCompaction"][];
+            last_observation?: components["schemas"]["ContextWindowObservation"];
         };
     };
     responses: never;
@@ -82,6 +89,8 @@ export interface operations {
         parameters: {
             query?: {
                 include_history?: boolean;
+                /** @description Opt in to the last verified measurement for this conversation when the current model binding has no sample. Omitted or false keeps the original closed response. */
+                include_last_observation?: boolean;
             };
             header?: never;
             path: {

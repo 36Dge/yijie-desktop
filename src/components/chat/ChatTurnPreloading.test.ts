@@ -62,19 +62,19 @@ describe("first-content loading feedback", () => {
     await flushPromises();
     expect(wrapper.find(".chat-turn-group__thinking .chat-thinking").exists()).toBe(false);
     expect(wrapper.get(".chat-turn-group__timing").element).toBe(row);
-    expect(row.textContent).toBe("已处理 3s");
+    expect(row.textContent).toBe("执行 3s");
     expect(wrapper.get(".chat-turn-group__timing").find('[aria-live]').exists()).toBe(false);
     await vi.advanceTimersByTimeAsync(1000);
-    expect(row.textContent).toBe("已处理 4s");
+    expect(row.textContent).toBe("执行 4s");
 
     const answer: NativeConversationView["items"][number] = { ordinal: 2, lastMethod: "item/started",
       item: { id: "answer", type: "agentMessage", phase: "final_answer", text: "可以先尝小笼。", availability: "available" } };
     native.value = view([...native.value.items, answer]);
     await flushPromises();
-    expect(wrapper.find('.chat-turn-group__process-toggle').exists()).toBe(false);
+    expect(wrapper.get('.chat-turn-group__process-toggle').attributes('aria-expanded')).toBe('false');
     native.value = view(native.value.items.map(item => ({ ...item, lastMethod: "item/completed" })));
     await flushPromises();
-    expect(row.textContent).toBe("已处理 4s"); // Item completion does not complete the Turn.
+    expect(row.textContent).toBe("执行 4s"); // Item completion does not complete the Turn.
 
     native.value = { ...native.value, status: "completed", terminalObserved: true };
     await flushPromises();
@@ -90,19 +90,19 @@ describe("first-content loading feedback", () => {
   it.each(["commentary", "final_answer", undefined] as const)("waits for actual text in an empty %s Item", async phase => {
     const item: NativeConversationView["items"][number] = { ordinal: 1, lastMethod: "item/started",
       item: { id: "answer", type: "agentMessage", phase, text: "  ", availability: "available" } };
-    const wrapper = mount(ChatTimeline, { props: { timeline: timeline(view([user, item])), turnTimingLabels: { turn: "已处理 2s" } } });
+    const wrapper = mount(ChatTimeline, { props: { timeline: timeline(view([user, item])), turnTimingLabels: { turn: "执行 2s" } } });
     expect(wrapper.get(".chat-turn-group__timing").text()).toBe("正在思考");
     await wrapper.setProps({ timeline: timeline(view([user, { ...item, item: { ...item.item, text: "开始输出" } }])) });
     expect(wrapper.find(".chat-turn-group__thinking .chat-thinking").exists()).toBe(false);
-    expect(wrapper.get(".chat-turn-group__timing").text()).toBe("已处理 2s");
+    expect(wrapper.get(".chat-turn-group__timing").text()).toBe("执行 2s");
   });
 
   it("hands off to actual tool progress even before an assistant message arrives", async () => {
-    const wrapper = mount(ChatTimeline, { props: { timeline: timeline(view()), turnTimingLabels: { turn: "已处理 2s" } } });
+    const wrapper = mount(ChatTimeline, { props: { timeline: timeline(view()), turnTimingLabels: { turn: "执行 2s" } } });
     await wrapper.setProps({ timeline: timeline(view([user, { ordinal: 1, lastMethod: "item/started",
       item: { id: "search", type: "webSearch", webSearch: { action: "search", queries: ["杭州美食"] }, availability: "available" } }])) });
     expect(wrapper.find(".chat-turn-group__thinking .chat-thinking").exists()).toBe(false);
-    expect(wrapper.get(".chat-turn-group__timing").text()).toBe("已处理 2s");
+    expect(wrapper.get(".chat-turn-group__timing").text()).toBe("执行 2s");
     expect(wrapper.get(".chat-web-search").attributes("aria-busy")).toBe("true");
     expect(wrapper.get(".chat-web-search__toggle").text()).toContain("网页搜索杭州美食");
   });
@@ -117,10 +117,10 @@ describe("first-content loading feedback", () => {
     const output = view([user, { ordinal: 1, lastMethod: "item/started", item: {
       id: "reasoning", type: "reasoning", content: ["先核对信息。"], summary: [], availability: "available",
     } }]);
-    const wrapper = mount(ChatTimeline, { props: { timeline: timeline(output), turnTimingLabels: { turn: "已处理 3s" } } });
+    const wrapper = mount(ChatTimeline, { props: { timeline: timeline(output), turnTimingLabels: { turn: "执行 3s" } } });
     await wrapper.setProps({ timeline: timeline(view()) });
     expect(wrapper.find(".chat-turn-group__thinking .chat-thinking").exists()).toBe(false);
-    expect(wrapper.get(".chat-turn-group__timing").text()).toBe("已处理 3s");
+    expect(wrapper.get(".chat-turn-group__timing").text()).toBe("执行 3s");
   });
 
   it("does not animate cold history, unavailable observations or ended turns", () => {

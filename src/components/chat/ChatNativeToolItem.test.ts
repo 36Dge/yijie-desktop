@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
-import type { NativeConversationView } from "../../api/generated/native-conversation-private.gen";
+import { describe, expect, it, vi } from "vitest";
+import { webSourceActionsKey, type WebSourceActions } from "../../composables/useWebSources";
+import type { NativeConversationView, NativeItem } from "../../api/generated/native-conversation-private.gen";
 import { composeConversationView } from "../../domain/conversation-view";
 import { selectConversationTimeline } from "../../domain/conversation-timeline";
 import ChatNativeToolItem from "./ChatNativeToolItem.vue";
@@ -16,7 +17,75 @@ function fixture(terminal=false) {
   return {item,execution:item.execution};
 }
 
+function renderDeepSearch(mcp: NonNullable<NativeItem["mcp"]>, fields: Partial<NativeItem> = {}, actions?: WebSourceActions) {
+  const item = traceTurn([traceItem("deep-search", "mcpToolCall", {
+    argumentsSummary: "杭州天气", durationMs: 8333, ...fields,
+    mcp: { ...mcp, server: "yijie_web", tool: "kimi_web_search_pro" },
+  })]).items[0]!;
+  if (item.execution?.kind !== "tool" || !("native" in item.execution)) throw new Error("missing native execution");
+  return mount(ChatNativeToolItem, { props: { item, execution: item.execution, processPresentation: true },
+    global: {provide: actions ? {[webSourceActionsKey as symbol]: actions} : {}} });
+}
+
 describe("native Tool display",()=>{
+  it("shows only recorded status and duration for a metadata-only deep search", () => {
+    const wrapper = renderDeepSearch({resultKind: "omitted", texts: [], diagnostics: ["arguments_unavailable", "result_unavailable"]},
+      {availability: "partial", argumentsSummary: "参数不可展示"});
+    expect(wrapper.text()).toBe("网页深度搜索已完成 · 8.3 秒");
+    expect(wrapper.find("button, [role=note], .chat-timeline-item-shell__body").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("keeps source order across expansion and opens the selected result's recorded URL", async () => {
+    const results = Array.from({length: 5}, (_, index) => ({
+      title: `天气资料 ${index + 1}`, url: `https://example.org/${index}`, snippet: `摘要 ${index + 1}`,
+    }));
+    const actions = {open: vi.fn(async () => {}), icon: vi.fn(async () => null)};
+    const wrapper = renderDeepSearch({resultKind: "text", diagnostics: [],
+      texts: [{index: 0, text: JSON.stringify({results, truncated: false})}]}, {}, actions);
+    const toggle = wrapper.get(".chat-timeline-item-shell__disclosure");
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    expect(toggle.text()).toContain("网页深度搜索 · 杭州天气");
+    expect(toggle.text()).toContain("5 条结果");
+    await toggle.trigger("click");
+    expect(wrapper.get(".native-tool__query").text()).toContain("杭州天气");
+    expect(wrapper.findAll(".web-result__rows li")).toHaveLength(3);
+    const more = wrapper.get(".web-result__more");
+    expect(more.text()).toBe("查看另外 2 条");
+    await more.trigger("click");
+    expect(wrapper.findAll(".native-tool strong").map(row => row.text())).toEqual(results.map(row => row.title));
+    const links = wrapper.findAll(".web-result__rows a");
+    expect(links.map(link => link.attributes("href"))).toEqual(results.map(row => row.url));
+    expect(links[4]!.text()).toBe("example.org");
+    expect(actions.open).not.toHaveBeenCalled();
+    expect(actions.icon).not.toHaveBeenCalled();
+    await links[4]!.trigger("click");
+    expect(actions.open).toHaveBeenCalledExactlyOnceWith({
+      sessionId: "trace-session", turnId: "trace-turn", itemId: "deep-search", url: results[4]!.url,
+    });
+    expect(wrapper.text()).toContain("摘要 5");
+    expect(wrapper.text()).toContain("耗时 8.3 秒");
+    expect(wrapper.find("img, iframe, pre, .chat-copy-action").exists()).toBe(false);
+    await more.trigger("click");
+    expect(wrapper.findAll(".web-result__rows li")).toHaveLength(3);
+    wrapper.unmount();
+  });
+
+  it.each([
+    ['{"results":[],"truncated":false}', "未找到相关网页。", true],
+    ['{"results":[],"truncated":true}', "部分搜索结果未完整展示。", false],
+    ['{"error":{"code":"quota_exceeded","message":"网页检索额度已用尽。"}}', "网页检索额度已用尽。", false],
+    ["历史结果详情不可用", "本次搜索的结果详情不可用。", false],
+  ] as const)("distinguishes real empty results, partial results, errors and missing content (%s)", async (text, expected, empty) => {
+    const wrapper = renderDeepSearch({resultKind: "text", texts: [{index: 0, text}], diagnostics: []},
+      {status: text.includes("quota_exceeded") ? "failed" : "completed"});
+    await wrapper.get(".chat-timeline-item-shell__disclosure").trigger("click");
+    expect(wrapper.text()).toContain(expected);
+    expect(wrapper.text().includes("0 条结果")).toBe(empty);
+    expect(wrapper.find("pre").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("reuses the retrieval presentation for builtin native MCP results",async()=>{
     const text=JSON.stringify({results:[{title:"公开资料",url:"https://example.com/docs",snippet:"普通检索材料"}],truncated:false});
     const raw=traceItem("builtin-web","mcpToolCall",{status:"completed",toolLabel:"yijie_web / kimi_web_search",mcp:{server:"yijie_web",tool:"kimi_web_search",resultKind:"text",texts:[{index:0,text}],diagnostics:[]}});

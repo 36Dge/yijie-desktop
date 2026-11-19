@@ -20,11 +20,13 @@ const props = withDefaults(defineProps<{
   processPresentation?: boolean;
   answerCandidate?: boolean;
   defaultExpanded?: boolean;
+  showAvailability?: boolean;
 }>(), {
   statusTone: "muted",
   collapsible: false,
   processPresentation: false,
   defaultExpanded: true,
+  showAvailability: true,
 });
 
 const emit = defineEmits<{
@@ -32,8 +34,8 @@ const emit = defineEmits<{
 }>();
 
 const slots = defineSlots<{
-  default(): unknown;
-  actions(): unknown;
+  default?(): unknown;
+  actions?(): unknown;
 }>();
 
 const expansionChoice = ref<boolean | null>(null);
@@ -89,7 +91,7 @@ function toggle(): void {
     :aria-describedby="item.role === 'user' || plainProcess || hideNormalAnswerStatus ? undefined : statusId"
     :aria-busy="busy ? 'true' : 'false'"
   >
-    <p v-if="!availabilityInDetails && item.role !== 'user' && item.availability && item.availability !== 'available'" class="chat-timeline-item-shell__availability" role="note">
+    <p v-if="showAvailability && !availabilityInDetails && item.role !== 'user' && item.availability && item.availability !== 'available'" class="chat-timeline-item-shell__availability" role="note">
       {{ availabilityText }}
     </p>
     <header v-if="item.role !== 'user' && !plainProcess && !hideNormalAnswerStatus" class="chat-timeline-item-shell__header">
@@ -144,11 +146,11 @@ function toggle(): void {
     </header>
 
     <div
-      v-if="!collapsible || expanded"
+      v-if="(slots.default || (showAvailability && availabilityInDetails)) && (!collapsible || expanded)"
       :id="contentId"
       class="chat-timeline-item-shell__body"
     >
-      <p v-if="availabilityInDetails" class="chat-timeline-item-shell__availability" role="note">{{ availabilityText }}</p>
+      <p v-if="showAvailability && availabilityInDetails" class="chat-timeline-item-shell__availability" role="note">{{ availabilityText }}</p>
       <slot />
     </div>
 
