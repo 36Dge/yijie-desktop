@@ -321,6 +321,7 @@
   --yj-layout-chat-stop-square-size: 9.5px;
   --yj-layout-permission-menu-width: 320px;
   --yj-layout-model-menu-width: 240px;
+  --yj-layout-model-label-width: 7em;
   --yj-layout-permission-confirm-width: 420px;
   --yj-layout-full-access-confirm-width: 480px;
   --yj-color-full-access-overlay: rgba(0, 0, 0, 0.15);

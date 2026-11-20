@@ -38,7 +38,7 @@ import ChatWorkspaceControl from "../../components/chat/ChatWorkspaceControl.vue
 import ChatSidebarTree from "../../components/chat/ChatSidebarTree.vue";
 import { chatWorkspaceClient } from "../../api/chat-workspace-client";
 import ChatModelControl from "../../components/chat/ChatModelControl.vue";
-import { chatModelClient, chatModelsEnabled, kimiK31Candidate } from "../../api/chat-model-client";
+import { chatModelClient, chatModelsEnabled, kimiK31Candidate, type ModelState } from "../../api/chat-model-client";
 import { modelDefinitions } from "../../domain/chat-models.generated";
 import ChatTimeline from "../../components/chat/ChatTimeline.vue";
 import {
@@ -659,6 +659,63 @@ describe("FEAT-126 ChatPage", () => {
     control.vm.$emit("select", "kimi-k3-max-v1");
     await flushPromises();
     expect(select).not.toHaveBeenCalled();
+  });
+
+  it.skipIf(!chatModelsEnabled || !kimiK31Candidate)("holds the model label and send button through a pending model switch", async () => {
+    const { modelDefinitions: current } = await import("../../domain/chat-models-v2.generated");
+    vi.spyOn(chatModelClient, "catalog").mockResolvedValue({ schema_version: 2, default_profile: "kimi-k3-1-pro-max-v1", models: current.map(profile => ({ profile, available: true, reason: "ready" })) });
+    vi.spyOn(chatModelClient, "state").mockResolvedValue({ profileId: "kimi-k3-1-pro-max-v1", revision: 0, state: "ready" });
+    let confirm!: (result: ModelState) => void;
+    vi.spyOn(chatModelClient, "select").mockImplementation(() => new Promise(resolve => { confirm = resolve; }));
+    const { wrapper } = await mountPage(`/chat/${SESSION_ID}`, true);
+    try {
+      const composer = wrapper.getComponent(ChatComposer);
+      const textarea = composer.get("textarea");
+      const send = composer.get<HTMLButtonElement>(".chat-composer__send");
+      const trigger = composer.get(".model-trigger");
+      await textarea.setValue("继续当前草稿");
+      expect(send.element.disabled).toBe(false);
+      await trigger.trigger("click");
+      await flushPromises();
+      const menu = new DOMWrapper(document.querySelector(".model-menu")!);
+      await menu.findAll('button[role="menuitemradio"]').find(option => option.text() === "MiniMax-M3")!.trigger("click");
+      expect(trigger.text()).toBe("Kimi K3.1 Pro");
+      expect(trigger.attributes("aria-busy")).toBe("true");
+      expect(send.element.disabled).toBe(true);
+      expect(send.attributes("aria-busy")).toBe("true");
+      send.element.click();
+      await textarea.trigger("keydown", { key: "Enter" });
+      expect(composer.emitted("submit")).toBeUndefined();
+      await textarea.setValue("");
+      expect(send.attributes("aria-busy")).toBeUndefined();
+      expect(send.element.disabled).toBe(true);
+      await textarea.setValue("继续当前草稿");
+      confirm({ profileId: "minimax-m3-high-v1", revision: 1, state: "ready" });
+      await flushPromises();
+      expect(trigger.text()).toBe("MiniMax-M3");
+      expect(composer.get(".chat-composer__send").element).toBe(send.element);
+      expect(send.attributes("aria-busy")).toBeUndefined();
+      expect(send.element.disabled).toBe(false);
+    } finally { wrapper.unmount(); }
+  });
+
+  it.skipIf(!chatModelsEnabled || !kimiK31Candidate)("keeps model recovery beside its error and waits for an explicit retry", async () => {
+    const { modelDefinitions: current } = await import("../../domain/chat-models-v2.generated");
+    vi.spyOn(chatModelClient, "catalog").mockResolvedValue({ schema_version: 2, default_profile: "kimi-k3-1-pro-max-v1", models: current.map(profile => ({ profile, available: true, reason: "ready" })) });
+    const pending = { operationId: crypto.randomUUID(), profileId: "minimax-m3-high-v1" as const, expectedRevision: 1, recoveryAvailable: true };
+    vi.spyOn(chatModelClient, "state").mockResolvedValue({ profileId: "kimi-k3-max-v1", revision: 1, state: "unknown", pending });
+    const recover = vi.spyOn(chatModelClient, "recover").mockResolvedValue({ profileId: pending.profileId, revision: 2, state: "ready" });
+    const { wrapper } = await mountPage(`/chat/${SESSION_ID}`, true);
+    try {
+      const retry = wrapper.get('.chat-workspace__composer-error[role="alert"] button');
+      expect(retry.text()).toBe("恢复原切换");
+      expect(recover).not.toHaveBeenCalled();
+      await retry.trigger("click");
+      await flushPromises();
+      expect(recover).toHaveBeenCalledOnce();
+      expect(wrapper.get(".model-trigger").text()).toBe("MiniMax-M3");
+      expect(wrapper.find('.chat-workspace__composer-error[role="alert"]').exists()).toBe(false);
+    } finally { wrapper.unmount(); }
   });
 
   it.skipIf(!chatModelsEnabled)("resets the model when leaving a discarded new scheduled draft", async () => {

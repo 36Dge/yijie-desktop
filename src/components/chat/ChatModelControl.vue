@@ -12,10 +12,8 @@ const props = defineProps<{
   disabledReason?: string;
   loading: boolean;
   saving: boolean;
-  error: string;
-  retryLabel?: string;
 }>();
-const emit = defineEmits<{ select: [id: ProfileId]; retry: [] }>();
+const emit = defineEmits<{ select: [id: ProfileId] }>();
 const overlay = ref<HTMLElement | null>(null);
 const open = ref(false);
 const trigger = ref<HTMLButtonElement | null>(null);
@@ -31,7 +29,9 @@ const upcomingModels: readonly { label: string; icon: YjIconName }[] = [
   { label: "GLM-5.3", icon: "modelGlm" },
 ];
 const selected = computed(() => props.profile ? presentation[props.profile] : null);
-const label = computed(() => props.saving ? "正在切换模型…" : props.loading ? "模型加载中" : selected.value ? `${selected.value.label}${props.catalog?.schema_version === 2 && props.profile === "kimi-k3-max-v1" ? "（已退役）" : ""}` : "模型待识别");
+const busyLabel = computed(() => props.saving ? "正在切换模型…" : props.loading ? "模型加载中" : "");
+const label = computed(() => selected.value?.label ?? (busyLabel.value || "模型待识别"));
+const retired = computed(() => props.catalog?.schema_version === 2 && props.profile === "kimi-k3-max-v1");
 const selectedAvailability = computed(() => props.catalog?.models.find((entry) => entry.profile.profile_id === props.profile));
 const unavailable = computed(() => selectedAvailability.value?.available === false);
 function unavailableLabel(reason?: string): string {
@@ -71,10 +71,17 @@ function key(event: KeyboardEvent): void {
   <NPopover :to="overlay ?? false" v-model:show="open" trigger="click" placement="top-end" :show-arrow="false" :disabled="blocked" raw>
     <template #trigger>
       <span class="chat-control-anchor">
-        <button ref="trigger" class="model-trigger yj-control yj-control--pill" type="button" :disabled="blocked" :aria-label="`选择对话模型，当前 ${label}`" :aria-description="blocked ? disabledReason : undefined" :aria-expanded="open" aria-haspopup="menu" @keydown.stop @keydown.down.prevent="open = !blocked" @keydown.esc="open = false">
-          <span class="model-brand model-trigger-brand" :class="{ 'is-kimi': selected?.icon === 'modelKimi' }"><YjIcon :name="selected?.icon ?? 'assistant'" size="sm" /></span>
-          <span class="model-trigger-label">{{ label }}</span>
-          <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
+        <button ref="trigger" class="model-trigger yj-control yj-control--pill" type="button"
+          :disabled="blocked" :aria-busy="!!busyLabel || undefined"
+          :aria-label="`选择对话模型，当前 ${label}${retired ? '（已退役）' : ''}`"
+          :aria-description="busyLabel || (disabled ? disabledReason : undefined)"
+          :aria-expanded="open" aria-haspopup="menu"
+          @keydown.stop @keydown.down.prevent="open = !blocked" @keydown.esc="open = false">
+          <span class="model-brand model-trigger-brand" :class="{ 'is-kimi': selected?.icon === 'modelKimi' }">
+            <YjIcon :name="selected?.icon ?? 'assistant'" size="sm" />
+          </span>
+          <span class="model-trigger-label">{{ label }}<small v-if="retired" class="model-retired">已退役</small></span>
+          <YjIcon class="yj-control__chevron" :name="busyLabel ? 'pending' : 'chevronDown'" size="xs" tone="muted" />
         </button>
       </span>
     </template>
@@ -91,8 +98,7 @@ function key(event: KeyboardEvent): void {
       </button>
     </div>
   </NPopover>
-  <button v-if="error"  class="model-retry yj-control" type="button" :disabled="saving || disabled"  :aria-label="retryLabel ?? '重试模型操作'" @click="emit('retry')">{{ retryLabel ?? "重试" }}</button>
-  <span class="sr-only" role="status">{{ error || (unavailable ? unavailableLabel(selectedAvailability?.reason) : '') }}</span>
+  <span class="model-status" role="status">{{ busyLabel || (unavailable ? unavailableLabel(selectedAvailability?.reason) : '') }}</span>
 </template>
 
 <style scoped>
@@ -109,12 +115,18 @@ function key(event: KeyboardEvent): void {
 }
 .model-trigger-label,
 .model-trigger > .yj-control__chevron { display: var(--chat-composer-control-label-display, inline-flex); }
+.model-trigger-label {
+  inline-size: var(--yj-layout-model-label-width);
+  align-items: center;
+  gap: var(--yj-space-1);
+}
+.model-retired { font-size: var(--yj-font-size-caption); }
 .model-trigger:hover:not(:disabled),
 .model-trigger[aria-expanded="true"] { background: var(--yj-color-control-hover); }
 .model-trigger:active:not(:disabled) { background: var(--yj-color-control-pressed); }
 .model-trigger:disabled { color: var(--yj-color-text-disabled); cursor: default; }
-.model-trigger:focus-visible,
-.model-retry:focus-visible {
+.model-trigger[aria-busy="true"] { color: var(--yj-color-text-primary); cursor: progress; }
+.model-trigger:focus-visible {
   outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-focus-ring-width);
 }
@@ -140,5 +152,12 @@ function key(event: KeyboardEvent): void {
 .model-menu [aria-checked="true"] .model-option-label { font-weight: var(--yj-font-weight-semibold); }
 .model-option-status { font-size: var(--yj-font-size-caption); }
 .model-menu-empty { display: block; padding: var(--yj-space-3); color: var(--yj-color-text-secondary); }
-.model-retry { color: var(--yj-color-semantic-warning-ink); }
+.model-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 </style>

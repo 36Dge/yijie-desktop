@@ -38,6 +38,7 @@ const props = withDefaults(defineProps<{
   activeProjectName?: string | null;
   readiness: ChatUiNotice;
   canSend: boolean;
+  waitingForModel?: boolean;
   canAttach: boolean;
   submissionState: ChatComposerSubmissionState;
   streaming: boolean;
@@ -151,14 +152,15 @@ const submissionBusy = computed(() => props.submissionState !== "idle");
 const selectionRemovalDisabled = computed(() =>
   submissionBusy.value || props.streaming || props.textLocked || !props.canSend,
 );
-const sendDisabled = computed(() =>
-  submissionBusy.value || props.streaming || !props.canSend || validationMessage.value !== null ||
+const draftBlocksSend = computed(() =>
+  submissionBusy.value || props.streaming || validationMessage.value !== null ||
   props.attachmentImporting || props.attachmentImportAttempt !== null ||
   props.attachments.some((attachment) => attachment.status !== "ready") ||
   (!props.textOnly && props.connectors.some((connector) => Boolean(connector.unavailableReason))) ||
   (!props.textOnly && props.skills.some((skill) => Boolean(skill.unavailableReason))) ||
   attachmentConstraintMessage.value !== null,
 );
+const sendDisabled = computed(() => !props.canSend || props.waitingForModel || draftBlocksSend.value);
 const sendLabel = computed(() => {
   if (props.submissionState === "validating") return "正在验证任务";
   if (props.submissionState === "submitting") return "正在提交任务";
@@ -586,6 +588,7 @@ function handlePaste(event: ClipboardEvent): void {
             class="chat-composer__send"
             type="button"
             :disabled="sendDisabled"
+            :aria-busy="waitingForModel && !draftBlocksSend || undefined"
             :aria-label="sendLabel"
 
             @click="submit"
@@ -1088,9 +1091,10 @@ function handlePaste(event: ClipboardEvent): void {
 }
 
 .chat-composer__send :deep(.yj-icon) { color: inherit; }
-.chat-composer__send:hover:not(:disabled) { background: var(--yj-color-brand-hover); }
+.chat-composer__send:hover:is(:enabled, [aria-busy="true"]) { background: var(--yj-color-brand-hover); }
 .chat-composer__send:active:not(:disabled):not(.chat-composer__send--stop) { background: var(--yj-color-brand-active); }
-.chat-composer__send:disabled { color: var(--yj-color-text-disabled); background: var(--yj-color-control-disabled-bg); cursor: not-allowed; }
+.chat-composer__send:disabled:not([aria-busy="true"]) { color: var(--yj-color-text-disabled); background: var(--yj-color-control-disabled-bg); cursor: not-allowed; }
+.chat-composer__send[aria-busy="true"] { opacity: 1; cursor: progress; }
 .chat-composer__send--stop { color: var(--yj-color-bg-card); background: var(--yj-color-text-primary); }
 .chat-composer__send--stop:hover:not(:disabled) { background: var(--yj-color-text-secondary); }
 .chat-composer__send--stop:active:not(:disabled) { background: var(--yj-color-text-tertiary); }

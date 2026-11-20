@@ -25,7 +25,7 @@ const controls = [
   {
     name: "model", panel: ".model-menu",
     setup: () => () => h(ChatModelControl, {
-      catalog: null, profile: null, disabled: false, loading: false, saving: false, error: "",
+      catalog: null, profile: null, disabled: false, loading: false, saving: false,
     }),
   },
   {

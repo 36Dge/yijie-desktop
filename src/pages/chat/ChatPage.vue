@@ -583,6 +583,12 @@ const models = useChatModels(() => chatStore.context?.contextId ?? null, () => r
   get: () => isNewDraftMode.value ? sharedDrafts.planProfile : sharedDrafts.newProfile,
   set: profile => { if (isNewDraftMode.value) sharedDrafts.planProfile = profile; else sharedDrafts.newProfile = profile; },
 } : undefined);
+const composerSendReadiness = computed(() => {
+  const workspaceReady = isSessionRoute.value || (workspaceSelectionValid.value && !workspacePicker.creating.value);
+  const canSubmit = isDraftMode.value ? draft.canSubmit.value
+    : normalPurposeReady.value && chatStore.canSend && permissionCanSend.value && expertSendReady.value;
+  return workspaceReady && canSubmit ? models.readiness.value : "unavailable";
+});
 const contextWindow = useContextWindow(
   () => runtimePermissionsEnabled && chatStore.hasAction("read_sessions") && chatStore.selectedAccessMode === "live" ? chatStore.context?.contextId ?? null : null,
   () => routeSessionId.value === chatStore.selectedSessionId ? routeSessionId.value : null,
@@ -1391,7 +1397,10 @@ onBeforeUnmount(() => {
       <p v-if="!isDraftMode && runtimePermissionsEnabled && permissions.error.value" class="chat-workspace__composer-error" role="alert">{{ permissions.error.value }} <button type="button" @click="permissions.refresh">重试</button></p>
       <p v-if="!isDraftMode && !workspaceSelectionValid" class="chat-workspace__composer-error" role="alert">所选工作空间已不可用，请重新选择或取消工作空间后发送。</p>
       <ScheduledDraftPanel v-if="isDraftMode" ref="draftPanel" :model="draft" @accepted="openDraftConversation" @view-plan="viewDraftPlan" @recover="recoverDraft" />
-      <p v-if="chatModelsEnabled && models.error.value" class="chat-workspace__composer-error" role="alert">{{ models.error.value }}</p>
+      <p v-if="chatModelsEnabled && models.error.value" class="chat-workspace__composer-error" role="alert">
+        {{ models.error.value }}
+        <button type="button" class="yj-control" :disabled="modelBlocked || models.saving.value" @click="models.retry">{{ models.retryLabel.value }}</button>
+      </p>
       <p v-if="expertNotice" class="chat-workspace__composer-error" role="status">{{ expertNotice }} <button type="button" class="yj-control" :disabled="submitting" @click="refreshExpert">{{ expertSubmission ? "确认原提交" : "重新读取" }}</button><template v-if="expertRecoveryOperation">恢复会重新应用原选择，不发送消息。<button type="button" class="yj-control" :disabled="expertRecoveryBlocked" @click="recoverExpertBinding">恢复原操作</button></template></p>
       <p v-if="uncertainLocalSubmission" class="chat-workspace__composer-error" role="status">原提交结果尚未确认，请勿重复发送。<button type="button" class="yj-control" :disabled="submitting || chatStore.phase === 'resyncing' || !chatStore.hasAction('read_sessions')" @click="chatStore.resyncSelected">重新读取原提交</button></p>
       <ChatDeliveryControl v-if="kimiK31Candidate && chatModelsEnabled && !isDraftMode && normalPurposeReady && routeSessionId && chatStore.hasAction('read_sessions')" :states="delivery.states.value" :loading="delivery.loading.value" :cancelling="delivery.cancelling.value" :can-cancel="chatStore.hasAction('interrupt_turn')" :error="delivery.error.value" :notice="delivery.notice.value" @refresh="delivery.refresh" @cancel="delivery.cancel" />
@@ -1413,7 +1422,8 @@ onBeforeUnmount(() => {
         @read-skill-suggestions="readSkillSuggestions"
         @select-suggested-skill="addSkill"
         @remove-skill="toggleSkill"
-        :can-send="workspaceSelectionValid && !workspacePicker.creating.value && models.ready.value && (isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend && expertSendReady)"
+        :can-send="composerSendReadiness === 'ready'"
+        :waiting-for-model="composerSendReadiness === 'pending'"
         :can-attach="attachmentInteractionAllowed"
         :submission-state="composerSubmissionState"
         :streaming="false"
@@ -1459,7 +1469,7 @@ onBeforeUnmount(() => {
           <ChatSkillControl :entries="skills.skills" :selected-ids="skillSelection.map(skill => skill.id)" :disabled="skillPickerDisabled" :loading="skills.phase === 'loading'" :refreshing="skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @select="toggleSkill" @manage="manageSkills" @close="close" />
         </template>
         <template v-if="chatModelsEnabled" #model-control>
-          <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" :error="models.error.value" :retry-label="models.retryLabel.value" @select="models.select" @retry="models.retry" />
+          <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" @select="models.select" />
         </template>
         <template v-if="!isDraftMode && runtimePermissionsEnabled" #permission-control>
           <ChatPermissionControl :state="permissions.state.value" :disabled="!permissions.ready.value || permissions.busy.value" :saving="permissions.saving.value" @select="permissions.setMode" />
@@ -1653,7 +1663,10 @@ onBeforeUnmount(() => {
       <p v-if="!isDraftMode && runtimePermissionsEnabled && permissions.error.value" class="chat-workspace__composer-error" role="alert">{{ permissions.error.value }} <button type="button" @click="permissions.refresh">重试</button></p>
       <p v-if="!isDraftMode && !workspaceSelectionValid" class="chat-workspace__composer-error" role="alert">所选工作空间已不可用，请重新选择或取消工作空间后发送。</p>
       <ScheduledDraftPanel v-if="isDraftMode" ref="draftPanel" :model="draft" @accepted="openDraftConversation" @view-plan="viewDraftPlan" @recover="recoverDraft" />
-      <p v-if="chatModelsEnabled && models.error.value" class="chat-workspace__composer-error" role="alert">{{ models.error.value }}</p>
+      <p v-if="chatModelsEnabled && models.error.value" class="chat-workspace__composer-error" role="alert">
+        {{ models.error.value }}
+        <button type="button" class="yj-control" :disabled="modelBlocked || models.saving.value" @click="models.retry">{{ models.retryLabel.value }}</button>
+      </p>
       <p v-if="expertNotice" class="chat-workspace__composer-error" role="status">{{ expertNotice }} <button type="button" class="yj-control" :disabled="submitting" @click="refreshExpert">{{ expertSubmission ? "确认原提交" : "重新读取" }}</button><template v-if="expertRecoveryOperation">恢复会重新应用原选择，不发送消息。<button type="button" class="yj-control" :disabled="expertRecoveryBlocked" @click="recoverExpertBinding">恢复原操作</button></template></p>
       <p v-if="uncertainLocalSubmission" class="chat-workspace__composer-error" role="status">原提交结果尚未确认，请勿重复发送。<button type="button" class="yj-control" :disabled="submitting || chatStore.phase === 'resyncing' || !chatStore.hasAction('read_sessions')" @click="chatStore.resyncSelected">重新读取原提交</button></p>
       <ChatComposer
@@ -1676,7 +1689,8 @@ onBeforeUnmount(() => {
         @read-skill-suggestions="readSkillSuggestions"
         @select-suggested-skill="addSkill"
         @remove-skill="toggleSkill"
-        :can-send="models.ready.value && (isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend && expertSendReady)"
+        :can-send="composerSendReadiness === 'ready'"
+        :waiting-for-model="composerSendReadiness === 'pending'"
         :can-attach="attachmentInteractionAllowed"
         :submission-state="composerSubmissionState"
         :streaming="isStreaming"
@@ -1711,7 +1725,7 @@ onBeforeUnmount(() => {
         </template>
         <template v-if="chatModelsEnabled" #model-control>
           <ChatContextWindow :sample="contextWindow.sample.value" :last-model="contextWindow.lastModel.value" />
-          <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" :error="models.error.value" :retry-label="models.retryLabel.value" @select="models.select" @retry="models.retry" />
+          <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" @select="models.select" />
         </template>
         <template v-if="!isDraftMode && runtimePermissionsEnabled" #permission-control>
           <ChatPermissionControl :state="permissions.state.value" :disabled="!permissions.ready.value || permissions.busy.value" :saving="permissions.saving.value" @select="permissions.setMode" />

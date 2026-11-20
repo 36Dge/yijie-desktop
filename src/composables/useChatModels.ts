@@ -7,7 +7,12 @@ export function useChatModels(context:()=>string|null,target:()=>string|null,bus
  let epoch=0;let pending:{target:string;intent:ModelIntent;operationId:string;recoveryAvailable?:boolean}|null=null;
  const profile=computed(()=>target()===null?newProfile.value:state.value?.profileId??null);
  const available=computed(()=>catalog.value?.models.some(m=>m.profile.profile_id===profile.value&&m.available)??false);
- const ready=computed(()=>!chatModelsEnabled||(!error.value&&!loading.value&&!saving.value&&available.value&&(target()===null||state.value?.state==="ready")));
+ const readiness = computed(() => {
+  if (!chatModelsEnabled) return "ready";
+  if (error.value || !available.value || (target() !== null && state.value?.state !== "ready")) return "unavailable";
+  return loading.value || saving.value ? "pending" : "ready";
+ });
+ const ready = computed(() => readiness.value === "ready");
  const intent=computed<ModelIntent|undefined>(()=>chatModelsEnabled&&ready.value&&profile.value?Object.freeze({profileId:profile.value,expectedRevision:target()===null?0:state.value?.revision??0}):undefined);
  async function refresh(){
   const ctx=context(),session=target(),current=++epoch;
@@ -45,5 +50,5 @@ export function useChatModels(context:()=>string|null,target:()=>string|null,bus
  }
  watch([context,target],([ctx],[oldCtx])=>{epoch++;state.value=null;saving.value=false;loading.value=false;pending=null;if(ctx!==oldCtx&&!newDraft)newProfile.value=defaultModelProfile;void refresh();},{immediate:true});
  watch(busy,(v,old)=>{if(old&&!v)void refresh();});
- return {catalog,state,profile,loading,saving,error,ready,intent,refresh,select,retry,retryLabel,resetNew:()=>{newProfile.value=defaultModelProfile;}};
+ return {catalog,state,profile,loading,saving,error,readiness,ready,intent,refresh,select,retry,retryLabel,resetNew:()=>{newProfile.value=defaultModelProfile;}};
 }
