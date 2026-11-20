@@ -11,10 +11,10 @@ import { useExpertsStore } from "../../stores/experts.store";
 import { defineComponent, h } from "vue";
 import { RouterView } from "vue-router";
 
-import { DOMWrapper,flushPromises,mount } from "@vue/test-utils";
+import { DOMWrapper, flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import axe from "axe-core";
 import { createPinia,setActivePinia } from "pinia";
-import { afterEach,describe,expect,it,vi } from "vitest";
+import { afterEach,beforeEach,describe,expect,it,vi } from "vitest";
 import { createMemoryHistory,createRouter } from "vue-router";
 import { documentPreviewClient } from "../../api/chat-document-preview-client";
 import { chatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
@@ -38,8 +38,9 @@ import ChatWorkspaceControl from "../../components/chat/ChatWorkspaceControl.vue
 import ChatSidebarTree from "../../components/chat/ChatSidebarTree.vue";
 import { chatWorkspaceClient } from "../../api/chat-workspace-client";
 import ChatModelControl from "../../components/chat/ChatModelControl.vue";
-import { chatModelClient, chatModelsEnabled, kimiK31Candidate, type ModelState } from "../../api/chat-model-client";
+import { chatModelClient, chatModelsEnabled, kimiK31Candidate, parseModelCatalog, type ModelState } from "../../api/chat-model-client";
 import { modelDefinitions } from "../../domain/chat-models.generated";
+import { modelDefinitions as currentModelDefinitions } from "../../domain/chat-models-v2.generated";
 import ChatTimeline from "../../components/chat/ChatTimeline.vue";
 import {
 CHAT_NEW_DRAFT_TARGET,
@@ -114,6 +115,10 @@ vi.mock("@tauri-apps/api/webview", () => ({
 const PROJECT_ID = "019c1a00-0000-7000-8000-000000000001";
 const SESSION_ID = "019c1a00-0000-7000-8000-000000000002";
 const TURN_ID = "019c1a00-0000-7000-8000-000000000003";
+const pageDefaultProfile = kimiK31Candidate ? "kimi-k3-1-pro-max-v1" : "kimi-k3-max-v1";
+const sessionModel = { profileId: "minimax-m3-high-v1", revision: 3, state: "ready" } as const;
+const newTaskModelArgs = chatModelsEnabled ? [{ profileId: pageDefaultProfile, expectedRevision: 0 }] : [];
+const replyModelArgs = chatModelsEnabled ? [{ profileId: sessionModel.profileId, expectedRevision: sessionModel.revision }] : [];
 
 function acceptedSubmission(
   sessionId = SESSION_ID,
@@ -245,6 +250,8 @@ function historyWithAcceptedTurn(
   });
 }
 
+const mountedPages: VueWrapper[] = [];
+
 async function mountPage(
   path: string,
   active = false,
@@ -309,11 +316,27 @@ async function mountPage(
       },
     },
   });
+  mountedPages.push(wrapper);
   await flushPromises();
   return { wrapper, store, router, pinia };
 }
 
+beforeEach(() => {
+  if (!chatModelsEnabled) return;
+  const profiles = kimiK31Candidate ? currentModelDefinitions : modelDefinitions;
+  vi.spyOn(chatModelClient, "catalog").mockResolvedValue(parseModelCatalog({
+    schema_version: kimiK31Candidate ? 2 : 1,
+    default_profile: pageDefaultProfile,
+    models: profiles.map(profile => ({ profile, available: true, reason: "ready" })),
+  }));
+  vi.spyOn(chatModelClient, "state").mockResolvedValue(sessionModel);
+});
+
 afterEach(() => {
+  // Unmount while native reads and animation frames still belong to this test.
+  for (const page of mountedPages.splice(0)) {
+    if (page.exists()) page.unmount();
+  }
   promptBoundary.invoke = null;
   expertFlag.enabled = false;
   skillFlag.enabled = false;
@@ -341,8 +364,6 @@ it.skipIf(!process.env.YIJIE_PROMPT_BOUNDARY_SETUP)("selected skill continuous N
   skillFlag.enabled = true;
   const skill = { ...installedSkill, id: "yijie.fixture.model-only", runtimeName: "yijie-fixture-model-only", displayName: "合成模型技能" };
   vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "2026-11-04T00:00:00Z", skills: [skill] });
-  const { modelDefinitions: current } = await import("../../domain/chat-models-v2.generated");
-  vi.spyOn(chatModelClient, "catalog").mockResolvedValue({ schema_version: 2, default_profile: "kimi-k3-1-pro-max-v1", models: current.map(profile => ({ profile, available: true, reason: "ready" })) });
   const { wrapper, store, pinia } = await mountPage("/chat");
   const skills = useSkillStore(pinia); skills.skills = [skill]; skills.phase = "ready";
   vi.spyOn(skills, "open").mockResolvedValue();
@@ -637,11 +658,7 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.text()).toContain("当前工作区权限不足");
   });
 
-  // Run explicitly with VITE_YIJIE_CHAT_MODELS_ENABLED=true; the legacy suite
-  // keeps its original feature-off behavior and assertions.
   it.skipIf(!chatModelsEnabled)("blocks the model selector and stale selection events for history-only or denied tasks", async () => {
-    vi.spyOn(chatModelClient, "catalog").mockResolvedValue({schema_version:1,default_profile:"kimi-k3-max-v1",models:modelDefinitions.map(profile=>({profile,available:true,reason:"ready"}))});
-    vi.spyOn(chatModelClient, "state").mockResolvedValue({profileId:"minimax-m3-high-v1",revision:0,state:"ready"});
     const select = vi.spyOn(chatModelClient, "select");
     const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
     await flushPromises();
@@ -651,21 +668,52 @@ describe("FEAT-126 ChatPage", () => {
     await flushPromises();
     expect(control.props("disabled")).toBe(true);
     expect(control.props("disabledReason")).toContain("仅可查看");
-    control.vm.$emit("select", "kimi-k3-max-v1");
+    control.vm.$emit("select", pageDefaultProfile);
     await flushPromises();
     expect(select).not.toHaveBeenCalled();
     store.selectedAccessMode = "live";
     store.context = {...store.context!, allowedActions:["read_sessions"]};
     await flushPromises();
     expect(control.props("disabled")).toBe(true);
-    control.vm.$emit("select", "kimi-k3-max-v1");
+    control.vm.$emit("select", pageDefaultProfile);
     await flushPromises();
     expect(select).not.toHaveBeenCalled();
   });
 
+  it.skipIf(!chatModelsEnabled || !kimiK31Candidate)("keeps the draft until the user selects an available model", async () => {
+    vi.mocked(chatModelClient.catalog).mockResolvedValue(parseModelCatalog({
+      schema_version: 2,
+      default_profile: "kimi-k3-1-pro-max-v1",
+      models: currentModelDefinitions.map(profile => profile.profile_id === "kimi-k3-1-pro-max-v1"
+        ? { profile, available: false, reason: "activation_required" }
+        : { profile, available: true, reason: "ready" }),
+    }));
+    const { wrapper, store } = await mountPage("/chat");
+    const create = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
+    try {
+      const composer = wrapper.getComponent(ChatComposer);
+      const input = composer.get("textarea");
+      const send = composer.get<HTMLButtonElement>(".chat-composer__send");
+      const draft = "保留当前草稿";
+      await input.setValue(draft);
+      expect(send.element.disabled).toBe(true);
+      await input.trigger("keydown", { key: "Enter" });
+      expect(create).not.toHaveBeenCalled();
+      await composer.get(".model-trigger").trigger("click");
+      await flushPromises();
+      const menu = new DOMWrapper(document.querySelector(".model-menu")!);
+      const options = menu.findAll<HTMLButtonElement>('button[role="menuitemradio"]');
+      expect(options.find(option => option.text().includes("Kimi K3.1 Pro"))!.element.disabled).toBe(true);
+      await options.find(option => option.text() === "MiniMax-M3")!.trigger("click");
+      expect(input.element.value).toBe(draft);
+      expect(send.element.disabled).toBe(false);
+      await send.trigger("click");
+      await flushPromises();
+      expect(create).toHaveBeenCalledExactlyOnceWith(null, draft, { profileId: "minimax-m3-high-v1", expectedRevision: 0 });
+    } finally { wrapper.unmount(); }
+  });
+
   it.skipIf(!chatModelsEnabled || !kimiK31Candidate)("holds the model label and send button through a pending model switch", async () => {
-    const { modelDefinitions: current } = await import("../../domain/chat-models-v2.generated");
-    vi.spyOn(chatModelClient, "catalog").mockResolvedValue({ schema_version: 2, default_profile: "kimi-k3-1-pro-max-v1", models: current.map(profile => ({ profile, available: true, reason: "ready" })) });
     vi.spyOn(chatModelClient, "state").mockResolvedValue({ profileId: "kimi-k3-1-pro-max-v1", revision: 0, state: "ready" });
     let confirm!: (result: ModelState) => void;
     vi.spyOn(chatModelClient, "select").mockImplementation(() => new Promise(resolve => { confirm = resolve; }));
@@ -702,8 +750,6 @@ describe("FEAT-126 ChatPage", () => {
   });
 
   it.skipIf(!chatModelsEnabled || !kimiK31Candidate)("keeps model recovery beside its error and waits for an explicit retry", async () => {
-    const { modelDefinitions: current } = await import("../../domain/chat-models-v2.generated");
-    vi.spyOn(chatModelClient, "catalog").mockResolvedValue({ schema_version: 2, default_profile: "kimi-k3-1-pro-max-v1", models: current.map(profile => ({ profile, available: true, reason: "ready" })) });
     const pending = { operationId: crypto.randomUUID(), profileId: "minimax-m3-high-v1" as const, expectedRevision: 1, recoveryAvailable: true };
     vi.spyOn(chatModelClient, "state").mockResolvedValue({ profileId: "kimi-k3-max-v1", revision: 1, state: "unknown", pending });
     const recover = vi.spyOn(chatModelClient, "recover").mockResolvedValue({ profileId: pending.profileId, revision: 2, state: "ready" });
@@ -721,7 +767,6 @@ describe("FEAT-126 ChatPage", () => {
   });
 
   it.skipIf(!chatModelsEnabled)("resets the model when leaving a discarded new scheduled draft", async () => {
-    vi.spyOn(chatModelClient, "catalog").mockResolvedValue({schema_version:1,default_profile:"kimi-k3-max-v1",models:modelDefinitions.map(profile=>({profile,available:true,reason:"ready"}))});
     const select = vi.spyOn(chatModelClient, "select");
     const {wrapper,router} = await mountPage("/chat?create=schedule", false, HISTORY, async () => false, false, {ScheduledDraftPanel: true});
     await flushPromises();
@@ -730,15 +775,13 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.getComponent(ChatModelControl).props("profile")).toBe("minimax-m3-high-v1");
     await router.push("/chat");
     await flushPromises();
-    expect(wrapper.getComponent(ChatModelControl).props("profile")).toBe("kimi-k3-max-v1");
+    expect(wrapper.getComponent(ChatModelControl).props("profile")).toBe(pageDefaultProfile);
     expect(select).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 
   it.skipIf(!kimiK31Candidate)("FEAT164 resets discarded shared plan draft to the current model without changing chat intent", async () => {
     expertFlag.enabled = true;
-    const { modelDefinitions: current } = await import("../../domain/chat-models-v2.generated");
-    vi.spyOn(chatModelClient, "catalog").mockResolvedValue({schema_version:2,default_profile:"kimi-k3-1-pro-max-v1",models:current.map(profile=>({profile,available:true,reason:"ready"}))});
     const select = vi.spyOn(chatModelClient, "select");
     const {wrapper,router,pinia} = await mountPage("/chat?create=schedule", false, HISTORY, async () => false, false, {ScheduledDraftPanel: true});
     const drafts = useChatComposerDraftStore(pinia);
@@ -1387,7 +1430,7 @@ describe("FEAT-126 ChatPage", () => {
     await flushPromises();
 
     expect(createSession).toHaveBeenCalledTimes(1);
-    expect(createSession).toHaveBeenCalledWith(null, "检查标题");
+    expect(createSession).toHaveBeenCalledWith(null, "检查标题", ...newTaskModelArgs);
     expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
     expect(document.activeElement).toBe(wrapper.get("textarea").element);
     expect(wrapper.find('input[type="file"]').exists()).toBe(false);
@@ -1405,7 +1448,7 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeUndefined();
     await wrapper.get('[aria-label="发送任务"]').trigger("click");
     await flushPromises();
-    expect(createSession).toHaveBeenCalledWith(null, "无项目任务");
+    expect(createSession).toHaveBeenCalledWith(null, "无项目任务", ...newTaskModelArgs);
     expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
   });
 
@@ -1430,7 +1473,7 @@ describe("FEAT-126 ChatPage", () => {
     await wrapper.get("textarea").setValue("今天周几？");
     await wrapper.get('[aria-label="发送任务"]').trigger("click");
     await flushPromises();
-    expect(create).toHaveBeenCalledWith(null, "今天周几？");
+    expect(create).toHaveBeenCalledWith(null, "今天周几？", ...newTaskModelArgs);
     expect(wrapper.text()).not.toContain("任务不可用");
     wrapper.unmount();
   });
@@ -1488,7 +1531,7 @@ describe("FEAT-126 ChatPage", () => {
     await wrapper.get("textarea").setValue("使用新项目");
     await wrapper.get('[aria-label="发送任务"]').trigger("click");
     await flushPromises();
-    expect(createSession).toHaveBeenCalledWith(SECOND_PROJECT.projectId, "使用新项目");
+    expect(createSession).toHaveBeenCalledWith(SECOND_PROJECT.projectId, "使用新项目", ...newTaskModelArgs);
     expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
   });
 
@@ -1503,7 +1546,7 @@ describe("FEAT-126 ChatPage", () => {
     const create = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
     await wrapper.get("textarea").setValue("分析最近一周的差评");
     await wrapper.get('[aria-label="发送任务"]').trigger('click'); await flushPromises();
-    expect(create).toHaveBeenCalledWith(null, "分析最近一周的差评");
+    expect(create).toHaveBeenCalledWith(null, "分析最近一周的差评", ...newTaskModelArgs);
     expect(model.current.value?.id).toBe(PREVIEW_SHOPS[0]!.id);
     wrapper.unmount();
   });
@@ -1542,7 +1585,7 @@ describe("FEAT-126 ChatPage", () => {
       await wrapper.get("textarea").setValue("在所选工作空间开始任务");
       await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();
       expect(createSession).toHaveBeenCalledOnce();
-      expect(createSession.mock.calls[0]?.slice(0, 2)).toEqual([SECOND_PROJECT.projectId, "在所选工作空间开始任务"]);
+      expect(createSession).toHaveBeenCalledWith(SECOND_PROJECT.projectId, "在所选工作空间开始任务", ...newTaskModelArgs);
     } finally { sidebar.unmount(); wrapper.unmount(); }
   });
 
@@ -1559,7 +1602,7 @@ describe("FEAT-126 ChatPage", () => {
     const createSession = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
     await wrapper.get("textarea").setValue("使用新建空间");
     await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();
-    expect(createSession).toHaveBeenCalledWith(SECOND_PROJECT.projectId, "使用新建空间");
+    expect(createSession).toHaveBeenCalledWith(SECOND_PROJECT.projectId, "使用新建空间", ...newTaskModelArgs);
     wrapper.unmount();
   });
 
@@ -1577,7 +1620,7 @@ describe("FEAT-126 ChatPage", () => {
     await wrapper.get("textarea").setValue("无目录继续发送");
     await wrapper.get('[aria-label="发送任务"]').trigger("click");
     await flushPromises();
-    expect(create).toHaveBeenCalledWith(null, "无目录继续发送");
+    expect(create).toHaveBeenCalledWith(null, "无目录继续发送", ...newTaskModelArgs);
     wrapper.unmount();
   });
 
@@ -1686,7 +1729,7 @@ describe("FEAT-126 ChatPage", () => {
     await flushPromises();
 
     // Selecting an attachment does not implicitly select a workspace.
-    expect(createSession).toHaveBeenCalledWith(null, "");
+    expect(createSession).toHaveBeenCalledWith(null, "", ...newTaskModelArgs);
     expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
   });
 
@@ -1782,16 +1825,6 @@ describe("FEAT-126 ChatPage", () => {
     skillFlag.enabled = true;
     vi.stubEnv("VITE_YIJIE_NATIVE_SKILL_INPUT_ENABLED", "true");
     vi.stubEnv("VITE_YIJIE_FEAT174_NATIVE_SKILLS", "true");
-    if (chatModelsEnabled) {
-      const catalog = vi.spyOn(chatModelClient, "catalog");
-      if (kimiK31Candidate) {
-        const { modelDefinitions: profiles } = await import("../../domain/chat-models-v2.generated");
-        catalog.mockResolvedValue({ schema_version: 2, default_profile: "kimi-k3-1-pro-max-v1", models: profiles.map(profile => ({ profile, available: true, reason: "ready" })) });
-      } else {
-        catalog.mockResolvedValue({ schema_version: 1, default_profile: "kimi-k3-max-v1", models: modelDefinitions.map(profile => ({ profile, available: true, reason: "ready" })) });
-      }
-      vi.spyOn(chatModelClient, "state").mockResolvedValue({ profileId: "minimax-m3-high-v1", revision: 1, state: "ready" });
-    }
     vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "2026-10-20T00:00:00Z", skills: [installedSkill] });
     const { wrapper, store, pinia } = await mountPage(`/chat/${SESSION_ID}`, true);
     const skills = useSkillStore(pinia);
@@ -1832,9 +1865,6 @@ describe("FEAT-126 ChatPage", () => {
     const catalog = [listing, installedSkill];
     const [firstSkill, secondSkill] = reply ? [installedSkill, listing] as const : [listing, installedSkill] as const;
     vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "2026-11-20T00:00:00Z", skills: catalog });
-    const { modelDefinitions: current } = await import("../../domain/chat-models-v2.generated");
-    vi.spyOn(chatModelClient, "catalog").mockResolvedValue({ schema_version: 2, default_profile: "kimi-k3-1-pro-max-v1",
-      models: current.map(profile => ({profile, available: true, reason: "ready"})) });
     vi.spyOn(chatModelClient, "state").mockResolvedValue({ profileId: "kimi-k3-1-pro-max-v1", revision: 1, state: "ready" });
     const { wrapper, pinia } = await mountPage(reply ? `/chat/${SESSION_ID}` : "/chat", reply);
     const skills = useSkillStore(pinia);
@@ -1933,7 +1963,7 @@ describe("FEAT-126 ChatPage", () => {
     await wrapper.get("textarea").setValue(text);
     await wrapper.get('[aria-label="发送任务"]').trigger("click");
     await flushPromises();
-    expect(send).toHaveBeenCalledWith(null, text);
+    expect(send).toHaveBeenCalledWith(null, text, ...newTaskModelArgs);
     expect(refresh).not.toHaveBeenCalled();
     wrapper.unmount();
   });
@@ -1947,7 +1977,7 @@ describe("FEAT-126 ChatPage", () => {
     await wrapper.get("textarea").setValue(text);
     await wrapper.get('[aria-label="发送任务"]').trigger("click");
     await flushPromises();
-    expect(send).toHaveBeenCalledWith(null, text, undefined, undefined, { expectedBindingRevision: 0, expert: { expertId: expertDisplay.expertId, version: expertDisplay.version } });
+    expect(send).toHaveBeenCalledWith(null, text, newTaskModelArgs[0], undefined, { expectedBindingRevision: 0, expert: { expertId: expertDisplay.expertId, version: expertDisplay.version } });
     wrapper.unmount();
   });
 
@@ -2102,7 +2132,7 @@ describe("FEAT-126 ChatPage", () => {
     await wrapper.getComponent(ChatComposer).vm.$emit("submit");
     await flushPromises();
 
-    expect(submitTurn).toHaveBeenCalledWith("不能丢失的回复");
+    expect(submitTurn).toHaveBeenCalledWith("不能丢失的回复", ...replyModelArgs);
     expect((wrapper.get("textarea").element as HTMLTextAreaElement).value)
       .toBe("不能丢失的回复");
     expect(wrapper.text()).toContain("本地服务尚未就绪");
@@ -2609,7 +2639,7 @@ it("FEAT158 composer keeps the expert after the shop and requires explicit user 
   await wrapper.get("textarea").setValue("普通待发送问题");
   const create = vi.spyOn(store, "createSessionWithResult").mockResolvedValue({ status: "not_accepted" });
   await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();
-  expect(create).toHaveBeenCalledWith(null, "普通待发送问题", undefined, undefined, { expectedBindingRevision: 0, expert: { expertId: expertDisplay.expertId, version: expertDisplay.version } });
+  expect(create).toHaveBeenCalledWith(null, "普通待发送问题", newTaskModelArgs[0], undefined, { expectedBindingRevision: 0, expert: { expertId: expertDisplay.expertId, version: expertDisplay.version } });
   expect(useChatComposerDraftStore(pinia).expert("new")).toEqual(expertDisplay);
   wrapper.unmount();
 });
@@ -2675,7 +2705,7 @@ it("FEAT158 retained binding uses its Native checked version when the market onl
   await flushPromises();
   expect(wrapper.text()).not.toContain("所选专家资源或执行环境暂不可用");
   await wrapper.get('[aria-label="发送任务"]').trigger("click");
-  expect(submit).toHaveBeenCalledWith("继续使用历史专家", undefined, undefined, { expectedBindingRevision: 1, expert: { expertId: expertDisplay.expertId, version: expertDisplay.version } });
+  expect(submit).toHaveBeenCalledWith("继续使用历史专家", replyModelArgs[0], undefined, { expectedBindingRevision: 1, expert: { expertId: expertDisplay.expertId, version: expertDisplay.version } });
   expect(useChatExpertsStore(pinia).bindings[SESSION_ID]?.expert).toEqual(expertDisplay);
   wrapper.unmount();
 });
@@ -2729,7 +2759,7 @@ it("FEAT158 removes a session expert only on the Native receipt and uses explici
   expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("保留当前文字");
   const submit = vi.spyOn(store, "submitTurnWithResult").mockResolvedValue({ status: "not_accepted" });
   await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();
-  expect(submit).toHaveBeenCalledWith("保留当前文字", undefined, undefined, { expectedBindingRevision: 2, expert: null });
+  expect(submit).toHaveBeenCalledWith("保留当前文字", replyModelArgs[0], undefined, { expectedBindingRevision: 2, expert: null });
   const acknowledged = vi.spyOn(useChatExpertsStore(pinia), "acknowledgeSubmission");
   submit.mockResolvedValue(acceptedSubmission(SESSION_ID, chatSessionDraftTarget(SESSION_ID)));
   await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();
