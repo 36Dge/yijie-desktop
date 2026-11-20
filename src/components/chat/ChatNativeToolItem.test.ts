@@ -47,7 +47,8 @@ describe("native Tool display",()=>{
     const toggle = wrapper.get("button");
     expect(toggle.attributes("aria-expanded")).toBe("false");
     expect(toggle.text()).toContain("读取指定网页" + (site ? " · " + site : ""));
-    expect(toggle.text()).toContain(status === "failed" ? "读取失败" : "已完成");
+    expect(toggle.text()).not.toMatch(/读取失败|已完成/);
+    expect(toggle.attributes("aria-description")).toBe(status === "failed" ? "读取失败" : "已完成");
     await toggle.trigger("click");
     expect(wrapper.text()).toContain(expected);
     expect(wrapper.text()).toContain("用时 6.8 秒");
@@ -56,11 +57,16 @@ describe("native Tool display",()=>{
     wrapper.unmount();
   });
 
-  it("shows only recorded status and duration for a metadata-only deep search", () => {
+  it("opens a metadata-only deep search to its recorded details", async () => {
     const wrapper = renderDeepSearch({resultKind: "omitted", texts: [], diagnostics: ["arguments_unavailable", "result_unavailable"]},
       {availability: "partial", argumentsSummary: "参数不可展示"});
-    expect(wrapper.text()).toBe("网页深度搜索已完成 · 8.3 秒");
-    expect(wrapper.find("button, [role=note], .chat-timeline-item-shell__body").exists()).toBe(false);
+    const toggle = wrapper.get("button");
+    expect(toggle.text()).toBe("网页深度搜索");
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    expect(wrapper.find(".chat-timeline-item-shell__body").exists()).toBe(false);
+    await toggle.trigger("click");
+    expect(wrapper.text()).toContain("本次搜索的结果详情不可用");
+    expect(wrapper.text()).toContain("耗时 8.3 秒");
     wrapper.unmount();
   });
 
@@ -74,7 +80,8 @@ describe("native Tool display",()=>{
     const toggle = wrapper.get(".chat-timeline-item-shell__disclosure");
     expect(toggle.attributes("aria-expanded")).toBe("false");
     expect(toggle.text()).toContain("网页深度搜索 · 杭州天气");
-    expect(toggle.text()).toContain("5 条结果");
+    expect(toggle.text()).not.toContain("5 条结果");
+    expect(toggle.attributes("aria-description")).toBe("5 条结果");
     await toggle.trigger("click");
     expect(wrapper.get(".native-tool__query").text()).toContain("杭州天气");
     expect(wrapper.findAll(".web-result__rows li")).toHaveLength(3);
@@ -109,7 +116,7 @@ describe("native Tool display",()=>{
       {status: text.includes("quota_exceeded") ? "failed" : "completed"});
     await wrapper.get(".chat-timeline-item-shell__disclosure").trigger("click");
     expect(wrapper.text()).toContain(expected);
-    expect(wrapper.text().includes("0 条结果")).toBe(empty);
+    expect(wrapper.get(".chat-timeline-item-shell__disclosure").attributes("aria-description")?.includes("0 条结果")).toBe(empty);
     expect(wrapper.find("pre").exists()).toBe(false);
     wrapper.unmount();
   });
@@ -139,7 +146,7 @@ describe("native Tool display",()=>{
       expect(wrapper.text()).toContain(raw.text);
       expect(wrapper.text()).not.toContain("工具身份信息不完整");
       expect(wrapper.text()).not.toContain("服务返回文本");
-      if(raw.type==="subAgentActivity") {expect(wrapper.text()).toContain("已记录");expect(wrapper.text()).not.toContain("子任务已完成");}
+      if(raw.type==="subAgentActivity") {expect(wrapper.get(".chat-timeline-item-shell__disclosure").attributes("aria-description")).toBe("已记录");expect(wrapper.text()).not.toContain("子任务已完成");}
       expect(JSON.stringify(raw)).toBe(original);wrapper.unmount();
     }
   });
@@ -149,7 +156,7 @@ describe("native Tool display",()=>{
     if(item.execution?.kind!=="tool" || !("native" in item.execution)) throw new Error("missing execution");
     const wrapper=mount(ChatNativeToolItem,{props:{item,execution:item.execution}});
     expect(wrapper.get("button.chat-timeline-item-shell__disclosure").text()).toContain("读取网页（Kimi）");
-    expect(wrapper.text()).toContain("调用失败"); expect(wrapper.text()).toContain("此项信息不完整");
+    expect(wrapper.get(".chat-timeline-item-shell__disclosure").attributes("aria-description")).toBe("调用失败"); expect(wrapper.text()).toContain("此项信息不完整");
     expect(wrapper.text()).not.toContain("不代表执行失败");
     await wrapper.get("button.chat-timeline-item-shell__disclosure").trigger("click");
     expect(wrapper.text()).toContain("yijie_market / kimi_web_fetch");

@@ -96,7 +96,7 @@ describe("native process reading layout", () => {
     wrapper.unmount();
   });
 
-  it("removes the partial footer without hiding unavailable records", async () => {
+  it("keeps usable partial searches and omits unavailable search rows", async () => {
     const view=native(); view.items[1]!.item.availability="partial";
     const wrapper=mount(ChatTurnGroup,{attachTo:document.body,props:{turn:turn(view),position:1}});
     await wrapper.get(".chat-turn-group__timing button").trigger("click");
@@ -106,9 +106,10 @@ describe("native process reading layout", () => {
     expect(search.text()).not.toContain("信息不完整");
     view.items[1]!.item.availability="unavailable";
     await wrapper.setProps({turn:turn(view)});
-    const unavailable=wrapper.get(".chat-turn-group__item--web_search");
-    await unavailable.get("button").trigger("click");
-    expect(unavailable.get('[role="note"]').text()).toContain("内容暂不可用");
+    const remaining = wrapper.findAll(".chat-turn-group__item--web_search");
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]!.attributes("data-native-item")).toContain("search-b");
+    expect(wrapper.text()).not.toContain("此项内容暂不可用");
     wrapper.unmount();
   });
 
@@ -146,6 +147,7 @@ describe("native process reading layout", () => {
     expect(wrapper.find(".chat-turn-group__details-control").exists()).toBe(false);
     await toggle.trigger("click");
     expect(wrapper.get(".chat-turn-group__item--unknown").isVisible()).toBe(true);
+    await wrapper.get(".chat-turn-group__item--unknown button").trigger("click");
     expect(wrapper.text()).toContain("unsupported_content");
     expect(wrapper.text()).not.toContain("网页搜索");
     await toggle.trigger("click");
@@ -154,7 +156,7 @@ describe("native process reading layout", () => {
     wrapper.unmount();
   });
 
-  it("folds historical failures after successful continuation, preserves their output and honors disclosure choices", async () => {
+  it("filters historical failures before counting and preserves disclosure choices for successful calls", async () => {
     const view=native();view.items=[
       record({id:"failed",type:"commandExecution",status:"failed",exitCode:2,availability:"partial",commandLabel:"zsh · 参数已隐藏",outputText:"需要先取得本次转换的审批。"},0),
       record({id:"old-image",type:"unknown",availability:"unavailable"},1),
@@ -163,34 +165,32 @@ describe("native process reading layout", () => {
     ];
     const before=JSON.stringify(view);
     const wrapper=mount(ChatTurnGroup,{attachTo:document.body,props:{turn:turn(view),position:1}});
-    const failed=wrapper.findAll(".chat-turn-group__item--command")[0]!;
-    expect(failed.isVisible()).toBe(false);
+    expect(wrapper.findAll(".chat-turn-group__item--command")).toHaveLength(1);
+    const successful=wrapper.get(".chat-turn-group__item--command");
+    expect(successful.isVisible()).toBe(false);
     expect(wrapper.get(".chat-turn-group__item--unknown").isVisible()).toBe(false);
     expect(wrapper.get(".chat-turn-group__item--final_answer").isVisible()).toBe(true);
     await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
     const group=wrapper.get(".chat-activity-group__toggle");
-    expect(group.text()).toContain("1 次失败");
-    expect(group.text()).toContain("1 项暂不支持展示");
+    expect(group.attributes("aria-description")).toBe("1 次调用 · 1 项暂不支持展示");
     await group.trigger("click");
-    expect(failed.isVisible()).toBe(true);
-    expect(failed.text()).toContain("执行失败");
-    await failed.get("button").trigger("click");
-    expect(failed.get("pre").text()).toBe("需要先取得本次转换的审批。");
+    expect(successful.isVisible()).toBe(true);
+    expect(successful.get("button").attributes("aria-description")).toBe("已完成");
+    expect(wrapper.text()).not.toContain("需要先取得本次转换的审批。");
     await wrapper.setProps({turn:turn({...view,revision:"2"})});
     expect(group.attributes("aria-expanded")).toBe("true");
-    expect(failed.isVisible()).toBe(true);
+    expect(successful.isVisible()).toBe(true);
     expect(JSON.stringify(view)).toBe(before);
     wrapper.unmount();
   });
 
-  it("does not fold an unresolved failure or cross explicit final and user-input boundaries", () => {
+  it("filters an unresolved failure while preserving explicit final and user-input boundaries", () => {
     const view=native();view.items[3]!.item.status="failed";view.items[3]!.item.exitCode=1;
     view.items.splice(6,0,record({id:"explicit",type:"agentMessage",phase:"final_answer",text:"明确回答",availability:"available"},6));
     const projected=turn(view);
     expect(observedProgressMessages(projected.items).has(projected.items[5]!.identity)).toBe(false);
     const wrapper=mount(ChatTurnGroup,{attachTo:document.body,props:{turn:projected,position:1}});
-    expect(wrapper.get(".chat-turn-group__item--command").isVisible()).toBe(true);
-    expect(wrapper.get(".chat-turn-group__item--command").text()).toContain("执行失败");
+    expect(wrapper.find(".chat-turn-group__item--command").exists()).toBe(false);
     const barrier={...projected.items[6]!,presentation:"user_message" as const};
     expect(observedProgressMessages([...projected.items.slice(0,6),barrier,...projected.items.slice(7)]).has(projected.items[5]!.identity)).toBe(false);
     wrapper.unmount();

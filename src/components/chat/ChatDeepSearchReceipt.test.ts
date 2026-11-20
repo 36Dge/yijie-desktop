@@ -9,6 +9,7 @@ import ChatTurnGroup from "./ChatTurnGroup.vue";
 
 type Fact = NonNullable<NonNullable<NativeItem["mcp"]>["searchReceipt"]>;
 const original = "019a8811-0000-7000-8000-000000000175";
+const disclosure = ".chat-timeline-item-shell__disclosure";
 function search(id: string, change: Partial<Fact> = {}) {
   return traceItem(id, "mcpToolCall", {
     argumentsSummary: "杭州", mcp: { server: "yijie_web", tool: "kimi_web_search_pro",
@@ -27,8 +28,9 @@ it("places eleven calls in two batches on one primary card and restores all logi
     for (const row of wrapper.findAll(".chat-activity-group__toggle")) await row.trigger("click");
     const cards = wrapper.findAll(".deep-search-row");
     expect(cards).toHaveLength(2);
-    expect(cards[0]!.text()).toContain("0 条结果 · 已复用 10 次");
-    await cards[0]!.get(".chat-timeline-item-shell__disclosure").trigger("click");
+    expect(cards[0]!.get(disclosure).attributes("aria-description")).toContain("0 条结果 · 已复用 10 次");
+    expect(cards[0]!.get(disclosure).text()).not.toMatch(/条结果|已复用/);
+    await cards[0]!.get(disclosure).trigger("click");
     expect(cards[0]!.findAll(".native-tool__calls li")).toHaveLength(11);
     for (const call of calls) expect(cards[0]!.text()).toContain(call.id);
     wrapper.unmount();
@@ -40,12 +42,29 @@ it("uses a settled logical receipt when the earliest observed item has incomplet
   const later = search("waiter", {relation: "joined"});
   const wrapper = mount(ChatTurnGroup, {props: {turn: traceTurn([pending, separator, later]), position: 1}});
   await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
-  expect(wrapper.get(".deep-search-row").text()).toContain("0 条结果 · 并发合并 1 次");
-  const [node] = conversationActivityPresentation(traceTurn([pending, separator, later]));
+  expect(wrapper.get(".deep-search-row").get(disclosure).attributes("aria-description")).toContain("0 条结果 · 并发合并 1 次");
+  const node = conversationActivityPresentation(traceTurn([pending, separator, later])).find(node => node.kind === "activity");
   expect(node?.kind === "activity" && summarizeActivity(node.group, false).counts).toContain("1 次实际搜索");
+  expect(node?.kind === "activity" && node.group.entries[0]?.searchCalls?.map(call => call.itemId)).toEqual(["waiter"]);
   await wrapper.setProps({turn: traceTurn([pending, separator, later, later])});
   expect(wrapper.findAll(".deep-search-row")).toHaveLength(1);
-  expect(wrapper.text()).toContain("并发合并 1 次");
+  expect(wrapper.get(".deep-search-row").get(disclosure).attributes("aria-description")).toContain("并发合并 1 次");
+  wrapper.unmount();
+});
+
+it("keeps failed followers out of a successful search and hides groups without a usable receipt", async () => {
+  const failed = search("failed", {outcome: "failed"});
+  const unknown = search("unknown", {outcome: "unknown", dispatch: "uncertain"});
+  const busy = search("busy", {operation_id: undefined, dispatch: "not_dispatched", outcome: "failed", error_code: "busy"});
+  const success = search("success", {relation: "first"});
+  const wrapper = mount(ChatTurnGroup, {props: {turn: traceTurn([failed, unknown, busy]), position: 1}});
+  expect(wrapper.find(".deep-search-row, .chat-activity-group, .chat-turn-group__process-toggle").exists()).toBe(false);
+  await wrapper.setProps({turn: traceTurn([failed, success, unknown, busy])});
+  await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
+  const row = wrapper.get(".deep-search-row");
+  expect(row.get(disclosure).attributes("aria-description")).toBe("0 条结果");
+  await row.get(disclosure).trigger("click");
+  expect(row.find(".native-tool__calls").exists()).toBe(false);
   wrapper.unmount();
 });
 
@@ -66,14 +85,14 @@ it.runIf(Boolean(process.env.SCOPED_REPLAY_DIRECTORY))("replays both Hangzhou mo
       const wrapper = mount(ChatTurnGroup,{props:{turn:traceTurn(snapshot),position:1}});
       for (const disclosure of wrapper.findAll(".chat-activity-group__toggle")) await disclosure.trigger("click");
       const visible = wrapper.findAll(".deep-search-row");
-      expect(visible).toHaveLength(physical + busy);
+      expect(visible).toHaveLength(name === "minimax" ? physical - 1 : physical);
       if (name === "kimi") {
-        const card = visible.find(row => row.text().includes("0 条结果 · 已复用 10 次"))!;
+        const card = visible.find(row => row.get(disclosure).attributes("aria-description")?.includes("0 条结果 · 已复用 10 次"))!;
         await card.get(".chat-timeline-item-shell__disclosure").trigger("click");
         expect(card.findAll(".native-tool__calls li")).toHaveLength(11);
       }
-      if (name === "three") expect(visible.every(row => row.text().includes("5 条结果 · 已复用 2 次"))).toBe(true);
-      if (name === "minimax") expect(visible.filter(row => row.text().includes("搜索失败"))).toHaveLength(1);
+      if (name === "three") expect(visible.every(row => row.get(disclosure).attributes("aria-description")?.includes("5 条结果 · 已复用 2 次"))).toBe(true);
+      expect(visible.every(row => !/搜索失败|未派发|结果待确认/.test(row.get(disclosure).attributes("aria-description") ?? ""))).toBe(true);
       wrapper.unmount();
     }
   }

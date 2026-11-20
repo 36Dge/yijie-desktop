@@ -6,6 +6,7 @@ import type {
 } from "../../domain/conversation-timeline";
 import type { YjIconName } from "../../icons/registry";
 import YjIcon from "../yijie/YjIcon.vue";
+import ChatActivityChevron from "./ChatActivityChevron.vue";
 
 const props = defineProps<{
   plan: ConversationTimelinePlanViewModel;
@@ -68,18 +69,18 @@ function toggle(): void {
 <template>
   <section class="chat-turn-plan" :aria-labelledby="titleId">
     <button
-      class="chat-turn-plan__disclosure"
+      class="chat-turn-plan__disclosure chat-activity-disclosure"
       type="button"
       :aria-expanded="expanded"
       :aria-controls="contentId"
+      :aria-description="planStatusLabel"
       @click="toggle"
     >
       <span class="chat-turn-plan__identity">
         <YjIcon name="taskHistory" size="sm" tone="muted" />
         <strong :id="titleId">执行计划</strong>
       </span>
-      <span class="chat-turn-plan__status">{{ planStatusLabel }}</span>
-      <YjIcon :name="expanded ? 'chevronDown' : 'chevronRight'" size="sm" tone="muted" />
+      <ChatActivityChevron :expanded="expanded" />
     </button>
 
     <div v-if="expanded" :id="contentId" class="chat-turn-plan__content yj-selectable-text">
@@ -109,17 +110,14 @@ function toggle(): void {
 <style scoped>
 .chat-turn-plan {
   min-width: 0;
-  border: var(--yj-border-width) solid var(--yj-color-border-subtle);
-  border-radius: var(--yj-radius-lg);
   color: var(--yj-color-text-primary);
-  background: var(--yj-color-bg-subtle);
 }
 
 .chat-turn-plan__disclosure {
   display: grid;
   width: 100%;
   min-width: 0;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--yj-space-3);
   padding: var(--yj-space-2) var(--yj-space-3);
@@ -132,13 +130,8 @@ function toggle(): void {
   transition: background var(--yj-motion-fast) var(--yj-ease-standard);
 }
 
-.chat-turn-plan__disclosure:hover {
+.chat-turn-plan__disclosure:is(:hover, :focus-visible) {
   background: var(--yj-color-control-hover);
-}
-
-.chat-turn-plan__disclosure:focus-visible {
-  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
-  outline-offset: var(--yj-space-1);
 }
 
 .chat-turn-plan__identity {
@@ -150,14 +143,12 @@ function toggle(): void {
   line-height: var(--yj-line-height-caption);
 }
 
-.chat-turn-plan__identity strong,
-.chat-turn-plan__status {
+.chat-turn-plan__identity strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chat-turn-plan__status,
 .chat-turn-plan__step-status {
   color: var(--yj-color-text-tertiary);
   font-size: var(--yj-font-size-caption);

@@ -53,6 +53,12 @@ button {
   cursor: pointer;
 }
 
+.chat-activity-disclosure:focus-visible {
+  outline: none;
+  text-decoration: underline;
+  text-underline-offset: var(--yj-space-1);
+}
+
 #app {
   min-height: var(--yj-ui-viewport-height, 100vh);
 }

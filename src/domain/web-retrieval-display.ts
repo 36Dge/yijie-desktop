@@ -5,18 +5,36 @@ import type { AppErrorOutput } from "./builtin-web.generated";
 
 function readResultText(text: string): unknown {
   try {
-    const source = text.replace(/^Wall time: [0-9.]+ seconds\nOutput:\n/, "");
-    return JSON.parse(source);
+    const source = text.replace(/^Wall time: [0-9.]+ seconds\nOutput:\n/, "").trimStart();
+    return source.startsWith("{") ? JSON.parse(source) : null;
   } catch {
     return null;
   }
 }
 
+function retrievalValidator(tool: string | undefined) {
+  switch (tool) {
+    case "kimi_web_search": return validateSearchOutput;
+    case "kimi_web_search_pro": return validateProOutput;
+    case "kimi_web_fetch": return validateFetchOutput;
+    default: return null;
+  }
+}
+
 export function readWebRetrievalResult(tool: string, text: string): WebRetrievalOutput | AppErrorOutput | null {
+  const validate = retrievalValidator(tool);
+  if (!validate) return null;
   const value = readResultText(text);
-  if (["kimi_web_search", "kimi_web_search_pro", "kimi_web_fetch"].includes(tool) && validateBuiltinWebErrorOutput(value)) return value;
-  const validate = tool === "kimi_web_search" ? validateSearchOutput : tool === "kimi_web_search_pro" ? validateProOutput : tool === "kimi_web_fetch" ? validateFetchOutput : null;
-  return validate?.(value) ? value as WebRetrievalOutput : null;
+  if (validateBuiltinWebErrorOutput(value)) return value;
+  return validate(value) ? value as WebRetrievalOutput : null;
+}
+
+export function hasWebRetrievalError(tool: string | undefined, text: string | undefined): boolean {
+  const validate = retrievalValidator(tool);
+  if (!text || !validate) return false;
+  const value = readResultText(text);
+  return typeof value === "object" && value !== null && "error" in value &&
+    (validateBuiltinWebErrorOutput(value) || validate(value));
 }
 
 export type DeepSearchPreview = SearchSuccess | ErrorOutput | AppErrorOutput;

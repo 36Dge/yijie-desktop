@@ -46,7 +46,7 @@ const fetchDetails = computed(() => {
 const fetchDescription = computed(() => {
   if (fetchDetails.value) return fetchDetails.value.description;
   if (props.item.busy) return "正在读取网页内容…";
-  if (props.item.activityLabel) return;
+  if (props.item.activityLabel) return props.item.activityLabel;
   switch (props.execution.status) {
     case "completed": return "读取已完成。这条记录没有保存页面详情。";
     case "failed": return "网页读取失败。这条记录没有保存具体原因。";
@@ -61,7 +61,6 @@ const searchResult = computed(() => {
   if (!deepSearch.value || receipt?.resultKind !== "text" || receipt.texts.length !== 1 || receipt.texts[0]?.index !== 0) return null;
   return readDeepSearchPreview(receipt.texts[0].text);
 });
-const hasDetails = computed(() => !deepSearch.value || Boolean(query.value || searchResult.value || (props.searchCalls?.length ?? 0) > 1));
 const title = computed(() => [activityItemTitle(props.item), query.value || fetchSite.value].filter(Boolean).join(" · "));
 const elapsed = computed(() => native.value.durationMs == null ? null : formatToolDuration(native.value.durationMs));
 const identity = computed(() => mcp.value?.server && mcp.value.tool ? `${mcp.value.server} / ${mcp.value.tool}` : "工具身份信息不完整");
@@ -94,7 +93,6 @@ const summaryStatus = computed(() => {
   if (fact.value?.outcome === "failed") return "搜索失败";
   if (fact.value?.outcome === "unknown") return "结果待确认";
   if (fact.value?.outcome === "empty") return "0 条结果";
-  if (!hasDetails.value) return [status.value, elapsed.value].filter(Boolean).join(" · ");
   const result = searchResult.value;
   if ((evidence.value.execution?.status === "completed") && result && "results" in result && (result.results.length || !result.truncated)) {
     return fact.value?.outcome === "partial"
@@ -130,20 +128,17 @@ const diagnosticLabels = {
 <template>
   <ChatTimelineItemShell
     :class="{ 'deep-search-row': deepSearch, 'web-fetch-row': webFetch }"
-    :activity-header="deepSearch || webFetch"
     :process-presentation="processPresentation"
     :item="item" :label="title" :status-label="headerStatus" :icon="deepSearch ? 'scanSearch' : webFetch ? 'readPage' : 'skillOperations'"
-    :status-icon="item.busy ? 'pending' : native.type === 'subAgentActivity' || execution.status === 'completed' ? 'check' : 'warning'"
-    :status-tone="item.busy ? 'primary' : native.type === 'subAgentActivity' ? 'muted' : execution.status === 'completed' ? 'success' : 'muted'"
-    :collapsible="hasDetails" :show-availability="!deepSearch && !webFetch" :default-expanded="!deepSearch && !webFetch && !processPresentation && item.busy"
+    collapsible :show-availability="!deepSearch && !webFetch" :default-expanded="!deepSearch && !webFetch && !processPresentation && item.busy"
     @disclosure-change="emit('disclosure-change', $event)"
   >
-    <template v-if="hasDetails" #default>
     <div class="native-tool" :aria-busy="item.busy">
       <template v-if="deepSearch">
         <p v-if="query" class="native-tool__query">搜索词 {{ query }}</p>
         <WebRetrievalResult v-if="searchResult" :key="item.identity" :preview="searchResult" @open-source="open" />
-        <p v-else-if="!item.busy && execution.status === 'completed'" role="note">本次搜索的结果详情不可用。</p>
+        <p v-else-if="item.activityLabel" role="note">{{ item.activityLabel }}</p>
+        <p v-else-if="!item.busy" role="note">{{ execution.status === "completed" && !fact ? "本次搜索的结果详情不可用。" : summaryStatus }}</p>
         <details v-if="searchCalls && searchCalls.length > 1" class="native-tool__calls">
           <summary>调用明细（{{ searchCalls.length }} 次）</summary>
           <ol><li v-for="call in searchCalls" :key="call.identity">
@@ -186,7 +181,6 @@ const diagnosticLabels = {
       <p v-else-if="native.availability !== 'available'" role="note">该项内容信息不完整；这不改变原生执行结果。</p>
       </template>
     </div>
-    </template>
   </ChatTimelineItemShell>
 </template>
 

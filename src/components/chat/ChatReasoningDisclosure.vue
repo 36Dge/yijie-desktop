@@ -4,6 +4,7 @@ import type { ChatReasoningItem, ChatReasoningMetadata } from "../../domain/chat
 import { reasoningStatusLabel } from "../../domain/chat-ui";
 import type { LiveReasoningPart } from "../../stores/chat.store";
 import YjIcon from "../yijie/YjIcon.vue";
+import ChatActivityChevron from "./ChatActivityChevron.vue";
 
 const props = withDefaults(defineProps<{
   disclosureId: string;
@@ -28,14 +29,6 @@ const emit = defineEmits<{
 
 const expanded = ref(props.defaultExpanded);
 const contentId = computed(() => `${props.disclosureId}-content`);
-const itemCount = computed(() => props.live
-  ? new Set(props.liveParts.map((part) => part.itemOrdinal)).size
-  : props.metadata.length,
-);
-const byteCount = computed(() => props.live
-  ? new TextEncoder().encode(props.liveParts.map((part) => part.text).join("")).length
-  : props.metadata.reduce((total, item) => total + item.totalBytes, 0),
-);
 const overallStatus = computed(() => {
   if (props.live) return "streaming";
   if (props.metadata.some((item) => item.status === "unavailable")) return "unavailable";
@@ -62,20 +55,18 @@ watch(() => props.defaultExpanded, (value) => {
 <template>
   <section class="reasoning" :class="`reasoning--${overallStatus}`" aria-label="模型推理记录">
     <button
-      class="reasoning__trigger"
+      class="reasoning__trigger chat-activity-disclosure"
       type="button"
       :aria-expanded="expanded"
       :aria-controls="contentId"
+      :aria-description="statusText"
       @click="toggle"
     >
       <span class="reasoning__title">
         <YjIcon name="assistant" size="sm" tone="muted" />
         模型推理记录
       </span>
-      <span class="reasoning__summary">
-        {{ statusText }}<template v-if="itemCount > 0"> · {{ itemCount }} 项 · {{ byteCount }} 字节</template>
-      </span>
-      <YjIcon :name="expanded ? 'chevronDown' : 'chevronRight'" size="sm" tone="muted" />
+      <ChatActivityChevron :expanded="expanded" />
     </button>
 
     <div v-if="expanded" :id="contentId" class="reasoning__content">
@@ -105,20 +96,11 @@ watch(() => props.defaultExpanded, (value) => {
 </template>
 
 <style scoped>
-.reasoning {
-  border: var(--yj-border-width) solid var(--yj-color-border-subtle);
-  border-radius: var(--yj-radius-lg);
-  background: var(--yj-color-bg-subtle);
-}
-
-.reasoning--incomplete { border-color: color-mix(in srgb, var(--yj-color-warning) 32%, transparent); }
-.reasoning--unavailable { border-color: color-mix(in srgb, var(--yj-color-error) 32%, transparent); }
-
 .reasoning__trigger {
   display: grid;
   width: 100%;
   min-height: var(--yj-space-10);
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--yj-space-3);
   padding: var(--yj-space-3) var(--yj-space-4);
@@ -129,23 +111,13 @@ watch(() => props.defaultExpanded, (value) => {
   text-align: left;
 }
 
-.reasoning__trigger:hover { background: var(--yj-color-control-hover); }
-.reasoning__trigger:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-space-1); }
+.reasoning__trigger:is(:hover, :focus-visible) { background: var(--yj-color-control-hover); }
 
 .reasoning__title {
   display: inline-flex;
   align-items: center;
   gap: var(--yj-space-2);
   font-weight: var(--yj-font-weight-semibold);
-}
-
-.reasoning__summary {
-  min-width: 0;
-  color: var(--yj-color-text-tertiary);
-  font-size: var(--yj-font-size-caption);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .reasoning__content {

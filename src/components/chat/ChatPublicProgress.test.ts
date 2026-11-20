@@ -24,8 +24,8 @@ describe("native public progress reading", () => {
     await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
     expect(before(wrapper.findAll(opening)[0]!.element, wrapper.get(summary).element)).toBe(true);
     expect(wrapper.findAll(".chat-activity-group")).toHaveLength(2);
-    // Single-call groups intentionally omit a redundant count label.
-    expect(wrapper.findAll(".chat-activity-group__counts").map(node => node.text())).toEqual(["2 次调用"]);
+    expect(wrapper.findAll(".chat-activity-group__toggle").map(node => node.attributes("aria-description"))).toEqual(["2 次调用"]);
+    expect(wrapper.get(".chat-activity-group__toggle").text()).not.toContain("次调用");
     const groups = conversationActivityPresentation(traceTurn(items)).filter(node => node.kind === "activity");
     expect(groups.map(node => node.group.items.length)).toEqual([2, 1]);
     expect(wrapper.findAll(opening).map(node => node.get(".chat-safe-content").text())).toEqual(["我会先比较范围。", "已明确两种不同范围。"]);

@@ -63,7 +63,7 @@ describe("one expandable reasoning summary per turn", () => {
     const before = JSON.stringify(input), wrapper = render(input, true);
     expect(wrapper.findAll(toggle)).toHaveLength(1);
     expect(wrapper.findAll(".chat-activity-group")).toHaveLength(1);
-    expect(wrapper.get(".chat-activity-group__counts").text()).toBe("2 次调用");
+    expect(wrapper.get(".chat-activity-group__toggle").attributes("aria-description")).toBe("2 次调用");
     expect(wrapper.get(".chat-activity-group__title").text()).toBe("运行了命令");
     await wrapper.get(".chat-activity-group__toggle").trigger("click");
     expect(wrapper.findAll('[data-activity-item]')).toHaveLength(2);

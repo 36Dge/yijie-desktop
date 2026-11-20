@@ -63,7 +63,7 @@ describe("FEAT-136 native Command display", () => {
     const wrapper = setup(view({status, exitCode: status === "completed" ? 128 : 0}, {status: "failed"}));
     await expand(wrapper);
     if (status === "completed") {
-      expect(wrapper.get(".chat-timeline-item-shell__status").text()).toBe("已完成");
+      expect(wrapper.get(".chat-timeline-item-shell__disclosure").attributes("aria-description")).toBe("已完成");
       expect(wrapper.find(".chat-command-item__error").exists()).toBe(false);
     } else {
       expect(wrapper.get(".chat-command-item__error code").text()).toBe(`command_${status}`);
@@ -108,7 +108,7 @@ describe("FEAT-136 native Command display", () => {
     const wrapper = setup(input, "turn");
     expect(wrapper.get("article").attributes("aria-busy")).toBe("false");
     expect(wrapper.get(".chat-timeline-item-shell__disclosure").attributes("aria-expanded")).toBe("false");
-    expect(wrapper.get(".chat-timeline-item-shell__status").text()).toContain("本轮已结束，未观察到该项结束记录");
+    expect(wrapper.get(".chat-timeline-item-shell__disclosure").attributes("aria-description")).toContain("本轮已结束，未观察到该项结束记录");
     await expand(wrapper);
     expect(wrapper.get('[aria-live="polite"]').text()).toContain("本轮已结束，未观察到该项结束记录");
     expect(wrapper.text()).not.toContain("命令正在执行");

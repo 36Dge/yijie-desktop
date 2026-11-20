@@ -1,6 +1,7 @@
 import { observedProgressMessages, tailCommentaryCandidate } from "./conversation-process";
 import { traceDiagnosticBlocksLive } from "./conversation-trace-liveness";
 import { reasoningSummaryIsCurrent } from "./conversation-reasoning-summary";
+import { showConversationActivity } from "./conversation-tool-visibility";
 import { deepSearchEvidence, deepSearchReceipt, activityEntriesForItem, type ConversationActivityEntry } from "./conversation-activity-entry";
 import type { ConversationTimelineItemViewModel as Item, ConversationTimelineTurnViewModel as Turn } from "./conversation-timeline";
 
@@ -11,40 +12,6 @@ export type ConversationActivityGroup = Readonly<{ identity: string; items: read
 export type ConversationReadingNode =
   | Readonly<{ kind: "activity"; identity: string; group: ConversationActivityGroup }>
   | Readonly<{ kind: "message" | "attention"; identity: string; item: Item; searchCalls?: readonly Item[]; process: boolean; answerCandidate: boolean }>;
-
-/** Reading placement only. A finished turn alone does not establish recovery.
- * Require later successful execution followed by a readable public answer.
- * There is no retry identity in the display projection: never match redacted
- * labels, rewrite failed status, or claim that an individual call succeeded. */
-function historicalFailures(turn: Turn): ReadonlySet<string> {
-  const result = new Set<string>();
-  if (turn.source !== "native_observed" || turn.domainStatus !== "completed" ||
-      turn.terminalStatus !== "completed" || traceDiagnosticBlocksLive(turn.diagnostic) || turn.terminalCode ||
-      turn.availability === "unavailable") return result;
-  let answered = false;
-  let continuedSuccessfully = false;
-  for (let index = turn.items.length - 1; index >= 0; index--) {
-    const item = turn.items[index]!;
-    if (item.presentation === "user_message") break;
-    if (["final_answer", "assistant_unclassified"].includes(item.presentation)) {
-      // Do not carry evidence across an earlier explicit answer boundary.
-      if (answered && item.presentation === "final_answer") break;
-      answered ||= item.domainStatus === "completed" && !item.activityLabel &&
-        item.availability !== "unavailable" && item.availability !== "partial" &&
-        item.contentBlocks.some(block => (block.type === "text" || block.type === "code") && block.text.trim());
-    }
-    if (!answered || item.domainStatus !== "completed" || item.busy || item.activityLabel ||
-        item.approval?.status === "pending" || item.availability === "unavailable") continue;
-    const execution = item.execution;
-    if (execution?.status === "completed" && (execution.kind !== "command" ||
-        ("native" in execution ? execution.native.item.exitCode : execution.exitCode) === 0)) {
-      continuedSuccessfully = true;
-    } else if (execution?.status === "failed" && continuedSuccessfully) {
-      result.add(item.identity);
-    }
-  }
-  return result;
-}
 
 function unsupportedDisplayOnly(item: Item): boolean {
   return item.presentation === "unknown" && item.domainStatus === "completed" &&
@@ -61,11 +28,10 @@ export function conversationActivityPresentation(turn: Turn, attentionIds: Reado
   // message, and the last readable answer is never hidden by trailing work.
   const observed = preserveUnclassified ? new Set<string>() : observedProgressMessages(turn.items);
   const candidate = tailCommentaryCandidate(turn.items);
-  const historical = historicalFailures(turn);
-  // Project the raw native items once per turn. Call IDs, including each
-  // follower, remain available in the original turn and the disclosure.
+  const visibleItems = turn.items.filter(item => item.approval?.status === "pending" || showConversationActivity(item));
+  // Filter each call before choosing the representative of a shared operation.
   const searches = new Map<string, Map<string, Item>>();
-  for (const item of turn.items) {
+  for (const item of visibleItems) {
     const id = deepSearchReceipt(item)?.operation_id;
     if (!id) continue;
     const calls = searches.get(id) ?? new Map<string, Item>();
@@ -90,7 +56,7 @@ export function conversationActivityPresentation(turn: Turn, attentionIds: Reado
     nodes.push({kind: "activity", identity, group: {identity, items: pending, entries, state: {kind: "summary"}}});
     pending = [];
   };
-  for (const item of turn.items) {
+  for (const item of visibleItems) {
     const related = searchCalls(item);
     if (related) {
       if (related[0]!.identity !== item.identity || rendered.has(item.identity)) continue;
@@ -101,10 +67,8 @@ export function conversationActivityPresentation(turn: Turn, attentionIds: Reado
     if (item.presentation === "reasoning" && !["stream_gap", "runtime_error", "protocol_error", "host_shutdown", "limit_exceeded"].includes(item.reasoning?.reasonCode ?? "")) continue;
     const attention = attentionIds.has(item.identity) || item.approval?.status === "pending" ||
       Boolean(item.activityLabel) || (item.availability === "partial" && ["commentary", "assistant_unclassified", "final_answer"].includes(item.presentation)) || (item.reasoning != null && (item.reasoning.reasonCode != null || item.reasoning.status === "incomplete")) ||
-      (item.execution != null && ["incomplete", "unknown", "declined", "cancelled"].includes(item.execution.status)) ||
       (item.presentation === "unknown" && !unsupportedDisplayOnly(item)) ||
-      (item.availability === "unavailable" && !unsupportedDisplayOnly(item)) ||
-      (item.execution?.status === "failed" && !historical.has(item.identity));
+      (item.availability === "unavailable" && !unsupportedDisplayOnly(item));
     if (attention || !["reasoning", "command", "tool", "web_search", "unknown"].includes(item.presentation)) {
       flush();
       const answerCandidate = item.identity === candidate;
@@ -148,7 +112,6 @@ export function traceCurrentStatus(turn: Turn, hasDeliveredArtifact = false): st
   if (latest?.presentation === "context_update" && latest.contextUpdateState === "in_progress") return null;
   if (latest?.presentation === "commentary" && latest.busy && latest.contentBlocks.some(block => (block.type === "text" || block.type === "code") && block.text.trim())) return null;
   if (latest && ["final_answer", "assistant_unclassified"].includes(latest.presentation) && latest.contentBlocks.some(block => (block.type === "text" || block.type === "code") && block.text.trim())) return null;
-  if (latest?.busy && ["command", "tool", "web_search"].includes(latest.presentation)) return null;
   if (latest?.presentation === "reasoning") return "正在思考";
   return hasDeliveredArtifact ? null : "等待模型继续输出";
 }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { Decision, DecisionFact, MarketApproval, NativeObservation, ToolObservation } from "../../domain/market-host-v2-native.generated";
+import { hasWebRetrievalError } from "../../domain/web-retrieval-display";
 import WebRetrievalResult from "./WebRetrievalResult.vue";
 import ChatApprovalPrompt from "./ChatApprovalPrompt.vue";
 import YjIcon from "../yijie/YjIcon.vue";
@@ -13,14 +14,19 @@ const props = defineProps<{
   actionable: (approval: MarketApproval) => boolean;
   toolObservation?: NativeObservation | null;
   selectedTurnId?: string | null;
+  liveNativeTurnId?: string | null;
   historyRefreshing?: boolean;
   historyError?: string | null;
 }>();
 defineEmits<{ refresh: []; decision: [approvalId: string, decision: Decision]; selectTurn: [turnId: string | null] }>();
 const pending = computed(() => props.observation?.approvals?.requests.filter(item => item.state === "pending") ?? []);
-const toolLabels = { in_progress: "执行中", completed: "已完成", failed: "执行失败" };
 const names = computed(() => new Map(props.observation?.selectionDisplay.map(item => [item.serviceId, item.displayName])));
 const displayed = computed(() => props.toolObservation === undefined ? props.observation : props.toolObservation);
+const visibleTools = computed(() => (displayed.value?.tools?.items ?? []).filter(item => {
+  const live = item.state === "in_progress" && props.connected && !props.selectedTurnId && item.nativeTurnId === props.liveNativeTurnId;
+  return (item.state === "completed" || live) && !item.errorCode &&
+    !hasWebRetrievalError(item.toolName, item.resultText) && !hasWebRetrievalError(item.toolName, item.structuredResultText);
+}));
 const decisionLabels = { approve_once: "已允许一次", reject: "已拒绝", cancel: "已取消本次" };
 const decisionIntents = { approve_once: "允许一次", reject: "拒绝", cancel: "取消本次" };
 function decisionTime(timestamp: number): string {
@@ -88,11 +94,10 @@ function callSourceName(turnId: string, identity: Pick<DecisionFact, "serviceId"
       <p class="market-activity__meta">{{ fact.toolName }} · {{ decisionTime(fact.observedAtUnixMs) }}</p>
       <p>{{ fact.kind === 'acknowledged' ? '已确认' : '已请求' }}{{ decisionIntents[fact.decision] }}</p>
       <p v-if="fact.kind !== 'acknowledged'" class="market-activity__meta">决定送达未确认。</p>
-      <p class="market-activity__meta">当前展示尚无关联的工具结果；这条记录不能证明外部操作已执行或成功。</p>
     </article>
     <p v-if="displayed?.decisionFactsTruncated" class="market-activity__meta">仅展示此轮部分决定记录，优先保留待确认调用的记录。</p>
-    <article v-for="item in displayed?.tools?.items ?? []" :key="item.nativeItemId" class="market-activity__card" aria-label="连接器工具结果">
-      <header><YjIcon name="connector" size="md" /><strong>{{ toolSourceName(item) }}</strong><span>{{ toolLabels[item.state] }}</span></header>
+    <article v-for="item in visibleTools" :key="item.nativeItemId" class="market-activity__card" aria-label="连接器工具结果">
+      <header><YjIcon name="connector" size="md" /><strong>{{ toolSourceName(item) }}</strong><span>{{ item.state === 'in_progress' ? '执行中' : '已完成' }}</span></header>
       <p class="market-activity__meta">{{ item.toolName }}</p>
       <p v-if="item.correlation" class="market-activity__meta" aria-label="本次调用的批准记录">{{ item.correlation.decisionReceipt ? decisionLabels[item.correlation.decisionReceipt.decision] : '未记录到用户决定' }} · {{ item.correlation.admissionConsumed ? '执行结果以工具记录为准' : '本次未开始执行' }}</p>
       <p v-else-if="item.state !== 'in_progress'" class="market-activity__meta">审批与结果关联未确认。</p>
@@ -100,16 +105,16 @@ function callSourceName(turnId: string, identity: Pick<DecisionFact, "serviceId"
       <WebRetrievalResult v-if="item.resultText && ['kimi_web_search', 'kimi_web_search_pro', 'kimi_web_fetch'].includes(item.toolName)" :tool="item.toolName" :text="item.resultText" />
       <pre v-else-if="item.resultText">{{ item.resultText }}</pre>
       <p v-else-if="item.state === 'in_progress'">正在等待工具返回。</p>
-      <p v-else-if="item.state === 'failed'">本次工具调用失败，请根据对话中的结果继续处理。</p>
       <p v-else>工具调用已结束，没有可展示的文本结果。</p>
       <template v-if="item.structuredResultText"><p class="market-activity__meta">结构化结果（JSON）</p><pre aria-label="结构化工具结果">{{ item.structuredResultText }}</pre></template>
       <p v-if="item.truncated" class="market-activity__meta">结果展示不完整，部分内容已省略。</p>
     </article>
-    <p v-if="displayed?.tools?.truncated" class="market-activity__meta">调用记录较多，仅展示当前返回的部分记录。</p>
+    <p v-if="visibleTools.length && displayed?.tools?.truncated" class="market-activity__meta">调用记录较多，仅展示当前返回的部分记录。</p>
   </section>
 </template>
 <style scoped>
 .market-activity { display:grid; gap:var(--yj-space-3); margin-block:var(--yj-space-4); min-width:0; }
+.market-activity:empty { display: none; }
 .market-activity__card { display:grid; gap:var(--yj-space-2); border:var(--yj-border-width) solid var(--yj-color-border-default); border-radius:var(--yj-radius-lg); padding:var(--yj-space-4); background:var(--yj-color-bg-card); color:var(--yj-color-text-primary); min-width:0; }
 header,.market-activity__notice { display:flex; align-items:center; gap:var(--yj-space-2); flex-wrap:wrap; }
 header > span,.market-activity__meta { color:var(--yj-color-text-secondary); font-size:var(--yj-font-size-caption); }

@@ -42,8 +42,16 @@ export function conversationDiagnosticMessage(code: string): string {
   return messages[safeConversationDiagnostic(code)]!;
 }
 
-/** Presentation only: keep generic warnings in native facts, without an empty
- * user-facing explanation. Errors retain their state and retry information. */
+const toolNotices = new Set([
+  "web_retrieval_local_fetch_blocked", "operation_duplicate_pending", "operation_retry_unchanged",
+  "operation_retry_dns_unchanged", "operation_retry_network_unchanged", "operation_retry_access_unchanged",
+]);
+
+/** Older histories can carry a tool-level guard notice without a call ID. */
+export function isToolOutcomeNotice(code: string | undefined): boolean {
+  return code !== undefined && toolNotices.has(code);
+}
+
 export function showConversationNotice(kind: "warning" | "error", code?: string): boolean {
-  return kind !== "warning" || code !== "runtime_notice";
+  return !isToolOutcomeNotice(code) && (kind !== "warning" || code !== "runtime_notice");
 }

@@ -43,7 +43,8 @@ describe("ChatReasoningDisclosure", () => {
         metadata: [{ itemOrdinal: 0, status: "incomplete", reasonCode: "interrupted", totalBytes: 3, partCount: 1, finalizedAtMs: 1 }],
       },
     });
-    expect(incomplete.text()).toContain("推理记录因停止而不完整");
+    expect(incomplete.get("button").text()).toBe("模型推理记录");
+    expect(incomplete.get("button").attributes("aria-description")).toContain("推理记录因停止而不完整");
     const unavailable = mount(ChatReasoningDisclosure, {
       props: {
         disclosureId: "reasoning-unavailable",

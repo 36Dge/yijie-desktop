@@ -25,6 +25,7 @@ describe("iconRegistry", () => {
       "fileVideo",
       "globe",
       "readPage",
+      "toolGroup",
       "lightbulb",
       "previewSidebar",
       "enterFullscreen",

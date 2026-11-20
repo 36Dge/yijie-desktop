@@ -5,6 +5,7 @@ import type { ConversationTimelineItemViewModel } from "../../domain/conversatio
 import type { ChatTimelineDisclosureChange } from "./ChatTimelineItemShell.vue";
 import { sourceHref, sourceInitial, useWebSources } from "../../composables/useWebSources";
 import YjIcon from "../yijie/YjIcon.vue";
+import ChatActivityChevron from "./ChatActivityChevron.vue";
 import ChatShortScrollbar from "./ChatShortScrollbar.vue";
 
 const props = withDefaults(defineProps<{ item: ConversationTimelineItemViewModel; processPresentation?: boolean; searchOccurrence?: number }>(), {searchOccurrence: 1});
@@ -30,9 +31,10 @@ const detail = computed(() => {
   return search?.action === "search" ? webSearchQueryTitle(search.queries)
     : [search?.pageLabel, search?.pattern].filter(Boolean).join(" · ");
 });
-const status = computed(() => props.item.busy ? "进行中" : props.item.domainStatus === "completed" ? "已完成" : "记录未完整结束");
+const completed = computed(() => props.item.execution ? props.item.execution.status === "completed" : props.item.domainStatus === "completed");
+const status = computed(() => props.item.busy ? "进行中" : completed.value ? "已完成" : "记录未完整结束");
 const availabilityMessage = computed(() => props.item.availability === "unavailable" ? "此项内容暂不可用。" : null);
-const stateMessage = computed(() => props.item.activityLabel || (!props.item.busy && props.item.domainStatus !== "completed"
+const stateMessage = computed(() => props.item.activityLabel || (!props.item.busy && !completed.value
   ? "此项记录未完整结束；当前进度待确认。" : null));
 const emptyMessage = computed(() => props.item.busy ? "正在等待网页搜索结果…"
   : props.item.webSearch?.action === "search" ? "该记录未提供可展示的搜索来源。"
@@ -47,13 +49,12 @@ watch(() => props.item.identity, () => { expanded.value = false; });
 
 <template>
   <article class="chat-web-search" data-progress-source="runtime_records" :aria-label="label" :aria-busy="item.busy ? 'true' : 'false'">
-    <button class="chat-web-search__toggle" type="button" :aria-expanded="expanded" :aria-controls="contentId"
+    <button class="chat-web-search__toggle chat-activity-disclosure" type="button" :aria-expanded="expanded" :aria-controls="contentId"
       :aria-label="`${label}${detail ? ` ${detail}` : ''}，${status}，${expanded ? '收起' : '展开'}`" @click="toggle">
       <YjIcon class="chat-web-search__globe" name="skillCrossBorderSelection" size="xs" :stroke-width="1.5" />
       <span class="chat-web-search__label">{{ label }}</span>
       <span v-if="detail"  class="chat-web-search__query" >{{ detail }}</span>
-      <YjIcon class="chat-web-search__chevron" :name="expanded ? 'chevronDown' : 'chevronRight'"
-        size="xs" :stroke-width="1.5" />
+      <ChatActivityChevron :expanded="expanded" />
     </button>
     <p v-if="availabilityMessage" class="chat-web-search__notice" role="note">{{ availabilityMessage }}</p>
     <p v-if="stateMessage" class="chat-web-search__notice" role="note">{{ stateMessage }}</p>
@@ -98,7 +99,7 @@ watch(() => props.item.identity, () => { expanded.value = false; });
 }
 .chat-web-search__toggle {
   display: flex;
-  width: fit-content;
+  width: 100%;
   max-width: 100%;
   min-width: 0;
   align-items: center;
@@ -113,7 +114,6 @@ watch(() => props.item.identity, () => { expanded.value = false; });
   cursor: pointer;
 }
 .chat-web-search__toggle:hover { color: var(--yj-color-text-primary); }
-.chat-web-search__toggle:focus-visible,
 .chat-web-search__viewport:focus-visible,
 .chat-web-search__source-link:focus-visible {
   outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
@@ -127,10 +127,6 @@ watch(() => props.item.identity, () => { expanded.value = false; });
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.chat-web-search__chevron { opacity: 0; }
-.chat-web-search__toggle:hover .chat-web-search__chevron,
-.chat-web-search__toggle:focus-visible .chat-web-search__chevron,
-.chat-web-search__toggle[aria-expanded="true"] .chat-web-search__chevron { opacity: 1; }
 .chat-web-search__details {
   box-sizing: border-box;
   min-width: 0;
@@ -211,8 +207,5 @@ watch(() => props.item.identity, () => { expanded.value = false; });
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
-}
-@media (hover: none) {
-  .chat-web-search__chevron { opacity: 1; }
 }
 </style>

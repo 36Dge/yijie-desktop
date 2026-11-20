@@ -203,6 +203,7 @@ export const iconRegistry = {
   terminal: SquareTerminal,
   globe: Globe,
   readPage: BookOpenText,
+  toolGroup: Hammer,
   folderOpen: FolderOpen,
   gridView: Grid2X2,
   expandSidebar: PanelLeftOpen,
@@ -318,6 +319,7 @@ export const iconStrokeWidths: Partial<Record<YjIconName, number>> = {
   workflow: 1.5,
   scheduledTask: 1.5,
   skillOperations: 1.5,
+  toolGroup: 1.5,
   connector: 1.5,
   plugin: 1.5,
 };

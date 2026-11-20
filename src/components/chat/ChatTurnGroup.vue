@@ -258,7 +258,7 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
       <template v-for="node in entries" :key="node.identity">
         <li v-if="node.kind === 'timing' && (hasProcess || timingObserved || preloading)" class="chat-turn-group__timing">
           <span v-if="preloading" class="chat-turn-group__thinking" role="status" aria-live="polite"><ChatThinkingIndicator /></span>
-          <button v-else-if="hasProcess" class="chat-turn-group__process-toggle" type="button" :aria-expanded="processExpanded" :aria-controls="processControls" @click="toggleProcess">
+          <button v-else-if="hasProcess" class="chat-turn-group__process-toggle chat-activity-disclosure" type="button" :aria-expanded="processExpanded" :aria-controls="processControls" @click="toggleProcess">
             {{ timingLabel || '处理过程' }}<YjIcon :name="processExpanded ? 'chevronDown' : 'chevronRight'" size="xs" tone="muted" />
           </button>
           <span v-else>{{ timingLabel || '耗时待确认' }}</span>
@@ -322,10 +322,6 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
   cursor: pointer;
 }
 .chat-turn-group__process-toggle:hover { color: var(--yj-color-text-primary); }
-.chat-turn-group__process-toggle:focus-visible {
-  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
-  outline-offset: var(--yj-space-1);
-}
 .chat-turn-group__timing {
   min-height: calc(var(--yj-line-height-body) + var(--yj-space-2));
   /* Tighten only the space after the timing row, keeping the button's hit area. */

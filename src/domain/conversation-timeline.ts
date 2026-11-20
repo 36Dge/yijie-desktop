@@ -1,5 +1,7 @@
 import type { SelectedSkillRef } from "./market-selection-v2.generated";
 import { traceDiagnosticBlocksLive } from "./conversation-trace-liveness";
+import { isToolActivity } from "./conversation-tool-visibility";
+import { isToolOutcomeNotice } from "./conversation-diagnostics";
 import {
 selectConversationApprovalForCommand,
 type ConversationApproval,
@@ -505,7 +507,7 @@ function projectItem(
   const nativeLive = policy?.liveTurnId === turn.turnId && turn.source === "native_observed" &&
     turn.statusSource === "runtime_notification" && turn.status === "in_progress" && turn.availability !== "unavailable" && !traceDiagnosticBlocksLive(turn.diagnostic);
   const nativeExecutionActive = item.execution !== null && "native" in item.execution
-    ? item.execution.native.item.status === "inProgress" : true;
+    ? item.execution.status === "running" || item.execution.status === "in_progress" : true;
   const busy = unfinished && nativeLive && nativeExecutionActive && item.availability !== "unavailable";
   const ended = ["completed", "failed", "interrupted"].includes(turn.status);
   const activityLabel = unfinished && !busy
@@ -689,6 +691,12 @@ function projectTurn(
   approvalState?: ConversationApprovalState,
   policy?: ConversationTimelineProjectionPolicy,
 ): ConversationTimelineTurnViewModel {
+  const items = relatedItems(state, turn).map(item => projectItem(item, turn, approvalState, policy));
+  let traceNotices = turn.traceNotices?.filter(notice => !isToolOutcomeNotice(notice.code));
+  if (traceNotices?.some(notice => notice.itemId)) {
+    const toolIds = new Set(items.filter(isToolActivity).map(item => item.itemId));
+    traceNotices = traceNotices.filter(notice => !notice.itemId || !toolIds.has(notice.itemId));
+  }
   return Object.freeze({
     liveObserved: policy?.liveTurnId === turn.turnId,
     nativeThreadId: turn.nativeThreadId, nativeTurnId: turn.nativeTurnId,
@@ -704,9 +712,8 @@ function projectTurn(
     plan: projectPlan(turn, policy),
     progress: projectProgress(turn, policy),
     notices: projectNotices(turn),
-    traceNotices: turn.traceNotices, traceSequence: turn.traceSequence,
-    items: Object.freeze(relatedItems(state, turn)
-      .map((item) => projectItem(item, turn, approvalState, policy))),
+    traceNotices, traceSequence: turn.traceSequence,
+    items: Object.freeze(items),
   });
 }
 

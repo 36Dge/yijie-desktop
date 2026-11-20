@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { NativeConversationView } from "../../api/generated/native-conversation-private.gen";
 import { composeConversationView, type ConversationSnapshot } from "../../domain/conversation-view";
 import { selectConversationTimeline } from "../../domain/conversation-timeline";
+import { completedTurnAnswer } from "../../domain/conversation-process";
 import { copyableTimelineItemText } from "../../domain/conversation-timeline-copy";
 import ChatTimeline from "./ChatTimeline.vue";
 import ChatDeepThinking from "./ChatDeepThinking.vue";
@@ -32,6 +33,97 @@ function frozen<T>(value: T): T {
 }
 
 describe("FEAT-134 native streaming presentation", () => {
+  it.each(["completed", "failed", "interrupted"] as const)("omits start-only web rows when a turn is %s and restores a late completion by ID", async status => {
+    const starts: NativeConversationView["items"] = (["search", "openPage", "findInPage"] as const).map((action, ordinal) => ({
+      ordinal, lastMethod: "item/started", item: {
+        id: `start-${action}`, type: "webSearch", availability: "available", webSearch: {action, queries: []},
+      },
+    }));
+    const items: NativeConversationView["items"] = [...starts,
+      {ordinal: 3, lastMethod: "item/completed", item: {id: "finished-search", type: "webSearch", availability: "available", webSearch: {action: "search", queries: []}}},
+      {ordinal: 4, lastMethod: "item/completed", item: {id: "failed-fetch", type: "mcpToolCall", status: "failed", availability: "partial",
+        mcp: {server: "yijie_web", tool: "kimi_web_fetch", resultKind: "omitted", texts: [], diagnostics: []}}},
+    ];
+    const view = frozen(native({items}));
+    const wrapper = mount(ChatTimeline, {props: {timeline: timeline(view, "turn")}});
+    expect(wrapper.findAll(".chat-web-search")).toHaveLength(4);
+
+    const ended = frozen({...view, status, terminalObserved: true});
+    for (const liveTurnId of ["turn", null]) {
+      const projection = timeline(ended, liveTurnId);
+      expect(projection.turns[0]!.items.map(item => item.itemId)).toEqual(items.map(entry => entry.item.id));
+      await wrapper.setProps({timeline: projection});
+      expect(wrapper.findAll(".chat-web-search")).toHaveLength(1);
+      expect(wrapper.html()).not.toContain("未观察到该项结束记录");
+      expect(wrapper.find(".web-fetch-row").exists()).toBe(false);
+    }
+
+    const later = [...items];
+    later[0] = {...items[0]!, lastMethod: "item/completed"};
+    await wrapper.setProps({timeline: timeline({...ended, revision: "2", items: later})});
+    expect(wrapper.findAll(".chat-web-search")).toHaveLength(2);
+    expect(ended.items[0]!.lastMethod).toBe("item/started");
+    wrapper.unmount();
+  });
+
+  it("removes a running tool and its notice on failure, and keeps independent turn notices", async () => {
+    const initial = native({items: [{ordinal: 0, lastMethod: "item/started", item: {
+      id: "tool", type: "mcpToolCall", status: "inProgress", availability: "available", toolLabel: "查询资料",
+    }}]});
+    const wrapper = mount(ChatTimeline, {props: {timeline: timeline(initial, "turn")}});
+    expect(wrapper.find(".chat-activity-group").exists()).toBe(true);
+    const next = frozen(native({items: [{ordinal: 0, lastMethod: "item/completed", item: {
+      ...initial.items[0]!.item, status: "failed",
+    }}], notices: [
+      {eventId: "per-item", sequence: "2", method: "error", code: "transport_error", scope: "turn", itemId: "tool"},
+      {eventId: "per-turn", sequence: "3", method: "warning", code: "answer_completion_continuing", scope: "turn"},
+    ]}));
+    await wrapper.setProps({timeline: timeline(next, "turn")});
+    expect(wrapper.find(".chat-activity-group, .chat-turn-group__item--tool").exists()).toBe(false);
+    expect(wrapper.get(".chat-trace-notices").text()).toContain("正在根据已有结果补全回答");
+    expect(wrapper.get(".chat-trace-notices").text()).not.toContain("运行错误");
+    const record = next.items[0]!;
+    await wrapper.setProps({timeline: timeline({...next, items: [{...record, item: {...record.item, status: "completed"}}]}, "turn")});
+    expect(wrapper.find(".chat-turn-group__item--tool").exists()).toBe(true);
+    expect(wrapper.get(".chat-trace-notices").text()).not.toContain("运行错误");
+    expect(next.notices).toHaveLength(2);
+    wrapper.unmount();
+  });
+
+  it("omits the empty activity group and preserves the meaning of the message preceding a web start", () => {
+    const view = native({status: "completed", terminalObserved: true, items: [
+      {ordinal: 0, lastMethod: "item/completed", item: {id: "opening", type: "agentMessage", text: "我来查看网页。", availability: "available"}},
+      {ordinal: 1, lastMethod: "item/started", item: {id: "web", type: "webSearch", availability: "available"}},
+    ]});
+    const projection = timeline(view);
+    const wrapper = mount(ChatTimeline, {props: {timeline: projection}});
+    expect(wrapper.text()).toContain("我来查看网页。");
+    expect(wrapper.find(".chat-web-search, .chat-activity-group, .chat-turn-group__process-toggle").exists()).toBe(false);
+    expect(completedTurnAnswer(projection.turns[0]!)).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it("uses recorded tool outcomes when rebuilding a turn from thread/read", async () => {
+    const view = native({source: "native_rebuilt", statusSource: "runtime_read", status: "completed", terminalObserved: false,
+      items: [
+        {ordinal: 0, lastMethod: "thread/read", item: {id: "failed", type: "mcpToolCall", status: "failed", availability: "available"}},
+        {ordinal: 1, lastMethod: "thread/read", item: {id: "stale", type: "commandExecution", status: "inProgress", availability: "available"}},
+        {ordinal: 2, lastMethod: "thread/read", item: {id: "unknown", type: "webSearch", availability: "available"}},
+        {ordinal: 3, lastMethod: "thread/read", item: {id: "known", type: "webSearch", status: "completed", availability: "partial",
+          webSearch: {action: "openPage", queries: [], pageLabel: "example.org"}}},
+      ]});
+    const wrapper = mount(ChatTimeline, {props: {timeline: timeline(view)}});
+    await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
+    const group = wrapper.find(".chat-activity-group__toggle");
+    if (group.exists()) await group.trigger("click");
+    expect(wrapper.findAll(".chat-web-search")).toHaveLength(1);
+    expect(wrapper.get(".chat-web-search").isVisible()).toBe(true);
+    expect(wrapper.get(".chat-web-search button").attributes("aria-label")).toContain("已完成");
+    expect(wrapper.get(".chat-web-search").text()).toContain("example.org");
+    expect(wrapper.find(".chat-turn-group__item--tool, .chat-turn-group__item--command").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it.each([undefined, "final_answer", "commentary"] as const)("follows CLI phase %s handling while keeping Item and Turn completion separate", async phase => {
     const started = frozen(native({availability: "available", items: [{
       ordinal: 0, lastMethod: "item/started",

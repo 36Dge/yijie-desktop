@@ -102,7 +102,7 @@ describe("ChatToolItem", () => {
     ["failed" as const, "调用失败", false],
     ["declined" as const, "已拒绝", false],
     ["incomplete" as const, "未完整结束", false],
-  ])("renders %s with status text, an icon, and the correct initial disclosure", (
+  ])("renders %s with an accessible status and the correct initial disclosure", (
     status,
     label,
     expanded,
@@ -115,11 +115,11 @@ describe("ChatToolItem", () => {
     const wrapper = mount(ChatToolItem, { props: { item: item(tool), execution: tool } });
 
     const disclosure = wrapper.get(".chat-timeline-item-shell__disclosure");
-    const visibleStatus = wrapper.get(".chat-timeline-item-shell__status");
     expect(disclosure.attributes("aria-expanded")).toBe(String(expanded));
     expect(disclosure.attributes("type")).toBe("button");
-    expect(visibleStatus.text()).toBe(label);
-    expect(visibleStatus.find("svg").exists()).toBe(true);
+    expect(disclosure.attributes("aria-description")).toBe(label);
+    expect(disclosure.find(".chat-timeline-item-shell__status").exists()).toBe(false);
+    expect(disclosure.find(".chat-activity-chevron").exists()).toBe(true);
     expect(wrapper.find(".chat-tool-item__details").exists()).toBe(expanded);
   });
 

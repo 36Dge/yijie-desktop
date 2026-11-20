@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { conversationDiagnosticMessage, safeConversationDiagnostic } from "./conversation-diagnostics";
+import { conversationDiagnosticMessage, safeConversationDiagnostic, showConversationNotice } from "./conversation-diagnostics";
 import { composeConversationView, type ConversationSnapshot } from "./conversation-view";
 import { selectConversationTimeline } from "./conversation-timeline";
 import type { NativeConversationView } from "../api/generated/native-conversation-private.gen";
@@ -61,7 +61,7 @@ it("shows execution guard reasons through the existing diagnostic allowlist", ()
   expect(conversationDiagnosticMessage("web_retrieval_local_fetch_blocked")).toContain("本地脚本");
 });
 
-it("keeps a guard reason visible without inventing an executed command or failed answer", () => {
+it("retains the recorded guard reason and filters tool notices without hiding a turn-level stop", () => {
   const saved: NativeConversationView = {
     sessionId: "session", turnId: "turn", runtimeThreadId: "runtime-thread", runtimeTurnId: "runtime-turn",
     source: "native_observed", revision: "5", availability: "available", status: "completed",
@@ -70,6 +70,12 @@ it("keeps a guard reason visible without inventing an executed command or failed
   const snapshot: ConversationSnapshot = { threads: [{ threadId: "session", status: "ready" }], turns: [], items: [] };
   const timeline = selectConversationTimeline(composeConversationView(snapshot, [saved]), "session")!;
   expect(timeline.notices[0]?.diagnostic).toBe("web_retrieval_local_fetch_blocked");
+  for (const method of ["warning", "error"] as const) {
+    expect(showConversationNotice(method, timeline.notices[0]!.diagnostic)).toBe(false);
+    expect(showConversationNotice(method, "operation_retry_network_unchanged")).toBe(false);
+    expect(showConversationNotice(method, "operation_guard_capacity")).toBe(true);
+    expect(showConversationNotice(method, "session_budget_exceeded")).toBe(true);
+  }
   expect(timeline.turns[0]?.domainStatus).toBe("completed");
   expect(timeline.turns[0]?.items).toEqual([]);
 });

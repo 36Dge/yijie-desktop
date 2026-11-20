@@ -6,7 +6,7 @@ import type { ChatTimelineDisclosureChange } from "./ChatTimelineItemShell.vue";
 import ChatSafeContent from "./ChatSafeContent.vue";
 import ChatShortScrollbar from "./ChatShortScrollbar.vue";
 import ChatThinkingIndicator from "./ChatThinkingIndicator.vue";
-import YjIcon from "../yijie/YjIcon.vue";
+import ChatActivityChevron from "./ChatActivityChevron.vue";
 
 const props = withDefaults(defineProps<{
   item: ConversationTimelineItemViewModel;
@@ -78,11 +78,10 @@ onBeforeUnmount(cancelScroll);
 
 <template>
   <article class="chat-deep-thinking" :aria-label="label" :aria-busy="live ? 'true' : 'false'">
-    <button class="chat-deep-thinking__toggle" type="button" :aria-expanded="expanded" :aria-controls="contentId"
+    <button class="chat-deep-thinking__toggle chat-activity-disclosure" type="button" :aria-expanded="expanded" :aria-controls="contentId"
       :aria-label="`${label}，${expanded ? '收起' : '展开'}`" @click="toggle">
       <span class="chat-deep-thinking__title"><ChatThinkingIndicator :label="live && thinking ? '正在思考' : label" :active="live && thinking === true" :paused="!visible" /><template v-if="heading"> · {{ heading }}</template></span>
-      <YjIcon class="chat-deep-thinking__chevron" :name="expanded ? 'chevronDown' : 'chevronRight'"
-        size="xs" :stroke-width="1.5" tone="muted" />
+      <ChatActivityChevron :expanded="expanded" />
     </button>
     <p v-if="!items && item.availability && item.availability !== 'available'" class="chat-deep-thinking__notice" role="note">
       {{ item.availability === 'unavailable' ? '此项内容暂不可用' : '此项信息不完整' }}；不代表执行失败。
@@ -115,7 +114,8 @@ onBeforeUnmount(cancelScroll);
   font-weight: var(--yj-font-weight-regular);
 }
 .chat-deep-thinking__toggle {
-  display: inline-flex;
+  display: flex;
+  width: 100%;
   align-items: center;
   gap: var(--yj-space-1);
   padding: var(--yj-space-1) 0;
@@ -130,11 +130,6 @@ onBeforeUnmount(cancelScroll);
 .chat-deep-thinking__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-deep-thinking__title :deep(.chat-thinking) { display: inline; }
 .chat-deep-thinking__toggle:hover { color: var(--yj-color-text-primary); }
-.chat-deep-thinking__toggle .chat-deep-thinking__chevron { flex-shrink: 0; color: inherit; opacity: 0; }
-.chat-deep-thinking__toggle:hover .chat-deep-thinking__chevron,
-.chat-deep-thinking__toggle:focus-visible .chat-deep-thinking__chevron,
-.chat-deep-thinking__toggle[aria-expanded="true"] .chat-deep-thinking__chevron { opacity: 1; }
-.chat-deep-thinking__toggle:focus-visible,
 .chat-deep-thinking__viewport:focus-visible {
   outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
@@ -165,7 +160,4 @@ onBeforeUnmount(cancelScroll);
 .chat-deep-thinking__notice,
 .chat-deep-thinking__empty { margin: 0; }
 .chat-deep-thinking__notice { color: var(--yj-color-text-secondary); margin-top: var(--yj-space-1); }
-@media (hover: none) {
-  .chat-deep-thinking__toggle .chat-deep-thinking__chevron { opacity: 1; }
-}
 </style>

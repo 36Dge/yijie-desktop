@@ -43,6 +43,7 @@ const props = withDefaults(defineProps<{
   approvalTransients?: Readonly<Record<string, ChatApprovalTransientState | undefined>>;
 }>(), {processPresentation: false, visible: true, skillCatalog: () => [], connectorNames: () => [], canDecideApprovals: false, approvalAuthorityRevision: 0, approvalTransients: () => ({})});
 const firstUserMessage = computed(() => props.turn.items.find(item => item.presentation === "user_message")?.identity);
+const fallbackActivity = computed(() => ["unknown", "command", "tool"].includes(props.item.presentation));
 const linkTarget = computed(() => {
   const item = props.item;
   const itemId = item.kind === "assistant_message" ? item.itemId : item.kind === "user_message" ? item.userLinkSourceId : undefined;
@@ -302,13 +303,13 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange) { emit("app
             :answer-candidate="answerCandidate"
             :status-label="itemStatusLabel(item)"
             :icon="itemIcon(item)"
-            :collapsible="item.collapsible && !processPresentation && !answerCandidate"
+            :collapsible="fallbackActivity || (item.collapsible && !processPresentation && !answerCandidate)"
             :process-presentation="processPresentation"
-            :default-expanded="item.defaultExpanded"
+            :default-expanded="!fallbackActivity && item.defaultExpanded"
             @disclosure-change="forwardDisclosure"
           >
             <div
-              v-if="item.presentation === 'unknown' || item.presentation === 'command' || item.presentation === 'tool'"
+              v-if="fallbackActivity"
               class="chat-turn-group__unknown"
               role="note"
             >

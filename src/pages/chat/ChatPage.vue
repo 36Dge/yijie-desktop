@@ -7,6 +7,7 @@ import { useChatTurnTimingDetails } from "../../composables/useChatTurnTiming";
 import { useChatTurnModels } from "../../composables/useChatTurnModels";
 import { nativeCompletedAt } from "../../domain/chat-answer-actions";
 import { completedTurnAnswer } from "../../domain/conversation-process";
+import { traceIsLive } from "../../domain/conversation-activity-presentation";
 import ChatAnswerActions from "../../components/chat/ChatAnswerActions.vue";
 import { computed, inject, provide, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
@@ -464,6 +465,7 @@ const rawConversationTimeline = computed(() => {
 });
 const mediaPresentation = computed(() => presentMediaTimeline(rawConversationTimeline.value, artifactsForTimelineReference));
 const conversationTimeline = computed(() => mediaPresentation.value.timeline);
+const liveNativeTurnId = computed(() => conversationTimeline.value?.turns.find(traceIsLive)?.nativeTurnId);
 const turnTiming = useChatTurnTimingDetails({
   scope: () => chatStore.context && chatStore.selectedSessionId && chatStore.hasAction("read_sessions")
     ? `${chatStore.context.contextId}:${chatStore.selectedSessionId}` : null,
@@ -1645,7 +1647,7 @@ onBeforeUnmount(() => {
             </div>
             <button v-if="cleanup.actionLabel" class="chat-notice__action yj-control" type="button" @click="refreshCleanup">{{ cleanup.actionLabel }}</button>
           </div>
-          <MarketChatActivity v-if="!isDraftMode && marketConnectorsEnabled" :observation="marketChat.observation.value" :connected="marketChat.connected.value" :refreshing="marketChat.refreshing.value" :deciding="marketChat.deciding.value" :error="marketChat.error.value" :actionable="marketChat.actionable" :tool-observation="marketChat.toolObservation.value" :selected-turn-id="marketChat.selectedTurnId.value" :history-refreshing="marketChat.historyRefreshing.value" :history-error="marketChat.historyError.value" @refresh="marketChat.refresh" @decision="marketChat.decide" @select-turn="marketChat.selectTurn" />
+          <MarketChatActivity v-if="!isDraftMode && marketConnectorsEnabled" :observation="marketChat.observation.value" :connected="marketChat.connected.value" :refreshing="marketChat.refreshing.value" :deciding="marketChat.deciding.value" :error="marketChat.error.value" :actionable="marketChat.actionable" :tool-observation="marketChat.toolObservation.value" :selected-turn-id="marketChat.selectedTurnId.value" :live-native-turn-id="liveNativeTurnId" :history-refreshing="marketChat.historyRefreshing.value" :history-error="marketChat.historyError.value" @refresh="marketChat.refresh" @decision="marketChat.decide" @select-turn="marketChat.selectTurn" />
           <ChatSkillNotice v-if="skillNotice" :message="skillNotice" @manage="manageSkills" />
         </div>
       </div>

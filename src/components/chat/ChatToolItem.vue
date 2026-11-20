@@ -8,14 +8,11 @@ import type {
   ConversationTruncationReason,
 } from "../../domain/conversation-view";
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
-import type { YjIconName } from "../../icons/registry";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatCopyAction from "./ChatCopyAction.vue";
 import ChatTimelineItemShell, {
   type ChatTimelineDisclosureChange,
 } from "./ChatTimelineItemShell.vue";
-
-type StatusTone = "muted" | "primary" | "success" | "warning" | "error";
 
 const props = defineProps<{
   item: ConversationTimelineItemViewModel;
@@ -34,23 +31,21 @@ const resultHeadingId = `${headingId}-result`;
 const statusPresentation = computed<Readonly<{
   label: string;
   summary: string;
-  icon: YjIconName;
-  tone: StatusTone;
 }>>(() => {
   switch (props.execution.status) {
     case "in_progress":
       return props.item.busy === true
-        ? { label: "执行中", summary: "工具正在执行。", icon: "pending", tone: "primary" }
-        : { label: "最后观察：执行中", summary: props.item.activityLabel ?? "仅有历史记录，当前进度待确认。", icon: "warning", tone: "muted" };
+        ? { label: "执行中", summary: "工具正在执行。" }
+        : { label: "最后观察：执行中", summary: props.item.activityLabel ?? "仅有历史记录，当前进度待确认。" };
     case "completed":
-      return { label: "已完成", summary: "工具调用已完成。", icon: "check", tone: "success" };
+      return { label: "已完成", summary: "工具调用已完成。" };
     case "failed":
-      return { label: "调用失败", summary: "工具调用失败。", icon: "warning", tone: "error" };
+      return { label: "调用失败", summary: "工具调用失败。" };
     case "declined":
-      return { label: "已拒绝", summary: "工具调用未获执行。", icon: "stop", tone: "warning" };
+      return { label: "已拒绝", summary: "工具调用未获执行。" };
     case "incomplete":
     default:
-      return { label: "未完整结束", summary: "工具状态未完整结束。", icon: "warning", tone: "warning" };
+      return { label: "未完整结束", summary: "工具状态未完整结束。" };
   }
 });
 
@@ -91,8 +86,6 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
     label="工具调用"
     :status-label="statusPresentation.label"
     icon="skillOperations"
-    :status-icon="statusPresentation.icon"
-    :status-tone="statusPresentation.tone"
     collapsible
     :default-expanded="processPresentation ? false : defaultExpanded"
     @disclosure-change="forwardDisclosure"

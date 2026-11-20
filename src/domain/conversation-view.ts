@@ -390,7 +390,8 @@ function nativeExecution(entry: NativeConversationView["items"][number], view: N
       item.status === "completed" || item.status === "failed" || item.status === "declined" ? item.status : "unknown",
     native: {source: view.source, lastMethod: entry.lastMethod, item},
   };
-  if (item.type === "mcpToolCall" || item.type === "fileChange" || item.type === "subAgentActivity" || item.type === "imageView") return {
+  if (item.type === "mcpToolCall" || item.type === "fileChange" || item.type === "subAgentActivity" ||
+      item.type === "imageView" || (item.type === "webSearch" && item.status != null)) return {
     kind: "tool", status: item.status === "inProgress" ? "in_progress" :
       item.status === "completed" || item.status === "failed" || item.status === "declined" ? item.status :
       ["subAgentActivity", "imageView"].includes(item.type) && entry.lastMethod === "item/started" ? "in_progress" :

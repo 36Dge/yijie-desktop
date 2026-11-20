@@ -45,7 +45,7 @@ describe("ChatTurnPlan", () => {
     const wrapper = mount(ChatTurnPlan, { props: { plan: projectedPlan("in_progress") } });
 
     expect(wrapper.get("button").attributes("aria-expanded")).toBe("true");
-    expect(wrapper.get(".chat-turn-plan__status").text()).toBe("进行中");
+    expect(wrapper.get(".chat-turn-plan__disclosure").attributes("aria-description")).toBe("进行中");
     expect(wrapper.get(".chat-turn-plan__explanation").text())
       .toContain("**保持纯文本**");
     expect(wrapper.find(".chat-turn-plan__explanation strong").exists()).toBe(false);

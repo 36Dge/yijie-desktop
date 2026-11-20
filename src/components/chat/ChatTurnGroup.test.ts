@@ -219,7 +219,7 @@ function turnWithApproval(): ConversationTimelineTurnViewModel {
 }
 
 describe("ChatTurnGroup", () => {
-  it("renders projected Items in order with closed role and unknown renderers", () => {
+  it("renders projected Items in order with closed role and unknown renderers", async () => {
     const turn = projectedTurn({
       notices: [{ severity: "warning", code: "conversation_warning" }],
       items: [
@@ -246,6 +246,8 @@ describe("ChatTurnGroup", () => {
     expect(turn.items.map(item => item.itemId)).toContain("reasoning");
     expect(itemElements[1]?.get("article").attributes("aria-label")).toBe("模型回答");
     expect(itemElements[1]?.text()).toContain("回答内容");
+    await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
+    await itemElements[2]!.get(".chat-timeline-item-shell__disclosure").trigger("click");
     expect(itemElements[2]?.text()).toContain("此内容类型暂不支持");
     expect(itemElements[2]?.text()).toContain("unsupported_content");
     expect(itemElements[2]?.text()).not.toContain("普通的未来类型占位内容");
@@ -445,6 +447,8 @@ describe("ChatTurnGroup", () => {
     const items = wrapper.get(".chat-turn-group__items");
     expect(items.element.contains(plan.element)).toBe(true);
     expect(plan.get("button").attributes("aria-expanded")).toBe("false");
+    expect(plan.get("button").text()).toBe("执行计划");
+    expect(plan.get(".chat-activity-chevron").classes()).toContain("lucide-chevron-right");
 
     const commentary = wrapper.get(".chat-turn-group__item--commentary");
     expect(commentary.get("article").attributes("aria-label")).toBe("处理过程");
@@ -733,7 +737,7 @@ it("uses elapsed time to reveal the entire process while leaving answers and lat
   const turn = projectedTurn({items: [
     message("user", 0, "user_message", "检查工作区"),
     {...message("process", 1, "assistant_message", "**先检查当前状态**"), agentMessagePhase: "commentary"},
-    {...doneCommand, ordinal: 2, status: "completed", execution: {...doneCommand.execution, status: "completed"}},
+    {...doneCommand, ordinal: 2, status: "completed", execution: {...doneCommand.execution, status: "completed", exitCode: 0}},
     message("follow-up", 3, "user_message", "保留当前设置"),
     {...message("unclassified", 4, "assistant_message", "兼容模型的回答"), agentMessagePhase: "unknown"},
     message("final", 5, "assistant_message", "**最终结果**"),
@@ -782,22 +786,25 @@ it("keeps the live expansion choice through terminal status without a readable f
   expect(automatic.get(".chat-turn-group__process-toggle").attributes("aria-expanded")).toBe("true");
 });
 
-it("keeps pending approvals and failed or incomplete process records outside the folded content", async () => {
+it("keeps approvals actionable while filtering stale commands and their failure details", async () => {
   const approved = turnWithApproval();
   const normal = projectedTurn({items: [{...message("commentary", 1, "assistant_message", "普通过程"), agentMessagePhase: "commentary"}]}).items[0]!;
   const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: {
     turn: {...approved, items: [...approved.items.map(item => ({...item, approval: null, activityLabel: undefined})), normal]}, position: 1, timingLabel: "执行 7s",
   }});
-  expect(wrapper.get(".chat-turn-group__process-toggle").attributes("aria-expanded")).toBe("false");
-  expect(wrapper.get(".chat-turn-group__item--command").isVisible()).toBe(false);
+  expect(wrapper.find(".chat-turn-group__item--command").exists()).toBe(false);
   await wrapper.setProps({turn: {...approved, items: [normal, ...approved.items]}});
   expect(wrapper.get(".chat-approval-card").isVisible()).toBe(true);
   expect(wrapper.get(".chat-turn-group__item--commentary").isVisible()).toBe(false);
   const commandItem = approved.items[0]!;
   if (!commandItem.execution) throw Error("missing execution");
-  await wrapper.setProps({turn: {...approved, items: [{...commandItem, approval: null, domainStatus: "completed", activityLabel: undefined, execution: {...commandItem.execution, status: "failed"}}, normal]}});
-  expect(wrapper.get(".chat-turn-group__item--command").isVisible()).toBe(true);
-  expect(wrapper.get(".chat-turn-group__item--command").text()).toContain("执行失败");
+  const failed = {...commandItem, domainStatus: "completed" as const, activityLabel: undefined,
+    execution: {...commandItem.execution, status: "failed" as const}};
+  await wrapper.setProps({turn: {...approved, items: [failed, normal]}});
+  expect(wrapper.get(".chat-approval-card").isVisible()).toBe(true);
+  expect(wrapper.html()).not.toContain("执行失败");
+  await wrapper.setProps({turn: {...approved, items: [{...failed, approval: null}, normal]}});
+  expect(wrapper.find(".chat-turn-group__item--command, .chat-approval-card").exists()).toBe(false);
   await wrapper.setProps({turn: {...approved, items: [{...normal, availability: "partial"}]}});
   expect(wrapper.get(".chat-turn-group__item--commentary").isVisible()).toBe(true);
   expect(wrapper.text()).toContain("此项信息不完整");
@@ -815,6 +822,12 @@ it("keeps an empty process control out of answer-only Turns and supports plans w
   expect(wrapper.get(".chat-turn-plan").isVisible()).toBe(false);
   await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
   expect(wrapper.get(".chat-turn-plan").isVisible()).toBe(true);
+  const planButton = wrapper.get(".chat-turn-plan__disclosure");
+  expect(planButton.text()).toBe("执行计划");
+  expect(planButton.attributes("aria-description")).toBe("已完成");
+  await planButton.trigger("click");
+  expect(wrapper.get(".chat-turn-plan__step").text()).toContain("检查状态");
+  expect(planButton.attributes("aria-controls")).toBe(wrapper.get(".chat-turn-plan__content").attributes("id"));
 });
 
 it("FEAT164 unreadable submitted history is never displayed as waiting to submit", () => {

@@ -44,15 +44,18 @@ describe("market review and result presentation", () => {
     expect(record.text()).not.toContain("本次未开始执行");
     expect(wrapper.emitted("decision")).toBeUndefined(); wrapper.unmount();
   });
-  it("uses a linked native result instead of duplicating its decision as an unlinked record", () => {
+  it("filters a failed native result without presenting its linked approval as an unlinked record", () => {
     const observation = marketObservation(); observation.approvals!.requests = [];
     observation.decisionFacts = [marketDecisionFact("requested"), marketDecisionFact("acknowledged")];
     const item = observation.tools!.items[0]!; item.correlation = marketCallReceipt(); item.callRef = item.correlation.callRef; item.state = "failed";
     const wrapper = mount(MarketChatActivity, { props: { observation, connected: true, refreshing: false, deciding: null, error: null, actionable: () => false } });
     expect(wrapper.find('[aria-label="只读决定记录"]').exists()).toBe(false);
-    expect(wrapper.text()).toContain("已允许一次"); expect(wrapper.text()).toContain("执行失败"); wrapper.unmount();
+    expect(wrapper.find('[aria-label="连接器工具结果"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("执行失败");
+    expect(observation.decisionFacts).toHaveLength(2);
+    wrapper.unmount();
   });
-  it("links a historical decision without promoting admission to execution success", () => {
+  it("filters a failed historical result even when an approval receipt confirms admission", () => {
     const observation = marketObservation();
     observation.approvals!.requests = [];
     const item = observation.tools!.items[0]!;
@@ -60,8 +63,9 @@ describe("market review and result presentation", () => {
     observation.availableTurns = [{ nativeTurnId: item.nativeTurnId, selectionDisplay: observation.selectionDisplay }];
     const wrapper = mount(MarketChatActivity, { props: { observation, connected: true, refreshing: false, deciding: null, error: null, actionable: () => false } });
     expect(wrapper.text()).toContain("Tushare·金融数据");
-    expect(wrapper.get('[aria-label="本次调用的批准记录"]').text()).toContain("已允许一次");
-    expect(wrapper.text()).toContain("执行失败");
+    expect(wrapper.find('[aria-label="连接器工具结果"]').exists()).toBe(false);
+    expect(item.correlation.decisionReceipt?.decision).toBe("approve_once");
+    expect(wrapper.text()).not.toContain("执行失败");
     expect(wrapper.text()).not.toContain("已完成");
     expect(wrapper.find(".approval-prompt").exists()).toBe(false);
     expect(wrapper.emitted("decision")).toBeUndefined(); wrapper.unmount();
@@ -87,7 +91,7 @@ describe("market review and result presentation", () => {
     const observation = marketObservation();
     observation.approvals!.requests = [];
     const item = observation.tools!.items[0]!;
-    item.state = "failed"; item.resultText = "保留原生结果";
+    item.state = "completed"; item.resultText = "保留原生结果";
     item.correlation = marketCallReceipt(); item.callRef = item.correlation.callRef;
     observation.availableTurns = source === "legacy-latest" ? undefined : [{
       nativeTurnId: source === "other-turn" ? id(40) : item.nativeTurnId,
@@ -97,10 +101,12 @@ describe("market review and result presentation", () => {
     const result = wrapper.get('[aria-label="连接器工具结果"]');
     expect(result.get("strong").text()).toBe("tushareMcp");
     expect(result.text()).toContain("保留原生结果");
-    expect(result.text()).toContain("执行失败"); wrapper.unmount();
+    expect(result.text()).toContain("已完成"); wrapper.unmount();
   });
   it("shows the qualified review and requires an explicit decision", async () => {
-    const wrapper = mount(MarketChatActivity, { props: { observation: marketObservation(), connected: true, refreshing: false, deciding: null, error: null, actionable: () => true } });
+    const observation = marketObservation();
+    const wrapper = mount(MarketChatActivity, { props: { observation, liveNativeTurnId: observation.tools!.nativeTurnId,
+      connected: true, refreshing: false, deciding: null, error: null, actionable: () => true } });
     expect(wrapper.text()).toContain("读取合成标的指定日期的一条行情数据。");
     expect(wrapper.text()).toContain("正在等待工具返回");
     expect(wrapper.text()).not.toContain("审批与结果关联未确认");
@@ -108,6 +114,31 @@ describe("market review and result presentation", () => {
     await approve.trigger("click");
     expect(wrapper.emitted("decision")).toEqual([[id(2), "approve_once"]]);
     expect(wrapper.text()).not.toContain("已完成"); wrapper.unmount();
+  });
+  it("drops stale progress and structured errors while preserving a subsequent successful result", async () => {
+    const observation = marketObservation();
+    const sample = observation.tools!.items[0]!;
+    const returnedError = JSON.stringify({error: {code: "upstream_unavailable", message: "网页检索服务暂不可用。"}});
+    observation.tools!.items.push(
+      {...sample, nativeItemId: "failed", state: "failed", resultText: "调用失败"},
+      {...sample, nativeItemId: "unknown", state: "completed", errorCode: "runtime_unavailable"},
+      {...sample, nativeItemId: "error-body", state: "completed", toolName: "kimi_web_fetch", resultText: returnedError},
+      {...sample, nativeItemId: "success", state: "completed", resultText: "有效结果"},
+    );
+    const wrapper = mount(MarketChatActivity, {props: {
+      observation, liveNativeTurnId: sample.nativeTurnId, connected: true, refreshing: false,
+      deciding: null, error: null, actionable: () => false,
+    }});
+    const rows = () => wrapper.findAll('[aria-label="连接器工具结果"]');
+    expect(rows()).toHaveLength(2);
+    await wrapper.setProps({connected: false});
+    expect(rows().map(row => row.text())).toEqual([expect.stringContaining("有效结果")]);
+    await wrapper.setProps({connected: true, liveNativeTurnId: "another-turn"});
+    expect(rows()).toHaveLength(1);
+    await wrapper.setProps({selectedTurnId: sample.nativeTurnId, liveNativeTurnId: sample.nativeTurnId});
+    expect(rows()).toHaveLength(1);
+    expect(wrapper.text()).not.toMatch(/等待工具返回|网页检索服务暂不可用|调用失败/);
+    wrapper.unmount();
   });
   it("displays complete generic parameters as plain text before one-shot approval", async () => {
     const observation = marketObservation();

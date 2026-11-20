@@ -12,7 +12,7 @@ import type {
   ConversationTruncationReason,
 } from "../../domain/conversation-view";
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
-import type { YjIconName } from "../../icons/registry";
+import { showConversationActivity } from "../../domain/conversation-tool-visibility";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatApprovalCard, {
   type ChatApprovalErrorCode,
@@ -23,8 +23,6 @@ import ChatCopyAction from "./ChatCopyAction.vue";
 import ChatTimelineItemShell, {
   type ChatTimelineDisclosureChange,
 } from "./ChatTimelineItemShell.vue";
-
-type StatusTone = "muted" | "primary" | "success" | "warning" | "error";
 
 type OutputSection = Readonly<{
   key: "live" | "complete" | "head" | "tail";
@@ -88,24 +86,22 @@ const executionError = computed(() => {
 const statusPresentation = computed<Readonly<{
   label: string;
   summary: string;
-  icon: YjIconName;
-  tone: StatusTone;
 }>>(() => {
   switch (props.execution.status) {
     case "running":
       if (native.value && props.item.busy !== true) {
-        return { label: "最后观察到执行中", summary: props.item.activityLabel ?? "最后观察到命令执行中，当前执行状态未确认。", icon: "pending", tone: "muted" };
+        return { label: "最后观察到执行中", summary: props.item.activityLabel ?? "最后观察到命令执行中，当前执行状态未确认。" };
       }
-      return { label: "执行中", summary: "命令正在执行。", icon: "pending", tone: "primary" };
+      return { label: "执行中", summary: "命令正在执行。" };
     case "completed":
-      return { label: "已完成", summary: "命令已完成。", icon: "check", tone: "success" };
+      return { label: "已完成", summary: "命令已完成。" };
     case "failed":
-      return { label: "执行失败", summary: "命令执行失败。", icon: "warning", tone: "error" };
+      return { label: "执行失败", summary: "命令执行失败。" };
     case "declined":
-      return { label: "已拒绝", summary: "命令未获执行。", icon: "stop", tone: "warning" };
+      return { label: "已拒绝", summary: "命令未获执行。" };
     case "incomplete":
     default:
-      return { label: "未完整结束", summary: "命令状态未完整结束。", icon: "warning", tone: "warning" };
+      return { label: "未完整结束", summary: "命令状态未完整结束。" };
   }
 });
 
@@ -283,14 +279,23 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
 </script>
 
 <template>
+  <ChatApprovalCard
+    v-if="approval && approvalCardStatus"
+    :approval-request-id="approval.approvalRequestId"
+    :status="approvalCardStatus"
+    :expires-at="approval.expiresAt"
+    :actionable="approvalActionable"
+    :authority-revision="approvalAuthorityRevision"
+    :error-code="approvalErrorCode"
+    @decision="forwardApprovalDecision"
+  />
   <ChatTimelineItemShell
+    v-if="!approvalCardStatus || showConversationActivity(item)"
     :process-presentation="processPresentation"
     :item="item"
     :label="activityEntry?.title ?? activityItemTitle(item)"
     :status-label="statusPresentation.label"
     icon="terminal"
-    :status-icon="statusPresentation.icon"
-    :status-tone="statusPresentation.tone"
     :collapsible="!approvalNeedsAttention"
     :default-expanded="processPresentation ? false : defaultExpanded"
     @disclosure-change="forwardDisclosure"
@@ -303,17 +308,6 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
     >{{ statusPresentation.summary }}</span>
 
     <div class="chat-command-item__details">
-      <ChatApprovalCard
-        v-if="approval && approvalCardStatus"
-        :approval-request-id="approval.approvalRequestId"
-        :status="approvalCardStatus"
-        :expires-at="approval.expiresAt"
-        :actionable="approvalActionable"
-        :authority-revision="approvalAuthorityRevision"
-        :error-code="approvalErrorCode"
-        @decision="forwardApprovalDecision"
-      />
-
       <p v-if="activityEntry && (native?.item.commandActions?.length ?? 0) > 1">以下状态和输出属于同一次命令调用。</p>
       <ul v-if="displayedActions.length" aria-label="原生命令动作">
         <li v-for="action in displayedActions" :key="action.index">

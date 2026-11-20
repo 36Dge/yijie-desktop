@@ -40,7 +40,7 @@ describe("v2 normal reading acceptance", () => {
     expect(wrapper.find(".chat-activity-group .chat-deep-thinking").exists()).toBe(false);
     await wrapper.get('.chat-turn-group__reasoning-summary button').trigger('click');
     expect(wrapper.findAll('[data-reasoning-item]')).toHaveLength(32);
-    expect(wrapper.get(".chat-activity-group__counts").text()).toBe("40 次调用");
+    expect(wrapper.get(".chat-activity-group__toggle").attributes("aria-description")).toBe("40 次调用");
     expect(JSON.stringify(saved)).toBe(original);
     expect(saved.items).toHaveLength(72);
     expect(groups(view([message("first", "commentary"), ...records, message("second", "commentary"), command("last")]))).toHaveLength(2);
@@ -161,7 +161,7 @@ describe("v2 normal reading acceptance", () => {
     const input = view([command("c", "inProgress")], false, {status: "interrupted", plan: [{step: "Read public sources", status: "inProgress"}, {step: "Write answer", status: "pending"}]});
     const before = JSON.stringify(input), wrapper = render(input);
     expect(wrapper.text()).toContain("已中断");
-    expect(wrapper.get(".chat-turn-group__item--command").isVisible()).toBe(true);
+    expect(wrapper.find(".chat-turn-group__item--command").exists()).toBe(false);
     expect(input.plan?.map(step => step.status)).toEqual(["inProgress", "pending"]);
     expect(JSON.stringify(input)).toBe(before);
   });
@@ -181,13 +181,12 @@ describe("v2 normal reading acceptance", () => {
     const input = view([command("empty"), noExit, traceItem("failed", "commandExecution", {status: "failed", exitCode: 2})]);
     const wrapper = render(input);
     await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
-    await wrapper.get(".chat-activity-group__toggle").trigger("click");
     const rows = wrapper.findAll("[data-activity-item]");
+    expect(rows).toHaveLength(1);
     await rows[0]!.get("button").trigger("click");
-    await rows[1]!.get("button").trigger("click");
     expect(rows[0]!.text()).toContain("无可显示输出");
-    expect(rows[1]!.text()).toContain("退出码未提供，执行结果未确认");
-    expect(wrapper.text()).toContain("执行失败");
+    expect(wrapper.text()).not.toContain("退出码未提供，执行结果未确认");
+    expect(wrapper.find('button[aria-description="执行失败"]').exists()).toBe(false);
   });
 
   it("A19 never animates a saved inProgress record without a live observation", () => {
@@ -211,7 +210,7 @@ describe("v2 normal reading acceptance", () => {
     const rows = wrapper.findAll("[data-activity-item]");
     expect(rows).toHaveLength(2);
     expect(rows[0]!.attributes("data-native-item")).toBe(rows[1]!.attributes("data-native-item"));
-    expect(wrapper.get(".chat-activity-group__counts").text()).toContain("1 次调用 · 2 个命令动作");
+    expect(wrapper.get(".chat-activity-group__toggle").attributes("aria-description")).toContain("1 次调用 · 2 个命令动作");
     expect(rows[0]!.get("button").text()).toContain("README.md");
     expect(rows[1]!.get("button").text()).toContain("package.json");
     await rows[1]!.get("button").trigger("click");
@@ -219,9 +218,10 @@ describe("v2 normal reading acceptance", () => {
     expect(JSON.stringify(input)).toBe(original);
   });
 
-  it("A26 keeps native failures visible outside a folded ordinary group", () => {
+  it("A26 omits a final failed tool even when the following answer completes", () => {
     const wrapper = render(view([command("ok"), traceItem("bad", "commandExecution", {status: "failed", exitCode: 1}), message("answer", "final_answer")]));
-    expect(wrapper.findAll(".chat-turn-group__item--command").some(row => row.isVisible() && row.text().includes("执行失败"))).toBe(true);
+    expect(wrapper.findAll(".chat-turn-group__item--command")).toHaveLength(1);
+    expect(wrapper.find('button[aria-description="执行失败"]').exists()).toBe(false);
   });
 
   it("uses one disclosure for an ended singleton and retains an explicit live-group choice", async () => {

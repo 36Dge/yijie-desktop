@@ -3,6 +3,7 @@ import { computed, ref, useId } from "vue";
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
 import type { YjIconName } from "../../icons/registry";
 import YjIcon from "../yijie/YjIcon.vue";
+import ChatActivityChevron from "./ChatActivityChevron.vue";
 
 export type ChatTimelineDisclosureChange = Readonly<{
   itemIdentity: string;
@@ -18,7 +19,6 @@ const props = withDefaults(defineProps<{
   statusTone?: "default" | "muted" | "primary" | "success" | "warning" | "error";
   collapsible?: boolean;
   processPresentation?: boolean;
-  activityHeader?: boolean;
   answerCandidate?: boolean;
   defaultExpanded?: boolean;
   showAvailability?: boolean;
@@ -43,6 +43,8 @@ const expansionChoice = ref<boolean | null>(null);
 const expanded = computed(() => expansionChoice.value ?? props.defaultExpanded);
 const plainProcess = computed(() => props.processPresentation &&
   ["commentary", "reasoning", "assistant_unclassified"].includes(props.item.presentation));
+const activityRow = computed(() => ["command", "tool", "web_search", "unknown"].includes(props.item.presentation));
+const statusText = computed(() => props.item.activityLabel ?? props.statusLabel);
 const availabilityInDetails = computed(() => props.collapsible && props.processPresentation &&
   ["web_search", "command", "tool"].includes(props.item.presentation) &&
   props.item.availability === "partial" && !props.item.activityLabel && !props.item.approval);
@@ -85,12 +87,13 @@ function toggle(): void {
       `chat-timeline-item-shell--${item.role}`,
       `chat-timeline-item-shell--${item.phase === 'active' && !busy ? 'incomplete' : item.phase}`,
       { 'chat-timeline-item-shell--answer': isAnswer, 'chat-timeline-item-shell--process-inline': processPresentation },
-      { 'chat-timeline-item-shell--activity-header': activityHeader || (processPresentation && ['command', 'tool', 'unknown'].includes(item.presentation)) },
+      { 'chat-timeline-item-shell--activity-header': activityRow },
       { 'chat-timeline-item-shell--artifact': item.presentation === 'artifact' && !collapsible },
     ]"
     :aria-label="item.role === 'user' || plainProcess || isAnswer ? label : undefined"
     :aria-labelledby="item.role === 'user' || plainProcess || isAnswer ? undefined : titleId"
-    :aria-describedby="item.role === 'user' || plainProcess || hideNormalAnswerStatus ? undefined : statusId"
+    :aria-describedby="item.role === 'user' || plainProcess || hideNormalAnswerStatus || activityRow ? undefined : statusId"
+    :aria-description="activityRow && !collapsible ? statusText : undefined"
     :aria-busy="busy ? 'true' : 'false'"
   >
     <p v-if="showAvailability && !availabilityInDetails && item.role !== 'user' && item.availability && item.availability !== 'available'" class="chat-timeline-item-shell__availability" role="note">
@@ -100,25 +103,28 @@ function toggle(): void {
       <button
         v-if="collapsible"
         class="chat-timeline-item-shell__disclosure"
+        :class="{ 'chat-activity-disclosure': activityRow }"
         type="button"
         :aria-expanded="expanded"
         :aria-controls="contentId"
+        :aria-description="activityRow ? statusText : undefined"
         @click="toggle"
       >
         <span class="chat-timeline-item-shell__identity">
           <YjIcon :name="icon" size="sm" :tone="iconTone" />
           <strong :id="titleId" >{{ label }}</strong>
         </span>
-        <span :id="statusId" class="chat-timeline-item-shell__status">
+        <span v-if="!activityRow" :id="statusId" class="chat-timeline-item-shell__status">
           <YjIcon
             v-if="statusIcon"
             :name="statusIcon"
             size="xs"
             :tone="statusTone"
           />
-          <span>{{ item.activityLabel ?? statusLabel }}</span>
+          <span>{{ statusText }}</span>
         </span>
-        <YjIcon :name="expanded ? 'chevronDown' : 'chevronRight'" size="sm" tone="muted" />
+        <ChatActivityChevron v-if="activityRow" :expanded="expanded" />
+        <YjIcon v-else :name="expanded ? 'chevronDown' : 'chevronRight'" size="sm" tone="muted" />
       </button>
 
       <div v-else class="chat-timeline-item-shell__static-header">
@@ -126,14 +132,14 @@ function toggle(): void {
           <YjIcon :name="icon" size="sm" :tone="iconTone" />
           <strong :id="titleId">{{ label }}</strong>
         </span>
-        <span :id="statusId" class="chat-timeline-item-shell__status">
+        <span v-if="!activityRow" :id="statusId" class="chat-timeline-item-shell__status">
           <YjIcon
             v-if="statusIcon"
             :name="statusIcon"
             size="xs"
             :tone="statusTone"
           />
-          <span>{{ item.activityLabel ?? statusLabel }}</span>
+          <span>{{ statusText }}</span>
         </span>
       </div>
 
@@ -264,7 +270,7 @@ function toggle(): void {
   background: var(--yj-color-control-hover);
 }
 
-.chat-timeline-item-shell__disclosure:focus-visible,
+.chat-timeline-item-shell__disclosure:not(.chat-activity-disclosure):focus-visible,
 .chat-timeline-item-shell__actions :deep(:focus-visible),
 .chat-timeline-item-shell__user-meta :deep(:focus-visible) {
   outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
@@ -384,7 +390,8 @@ function toggle(): void {
   pointer-events: auto;
 }
 
-.chat-timeline-item-shell--process-inline {
+.chat-timeline-item-shell--process-inline,
+.chat-timeline-item-shell--activity-header {
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -413,20 +420,21 @@ function toggle(): void {
 
 .chat-timeline-item-shell--activity-header .chat-timeline-item-shell__disclosure {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+  color: var(--yj-color-chat-timing);
 }
 .chat-timeline-item-shell--activity-header .chat-timeline-item-shell__static-header {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
+  color: var(--yj-color-chat-timing);
 }
-.chat-timeline-item-shell--activity-header .chat-timeline-item-shell__identity,
-.chat-timeline-item-shell--activity-header .chat-timeline-item-shell__status {
-  color: var(--activity-label-color, var(--yj-color-chat-timing));
+.chat-timeline-item-shell--activity-header .chat-timeline-item-shell__identity {
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
   font-weight: var(--yj-font-weight-regular);
 }
-.chat-timeline-item-shell--activity-header .chat-timeline-item-shell__disclosure:hover {
-  --activity-label-color: var(--yj-color-text-primary);
+.chat-timeline-item-shell--activity-header .chat-timeline-item-shell__disclosure:is(:hover, :focus-visible) {
+  color: var(--yj-color-text-primary);
+  background: transparent;
 }
 .chat-timeline-item-shell--activity-header .chat-timeline-item-shell__identity strong { font-weight: inherit; }
 .chat-timeline-item-shell--activity-header .chat-timeline-item-shell__identity .yj-icon {
