@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import { activityItemTitle } from "../../domain/conversation-activity-summary";
 import { formatToolDuration } from "../../domain/chat-ui";
-import { readDeepSearchPreview } from "../../domain/web-retrieval-display";
+import { readDeepSearchPreview, readWebRetrievalResult } from "../../domain/web-retrieval-display";
 import { useWebSources } from "../../composables/useWebSources";
 import { browserChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
 import ChatCopyAction from "./ChatCopyAction.vue";
@@ -21,6 +21,39 @@ const nativeOperation = computed(() => ["fileChange", "subAgentActivity"].includ
 const mcp = computed(() => native.value.mcp);
 const builtinWeb = computed(() => mcp.value?.server === "yijie_web" && ["kimi_web_search", "kimi_web_search_pro", "kimi_web_fetch"].includes(mcp.value.tool ?? ""));
 const deepSearch = computed(() => builtinWeb.value && mcp.value?.tool === "kimi_web_search_pro");
+const webFetch = computed(() => builtinWeb.value && mcp.value?.tool === "kimi_web_fetch");
+const fetchSite = computed(() => {
+  const site = native.value.argumentsSummary;
+  return webFetch.value && site && /^[a-z\d.-]{1,253}$/i.test(site) &&
+    !mcp.value?.diagnostics.some(code => code === "arguments_unavailable") ? site : undefined;
+});
+const fetchDetails = computed(() => {
+  const receipt = mcp.value;
+  if (!webFetch.value || receipt?.resultKind !== "text" || receipt.texts.length !== 1 || receipt.texts[0]?.index !== 0) return;
+  const text = receipt.texts[0].text.trim();
+  if (!text) return;
+  // Earlier readers also accepted a canonical tool result inside a text block.
+  if (text.startsWith("{") || text.startsWith("[") || text.startsWith("Wall time:")) {
+    const saved = readWebRetrievalResult("kimi_web_fetch", text);
+    if (saved && "error" in saved) return {description: saved.error.message};
+    if (saved && "markdown" in saved && props.execution.status === "completed") return {
+      title: saved.title, description: saved.truncated ? "已读取部分正文，网页内容较长。" : "已读取网页正文。",
+    };
+    return;
+  }
+  return {description: text, title: props.execution.status === "completed" ? native.value.resultSummary : undefined};
+});
+const fetchDescription = computed(() => {
+  if (fetchDetails.value) return fetchDetails.value.description;
+  if (props.item.busy) return "正在读取网页内容…";
+  if (props.item.activityLabel) return;
+  switch (props.execution.status) {
+    case "completed": return "读取已完成。这条记录没有保存页面详情。";
+    case "failed": return "网页读取失败。这条记录没有保存具体原因。";
+    case "declined": return "本次读取未获批准。";
+    default: return "尚未确认这次读取的结果。";
+  }
+});
 const query = computed(() => deepSearch.value && !mcp.value?.diagnostics.some(code => code === "arguments_unavailable")
   ? native.value.argumentsSummary?.trim() : undefined);
 const searchResult = computed(() => {
@@ -29,14 +62,14 @@ const searchResult = computed(() => {
   return readDeepSearchPreview(receipt.texts[0].text);
 });
 const hasDetails = computed(() => !deepSearch.value || Boolean(query.value || searchResult.value || (props.searchCalls?.length ?? 0) > 1));
-const title = computed(() => [activityItemTitle(props.item), query.value].filter(Boolean).join(" · "));
+const title = computed(() => [activityItemTitle(props.item), query.value || fetchSite.value].filter(Boolean).join(" · "));
 const elapsed = computed(() => native.value.durationMs == null ? null : formatToolDuration(native.value.durationMs));
 const identity = computed(() => mcp.value?.server && mcp.value.tool ? `${mcp.value.server} / ${mcp.value.tool}` : "工具身份信息不完整");
 const status = computed(() => {
   if (native.value.type === "subAgentActivity") return props.item.busy ? "处理中" : "已记录";
   switch (props.execution.status) {
     case "completed": return "已完成";
-    case "failed": return "调用失败";
+    case "failed": return webFetch.value ? "读取失败" : "调用失败";
     case "declined": return "已拒绝";
     case "in_progress": return props.item.busy ? "执行中" : "最后观察：执行中";
     default: return "状态信息不完整";
@@ -96,12 +129,13 @@ const diagnosticLabels = {
 
 <template>
   <ChatTimelineItemShell
-    :class="{ 'deep-search-row': deepSearch }"
+    :class="{ 'deep-search-row': deepSearch, 'web-fetch-row': webFetch }"
+    :activity-header="deepSearch || webFetch"
     :process-presentation="processPresentation"
-    :item="item" :label="title" :status-label="headerStatus" :icon="deepSearch ? 'scanSearch' : 'skillOperations'"
+    :item="item" :label="title" :status-label="headerStatus" :icon="deepSearch ? 'scanSearch' : webFetch ? 'readPage' : 'skillOperations'"
     :status-icon="item.busy ? 'pending' : native.type === 'subAgentActivity' || execution.status === 'completed' ? 'check' : 'warning'"
     :status-tone="item.busy ? 'primary' : native.type === 'subAgentActivity' ? 'muted' : execution.status === 'completed' ? 'success' : 'muted'"
-    :collapsible="hasDetails" :show-availability="!deepSearch" :default-expanded="!deepSearch && !processPresentation && item.busy"
+    :collapsible="hasDetails" :show-availability="!deepSearch && !webFetch" :default-expanded="!deepSearch && !webFetch && !processPresentation && item.busy"
     @disclosure-change="emit('disclosure-change', $event)"
   >
     <template v-if="hasDetails" #default>
@@ -118,6 +152,11 @@ const diagnosticLabels = {
         </details>
         <p v-if="openError" role="alert">{{ openError }}</p>
         <p class="native-tool__source">易界网页检索<span v-if="elapsed"> · 耗时 {{ elapsed }}</span></p>
+      </template>
+      <template v-else-if="webFetch">
+        <strong v-if="fetchDetails?.title" class="native-tool__page-title">{{ fetchDetails.title }}</strong>
+        <p v-if="fetchDescription">{{ fetchDescription }}</p>
+        <p v-if="elapsed" class="native-tool__source">用时 {{ elapsed }}</p>
       </template>
       <template v-else-if="nativeOperation">
         <p v-if="native.text">{{ native.text }}</p>
@@ -156,24 +195,13 @@ const diagnosticLabels = {
 .native-tool h3 { font-size:var(--yj-font-size-caption); margin:0 0 var(--yj-space-2); }
 .native-tool p { margin:0; }
 .native-tool__query { overflow-wrap: anywhere; white-space: pre-wrap; }
-.deep-search-row :deep(.chat-timeline-item-shell__disclosure) { grid-template-columns: minmax(0, 1fr) auto auto; }
-.deep-search-row :deep(.chat-timeline-item-shell__static-header) { grid-template-columns: minmax(0, 1fr) auto; }
-.deep-search-row :deep(.chat-timeline-item-shell__identity),
-.deep-search-row :deep(.chat-timeline-item-shell__status) {
-  color: var(--deep-search-label-color, var(--yj-color-chat-timing));
-  font-size: var(--yj-font-size-body);
-  line-height: var(--yj-line-height-body);
-  font-weight: var(--yj-font-weight-regular);
-}
-.deep-search-row :deep(.chat-timeline-item-shell__disclosure:hover) { --deep-search-label-color: var(--yj-color-text-primary); }
-.deep-search-row :deep(.chat-timeline-item-shell__identity strong) { font-weight: inherit; }
-.deep-search-row :deep(.chat-timeline-item-shell__identity .yj-icon) { width: 1em; height: 1em; color: inherit; stroke-width: 1.5; }
-.deep-search-row .native-tool {
+.deep-search-row .native-tool, .web-fetch-row .native-tool {
   color: var(--yj-color-text-secondary);
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
   font-weight: var(--yj-font-weight-regular);
 }
+.native-tool__page-title { color: var(--yj-color-text-primary); overflow-wrap: anywhere; }
 .native-tool pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:28rem; overflow:auto; margin:0; font:inherit; }
 .native-tool__source { color:var(--yj-color-text-secondary); font-size:var(--yj-font-size-caption); }
 .native-tool__calls code { overflow-wrap: anywhere; color: var(--yj-color-text-muted); }

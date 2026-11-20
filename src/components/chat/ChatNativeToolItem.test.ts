@@ -28,6 +28,34 @@ function renderDeepSearch(mcp: NonNullable<NativeItem["mcp"]>, fields: Partial<N
 }
 
 describe("native Tool display",()=>{
+  it.each([
+    {status: "completed", site: "example.org", title: "Reading guide", outcome: "已读取部分正文，网页内容较长。", expected: "已读取部分正文"},
+    {status: "failed", site: "example.org", title: "", outcome: "网页未返回可用正文。", expected: "网页未返回可用正文"},
+    {status: "completed", site: "example.org", title: "Old guide", outcome: '{"url":"https://example.org/page","title":"Old guide","markdown":"Recorded page body","truncated":false}', expected: "已读取网页正文"},
+    {status: "completed", site: "", title: "", outcome: '{"unrecognized":"unavailable"}', expected: "这条记录没有保存页面详情"},
+    {status: "completed", site: "", title: "", outcome: "", expected: "这条记录没有保存页面详情"},
+    {status: "failed", site: "", title: "", outcome: "", expected: "这条记录没有保存具体原因"},
+  ] as const)("shows recorded web fetch details for $status / $expected", async ({status, site, title, outcome, expected}) => {
+    const item = traceTurn([traceItem("fetch", "mcpToolCall", {
+      status, durationMs: 6818, availability: outcome ? "available" : "partial",
+      argumentsSummary: site || "参数不可展示", resultSummary: title || "结果已接收",
+      mcp: {server: "yijie_web", tool: "kimi_web_fetch", resultKind: outcome ? "text" : "omitted",
+        texts: outcome ? [{index: 0, text: outcome}] : [], diagnostics: outcome ? [] : ["arguments_unavailable", "result_unavailable"]},
+    })]).items[0]!;
+    if (item.execution?.kind !== "tool" || !("native" in item.execution)) throw new Error("missing native fetch");
+    const wrapper = mount(ChatNativeToolItem, {props: {item, execution: item.execution, processPresentation: true}});
+    const toggle = wrapper.get("button");
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    expect(toggle.text()).toContain("读取指定网页" + (site ? " · " + site : ""));
+    expect(toggle.text()).toContain(status === "failed" ? "读取失败" : "已完成");
+    await toggle.trigger("click");
+    expect(wrapper.text()).toContain(expected);
+    expect(wrapper.text()).toContain("用时 6.8 秒");
+    if (title) expect(wrapper.get(".native-tool__page-title").text()).toBe(title);
+    expect(wrapper.text()).not.toMatch(/查询参数|已观察到的原生记录|此项信息不完整|参数不可展示|结果已接收|Recorded page body|unrecognized/);
+    wrapper.unmount();
+  });
+
   it("shows only recorded status and duration for a metadata-only deep search", () => {
     const wrapper = renderDeepSearch({resultKind: "omitted", texts: [], diagnostics: ["arguments_unavailable", "result_unavailable"]},
       {availability: "partial", argumentsSummary: "参数不可展示"});

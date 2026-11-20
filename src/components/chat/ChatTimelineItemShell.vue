@@ -18,6 +18,7 @@ const props = withDefaults(defineProps<{
   statusTone?: "default" | "muted" | "primary" | "success" | "warning" | "error";
   collapsible?: boolean;
   processPresentation?: boolean;
+  activityHeader?: boolean;
   answerCandidate?: boolean;
   defaultExpanded?: boolean;
   showAvailability?: boolean;
@@ -84,6 +85,7 @@ function toggle(): void {
       `chat-timeline-item-shell--${item.role}`,
       `chat-timeline-item-shell--${item.phase === 'active' && !busy ? 'incomplete' : item.phase}`,
       { 'chat-timeline-item-shell--answer': isAnswer, 'chat-timeline-item-shell--process-inline': processPresentation },
+      { 'chat-timeline-item-shell--activity-header': activityHeader || (processPresentation && ['command', 'tool', 'unknown'].includes(item.presentation)) },
       { 'chat-timeline-item-shell--artifact': item.presentation === 'artifact' && !collapsible },
     ]"
     :aria-label="item.role === 'user' || plainProcess || isAnswer ? label : undefined"
@@ -409,6 +411,30 @@ function toggle(): void {
   margin-inline-start: auto;
 }
 
+.chat-timeline-item-shell--activity-header .chat-timeline-item-shell__disclosure {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+.chat-timeline-item-shell--activity-header .chat-timeline-item-shell__static-header {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.chat-timeline-item-shell--activity-header .chat-timeline-item-shell__identity,
+.chat-timeline-item-shell--activity-header .chat-timeline-item-shell__status {
+  color: var(--activity-label-color, var(--yj-color-chat-timing));
+  font-size: var(--yj-font-size-body);
+  line-height: var(--yj-line-height-body);
+  font-weight: var(--yj-font-weight-regular);
+}
+.chat-timeline-item-shell--activity-header .chat-timeline-item-shell__disclosure:hover {
+  --activity-label-color: var(--yj-color-text-primary);
+}
+.chat-timeline-item-shell--activity-header .chat-timeline-item-shell__identity strong { font-weight: inherit; }
+.chat-timeline-item-shell--activity-header .chat-timeline-item-shell__identity .yj-icon {
+  width: 1em;
+  height: 1em;
+  color: inherit;
+  stroke-width: 1.5;
+}
 
 @media (hover: none) {
   .chat-timeline-item-shell__user-meta {

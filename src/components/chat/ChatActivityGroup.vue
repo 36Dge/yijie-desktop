@@ -61,7 +61,7 @@ function toggle() {
 .chat-activity-group__title :deep(.chat-thinking) { display: inline; }
 .chat-activity-group__counts { flex: 0 0 auto; font-size: var(--yj-font-size-caption); color: var(--yj-color-text-secondary); }
 .chat-activity-group__frame { position: relative; padding: var(--yj-space-3); margin-top: var(--yj-space-2); border-radius: var(--yj-radius-lg); background: var(--yj-color-chat-search-sources-bg); }
-.chat-activity-group__viewport { display: grid; max-height: var(--yj-layout-chat-activity-max-height); overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: none; }
+.chat-activity-group__viewport { display: grid; grid-template-columns: minmax(0, 1fr); max-height: var(--yj-layout-chat-activity-max-height); overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: none; }
 .chat-activity-group__viewport::-webkit-scrollbar { display: none; }
-.chat-activity-group__items { grid-area: 1 / 1; min-width: 0; list-style: none; margin: 0; padding: 0 var(--yj-space-3) 0 0; display: grid; gap: var(--yj-space-3); }
+.chat-activity-group__items { grid-area: 1 / 1; min-width: 0; list-style: none; margin: 0; padding: 0 var(--yj-space-3) 0 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--yj-space-3); }
 </style>
