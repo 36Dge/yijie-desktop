@@ -16,9 +16,9 @@ use super::authorization::{
 };
 use super::database::{
     AttachmentSummary, CleanupSurfaceState, DeletionStatus, DraftContentBlock, DraftTarget,
-    Feat134HistorySnapshot, HistoryPage, MessageContentBlockProjection, ProjectSummary,
-    PublicTaskBindingState, PublicTaskControlPlaneStatus, ReasoningItem, ReasoningStatus,
-    SessionPage, SessionPageCursor, SessionSummary, SessionTitleSource,
+    Feat134HistorySnapshot, HistoryPage, HistoryReadOptions, MessageContentBlockProjection,
+    ProjectSummary, PublicTaskBindingState, PublicTaskControlPlaneStatus, ReasoningItem,
+    ReasoningStatus, SessionPage, SessionPageCursor, SessionSummary, SessionTitleSource,
 };
 use super::feat134::{
     Feat134HistoryProjection, Feat134Projection, SourceIdentity, TimelineDelta, TimelineItem,
@@ -2790,6 +2790,8 @@ struct MessageDto {
 enum MessageContentBlockDto {
     Text {
         text: String,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        skills: Vec<super::connectors::selection_generated::SelectedSkillRef>,
     },
     File {
         #[serde(rename = "attachmentId")]
@@ -3438,6 +3440,7 @@ fn history_dto_v2(
             }
             let content_blocks = if stored.is_empty() {
                 vec![MessageContentBlockDto::Text {
+                    skills: Vec::new(),
                     text: if message.content.is_empty() {
                         " ".to_owned()
                     } else {
@@ -3448,10 +3451,14 @@ fn history_dto_v2(
                 let mut blocks = Vec::with_capacity(stored.len());
                 for (expected_ordinal, block) in stored.into_iter().enumerate() {
                     match block {
-                        MessageContentBlockProjection::Text { ordinal, text }
-                            if ordinal == expected_ordinal =>
+                        MessageContentBlockProjection::Text {
+                            ordinal,
+                            text,
+                            skills,
+                        } if ordinal == expected_ordinal
+                            && (skills.is_empty() || message.role == "user") =>
                         {
-                            blocks.push(MessageContentBlockDto::Text { text });
+                            blocks.push(MessageContentBlockDto::Text { text, skills });
                         }
                         MessageContentBlockProjection::Attachment {
                             ordinal,
@@ -3779,7 +3786,7 @@ fn history_dto_v5(
     Ok(value)
 }
 
-fn history_dto_v6(
+pub(super) fn history_dto_v6(
     page: HistoryPage,
     next_cursor: Option<String>,
     projections: Vec<(Uuid, Vec<MessageContentBlockProjection>)>,
@@ -3831,17 +3838,25 @@ async fn load_bounded_feat134_history_snapshot(
     context_id: Uuid,
     session_id: Uuid,
     before_ordinal: Option<u64>,
-    requested_limit: Option<usize>,
+    options: HistoryReadOptions,
     response_limit: usize,
     request_id: Uuid,
 ) -> Result<Feat134HistorySnapshot, ChatIpcError> {
     let byte_budget = response_limit
         .checked_sub(V4_RESPONSE_STRUCTURAL_HEADROOM)
         .ok_or_else(|| ChatIpcError::limit_exceeded(Some(request_id)).v4())?;
-    let mut limit = requested_limit.unwrap_or(DEFAULT_HISTORY_PAGE_LIMIT);
+    let mut limit = options.limit.unwrap_or(DEFAULT_HISTORY_PAGE_LIMIT);
     loop {
         let snapshot = authorized
-            .load_feat134_history_snapshot(context_id, session_id, before_ordinal, Some(limit))
+            .load_feat134_history_snapshot(
+                context_id,
+                session_id,
+                before_ordinal,
+                HistoryReadOptions {
+                    limit: Some(limit),
+                    ..options
+                },
+            )
             .await
             .map_err(|error| map_chat_error(error, Some(request_id)).v4())?;
         let probe = history_dto_v4(
@@ -3874,17 +3889,25 @@ async fn load_bounded_feat136_history_snapshot(
     context_id: Uuid,
     session_id: Uuid,
     before_ordinal: Option<u64>,
-    requested_limit: Option<usize>,
+    options: HistoryReadOptions,
     response_limit: usize,
     request_id: Uuid,
 ) -> Result<Feat134HistorySnapshot, ChatIpcError> {
     let byte_budget = response_limit
         .checked_sub(V4_RESPONSE_STRUCTURAL_HEADROOM)
         .ok_or_else(|| ChatIpcError::limit_exceeded(Some(request_id)).v5())?;
-    let mut limit = requested_limit.unwrap_or(DEFAULT_HISTORY_PAGE_LIMIT);
+    let mut limit = options.limit.unwrap_or(DEFAULT_HISTORY_PAGE_LIMIT);
     loop {
         let snapshot = authorized
-            .load_feat136_history_snapshot(context_id, session_id, before_ordinal, Some(limit))
+            .load_feat136_history_snapshot(
+                context_id,
+                session_id,
+                before_ordinal,
+                HistoryReadOptions {
+                    limit: Some(limit),
+                    ..options
+                },
+            )
             .await
             .map_err(|error| map_chat_error(error, Some(request_id)).v5())?;
         let probe = history_dto_v5(
@@ -3917,17 +3940,25 @@ async fn load_bounded_feat137_history_snapshot(
     context_id: Uuid,
     session_id: Uuid,
     before_ordinal: Option<u64>,
-    requested_limit: Option<usize>,
+    options: HistoryReadOptions,
     response_limit: usize,
     request_id: Uuid,
 ) -> Result<Feat134HistorySnapshot, ChatIpcError> {
     let byte_budget = response_limit
         .checked_sub(V4_RESPONSE_STRUCTURAL_HEADROOM)
         .ok_or_else(|| ChatIpcError::limit_exceeded(Some(request_id)).v6())?;
-    let mut limit = requested_limit.unwrap_or(DEFAULT_HISTORY_PAGE_LIMIT);
+    let mut limit = options.limit.unwrap_or(DEFAULT_HISTORY_PAGE_LIMIT);
     loop {
         let snapshot = authorized
-            .load_feat137_history_snapshot(context_id, session_id, before_ordinal, Some(limit))
+            .load_feat137_history_snapshot(
+                context_id,
+                session_id,
+                before_ordinal,
+                HistoryReadOptions {
+                    limit: Some(limit),
+                    ..options
+                },
+            )
             .await
             .map_err(|error| map_chat_error(error, Some(request_id)).v6())?;
         let probe = history_dto_v6(
@@ -8902,6 +8933,7 @@ pub async fn chat_load_history_v1(
 #[tauri::command]
 pub async fn chat_load_history_v2(
     request: Value,
+    include_user_message_skills: Option<bool>,
     chat_runtime: State<'_, ChatRuntime>,
     ipc_runtime: State<'_, ChatIpcRuntime>,
 ) -> Result<CommandResponse<HistoryPageDtoV2>, ChatIpcError> {
@@ -8957,7 +8989,11 @@ pub async fn chat_load_history_v2(
         .map_err(ChatIpcError::v2)?;
     let message_ids = history_message_ids(&page);
     let projections = authorized
-        .load_message_content_blocks(request.context_id, message_ids)
+        .load_message_content_blocks(
+            request.context_id,
+            message_ids,
+            include_user_message_skills.unwrap_or(false),
+        )
         .await
         .map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
     let data = history_dto_v2(page, next_cursor, projections)
@@ -8970,6 +9006,7 @@ pub async fn chat_load_history_v2(
 #[tauri::command]
 pub async fn chat_load_history_v3(
     request: Value,
+    include_user_message_skills: Option<bool>,
     chat_runtime: State<'_, ChatRuntime>,
     ipc_runtime: State<'_, ChatIpcRuntime>,
 ) -> Result<Value, ChatIpcError> {
@@ -9007,7 +9044,10 @@ pub async fn chat_load_history_v3(
             request.context_id,
             request.payload.session_id,
             before,
-            request.payload.limit,
+            HistoryReadOptions::new(
+                request.payload.limit,
+                include_user_message_skills.unwrap_or(false),
+            ),
             MAX_HISTORY_PAGE_BYTES,
             request.request_id,
         )
@@ -9078,7 +9118,10 @@ pub async fn chat_load_history_v3(
             request.context_id,
             request.payload.session_id,
             before,
-            request.payload.limit,
+            HistoryReadOptions::new(
+                request.payload.limit,
+                include_user_message_skills.unwrap_or(false),
+            ),
             MAX_HISTORY_PAGE_BYTES,
             request.request_id,
         )
@@ -9148,7 +9191,10 @@ pub async fn chat_load_history_v3(
             request.context_id,
             request.payload.session_id,
             before,
-            request.payload.limit,
+            HistoryReadOptions::new(
+                request.payload.limit,
+                include_user_message_skills.unwrap_or(false),
+            ),
             MAX_HISTORY_PAGE_BYTES,
             request.request_id,
         )
@@ -9237,7 +9283,11 @@ pub async fn chat_load_history_v3(
     let message_ids = history_message_ids(&page);
     let turn_ids = page.turns.iter().map(|turn| turn.turn_id).collect();
     let projections = authorized
-        .load_message_content_blocks(request.context_id, message_ids)
+        .load_message_content_blocks(
+            request.context_id,
+            message_ids,
+            include_user_message_skills.unwrap_or(false),
+        )
         .await
         .map_err(|error| map_chat_error(error, Some(request.request_id)).v3())?;
     let artifacts = authorized
@@ -9531,6 +9581,7 @@ pub async fn chat_resync_session_v1(
 #[tauri::command]
 pub async fn chat_resync_session_v2(
     request: Value,
+    include_user_message_skills: Option<bool>,
     chat_runtime: State<'_, ChatRuntime>,
     ipc_runtime: State<'_, ChatIpcRuntime>,
 ) -> Result<Value, ChatIpcError> {
@@ -9565,7 +9616,10 @@ pub async fn chat_resync_session_v2(
             request.context_id,
             request.payload.session_id,
             None,
-            request.payload.limit,
+            HistoryReadOptions::new(
+                request.payload.limit,
+                include_user_message_skills.unwrap_or(false),
+            ),
             MAX_V4_RESYNC_BYTES,
             request.request_id,
         )
@@ -9650,7 +9704,10 @@ pub async fn chat_resync_session_v2(
             request.context_id,
             request.payload.session_id,
             None,
-            request.payload.limit,
+            HistoryReadOptions::new(
+                request.payload.limit,
+                include_user_message_skills.unwrap_or(false),
+            ),
             MAX_V4_RESYNC_BYTES,
             request.request_id,
         )
@@ -9719,7 +9776,10 @@ pub async fn chat_resync_session_v2(
             request.context_id,
             request.payload.session_id,
             None,
-            request.payload.limit,
+            HistoryReadOptions::new(
+                request.payload.limit,
+                include_user_message_skills.unwrap_or(false),
+            ),
             MAX_V4_RESYNC_BYTES,
             request.request_id,
         )
@@ -9812,7 +9872,11 @@ pub async fn chat_resync_session_v2(
         .map_err(ChatIpcError::v2)?;
     let message_ids = history_message_ids(&projection.history);
     let blocks = authorized
-        .load_message_content_blocks(request.context_id, message_ids)
+        .load_message_content_blocks(
+            request.context_id,
+            message_ids,
+            include_user_message_skills.unwrap_or(false),
+        )
         .await
         .map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
     let history = history_dto_v2(projection.history, next_cursor, blocks)

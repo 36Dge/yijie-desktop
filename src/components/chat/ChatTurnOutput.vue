@@ -4,7 +4,7 @@ import type { ConversationTurnOutput } from "../../domain/conversation-turn-outp
 import type { ConversationTimelineTurnViewModel } from "../../domain/conversation-timeline";
 import ChatActivityRow from "./ChatActivityRow.vue";
 
-defineProps<{ output: ConversationTurnOutput; turn: ConversationTimelineTurnViewModel }>();
+defineProps<{ output: ConversationTurnOutput; turn: ConversationTimelineTurnViewModel; completedAnswerId?: string }>();
 const slots = defineSlots<InstanceType<typeof ChatActivityRow>["$slots"]>();
 const answerRow = useTemplateRef<InstanceType<typeof ChatActivityRow>>("answerRow");
 </script>
@@ -12,7 +12,7 @@ const answerRow = useTemplateRef<InstanceType<typeof ChatActivityRow>>("answerRo
 <template>
   <section class="chat-turn-output" :aria-label="output.answer ? '模型回答与生成内容' : '生成内容'">
     <div class="chat-turn-output__body">
-      <ChatActivityRow v-if="output.answer" :key="output.answer.identity" ref="answerRow" :item="output.answer.item" :turn="turn" :answer-candidate="output.answer.answerCandidate">
+      <ChatActivityRow v-if="output.answer" :key="output.answer.identity" ref="answerRow" :item="output.answer.item" :turn="turn" :answer-candidate="output.answer.answerCandidate" :completed-answer-id="completedAnswerId">
         <template v-if="slots['structured-answer']" #structured-answer="scope"><slot name="structured-answer" v-bind="scope" /></template>
         <template v-if="slots['artifact-reference']" #artifact-reference="scope"><slot name="artifact-reference" v-bind="scope" /></template>
         <template v-if="slots['attachment-reference']" #attachment-reference="scope"><slot name="attachment-reference" v-bind="scope" /></template>

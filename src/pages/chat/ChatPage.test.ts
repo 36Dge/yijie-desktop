@@ -22,7 +22,10 @@ import { chatArtifactNativeClient } from "../../api/chat-artifact-native-client"
 import { chatArtifactReportNativeClient } from "../../api/chat-artifact-report-native-client";
 import { chatArtifactVideoNativeClient } from "../../api/chat-artifact-video-native-client";
 import { historyPageToConversationSnapshot } from "../../api/chat-conversation-adapter";
+import type { NativeItem } from "../../api/generated/native-conversation-private.gen";
+import { traceItem } from "../../domain/conversation-activity-fixtures";
 import { runtimePermissionClient } from "../../api/runtime-permission-client";
+import { userInputClient } from "../../api/user-input-client";
 import { CHAT_AUTHORITY_RETRY_KEY } from "../../authorization/chat-authority-recovery";
 import ChatArtifactList from "../../components/chat/ChatArtifactList.vue";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
@@ -1008,6 +1011,77 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.text()).not.toContain("标题检查完成");
   });
 
+  it("waits for turn completion and the final text reveal after an unphased search update", async () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"] });
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true, { turns: [], nextCursor: null }, undefined, true);
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    vi.spyOn(window, "matchMedia").mockReturnValue({ ...media, matches: false });
+    const items: NativeItem[] = [traceItem("user", "userMessage", { text: "请核对商品规格。" })];
+    let revision = 0;
+    async function publish(streamingItem: string | null = null, completed = false) {
+      store.conversationState = composeConversationView({
+        threads: [{ threadId: SESSION_ID, status: completed ? "ready" : "active" }], turns: [], items: [],
+      }, [{
+        sessionId: SESSION_ID, turnId: TURN_ID, runtimeThreadId: SESSION_ID, runtimeTurnId: TURN_ID,
+        source: "native_observed", statusSource: "runtime_notification", availability: "available",
+        revision: String(++revision), status: completed ? "completed" : "inProgress", terminalObserved: completed,
+        items: items.map((item, ordinal) => ({
+          item, ordinal, lastMethod: item.id === streamingItem ? "item/started" : "item/completed",
+        })),
+      }]);
+      store.nativeLiveTurnId = completed ? null : TURN_ID;
+      store.phase = completed ? "ready" : "streaming";
+      await vi.advanceTimersByTimeAsync(48);
+    }
+    const search = (id: string) => traceItem(id, "webSearch", { webSearch: { action: "search", queries: ["规格"] } });
+    const reasoning = (id: string) => traceItem(id, "reasoning", { summary: ["整理查询结果。"] });
+    const footer = ".chat-timeline-item-shell__answer-actions, .chat-turn-output__actions";
+    try {
+      // The November 19 Blink turn projected three searches, each followed by reasoning.
+      items.push(search("search-1"), reasoning("reason-1"));
+      await publish();
+      const interim = "已核对公开规格，下面给出具体建议。";
+      items.push(traceItem("interim", "agentMessage", { phase: null, text: interim }));
+      await publish("interim");
+      await publish();
+      await vi.advanceTimersByTimeAsync(2_000);
+      const midRow = wrapper.get(".chat-turn-group__item--assistant_unclassified");
+      expect(midRow.isVisible()).toBe(true);
+      expect(midRow.get(".chat-safe-content").text()).toBe(interim);
+      expect(midRow.find(".chat-stream-text__fresh").exists()).toBe(false);
+      expect(midRow.find(".chat-copy-action").exists()).toBe(false);
+      expect(wrapper.find(footer).exists()).toBe(false);
+      expect(wrapper.get(".chat-timeline-item-shell__user-meta [aria-label='复制文本']").isVisible()).toBe(true);
+      for (const item of [search("search-2"), reasoning("reason-2"), search("search-3"), reasoning("reason-3")]) {
+        items.push(item);
+        await publish();
+        expect(wrapper.find(footer).exists()).toBe(false);
+      }
+      const answer = "这是核对后的最终建议。".repeat(10);
+      items.push(traceItem("answer", "agentMessage", { phase: "final_answer", text: answer }));
+      await publish("answer");
+      await publish();
+      expect(wrapper.find(footer).exists()).toBe(false);
+      await publish(null, true);
+      const finalRow = wrapper.get(".chat-turn-group__item--final_answer");
+      expect(finalRow.get(".chat-safe-content").text().length).toBeLessThan(answer.length);
+      expect(wrapper.find(footer).exists()).toBe(false);
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(finalRow.get(".chat-safe-content").text()).toBe(answer);
+      expect(finalRow.find(".chat-stream-text__fresh").exists()).toBe(false);
+      expect(wrapper.findAll(footer)).toHaveLength(1);
+      for (const label of ["复制", "点赞", "点踩"]) {
+        expect(finalRow.get(`.chat-answer-actions [aria-label="${label}"]`).isVisible()).toBe(true);
+      }
+      await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
+      const savedInterim = wrapper.get(".chat-turn-group__item--assistant_unclassified");
+      expect(savedInterim.isVisible()).toBe(true);
+      expect(savedInterim.find(".chat-copy-action").exists()).toBe(false);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it("injects exact fenced-code copy without giving Timeline clipboard authority", async () => {
     const writeText = vi.fn<(_: string) => Promise<void>>().mockResolvedValue();
     vi.stubGlobal("navigator", { clipboard: { writeText } });
@@ -1593,22 +1667,45 @@ describe("FEAT-126 ChatPage", () => {
     wrapper.unmount();
   });
 
-  it.each([{reply:false,native:false},{reply:true,native:false},{reply:false,native:true},{reply:true,native:true}])("submits selected skills with preserved mentions and admitted identities (%j)", async ({reply,native}) => {
+  it.each([{reply:false,native:false},{reply:true,native:false},{reply:false,native:true},{reply:true,native:true}])("submits slash-selected skills with preserved mentions and admitted identities (%j)", async ({reply,native}) => {
     vi.stubEnv("VITE_YIJIE_NATIVE_SKILL_INPUT_ENABLED", String(native));
     skillFlag.enabled = true;
     vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "2026-10-20T00:00:00Z", skills: [installedSkill] });
     const { wrapper, store, pinia } = await mountPage(reply ? `/chat/${SESSION_ID}` : "/chat", reply);
     const skillStore = useSkillStore(pinia);
-    skillStore.skills = [installedSkill]; skillStore.phase = "ready";
+    skillStore.skills = [
+      installedSkill,
+      { ...installedSkill, id: "disabled", enabled: false, runtimeVisible: false },
+      { ...installedSkill, id: "not-installed", installationStatus: "not_installed", enabled: false, runtimeVisible: false },
+      { ...installedSkill, id: "syncing", runtimeVisible: false },
+      { ...installedSkill, id: "updating" },
+    ];
+    skillStore.operations = { updating: "disable" };
+    skillStore.phase = "ready";
     const refresh = vi.spyOn(skillStore, "open").mockResolvedValue();
     const target = reply ? `session:${SESSION_ID}` as const : "new";
     const drafts = useChatComposerDraftStore(pinia);
-    drafts.setSkills(target, [installedSkill]);
     const submit = reply
       ? vi.spyOn(store, "submitTurnWithResult").mockResolvedValue(acceptedSubmission(SESSION_ID, chatSessionDraftTarget(SESSION_ID)))
       : vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
-    await wrapper.get("textarea").setValue("根据合成资料撰写一段文案");
-    await wrapper.getComponent(ChatComposer).vm.$emit("submit");
+    const input = wrapper.get("textarea");
+    expect(input.attributes("placeholder")).toBe("描述你想完成的事，输入 / 调用技能");
+    input.element.focus();
+    await input.setValue("/");
+    await flushPromises();
+    expect(document.querySelectorAll('[role="listbox"] [role="option"]')).toHaveLength(1);
+    await input.setValue("/文案");
+    await input.trigger("keydown", { key: "Enter" });
+    await flushPromises();
+    expect(submit).not.toHaveBeenCalled();
+    expect(drafts.skillSelection(target).map(skill => skill.id)).toEqual([installedSkill.id]);
+    expect(input.element.value).toBe("");
+    expect(input.element).toBe(document.activeElement);
+    expect(document.querySelector('[role="listbox"]')).toBeNull();
+    expect(refresh).toHaveBeenCalledExactlyOnceWith(false);
+    refresh.mockClear();
+    await input.setValue("根据合成资料撰写一段文案");
+    await input.trigger("keydown", { key: "Enter" });
     await flushPromises();
     expect(refresh).toHaveBeenCalledOnce();
     expect(submit).toHaveBeenCalledOnce();
@@ -2252,9 +2349,18 @@ describe("FEAT-126 ChatPage", () => {
     } finally { wrapper.unmount(); }
   });
 
-  it("projects cleanup pending instead of removing the session optimistically", async () => {
-    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
-    store.cleanupStatus = {
+  it("silently checks deletion while retiring question reads for that session", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.stubEnv("VITE_YIJIE_ENV", "local");
+    vi.stubEnv("VITE_YIJIE_LOCAL_PROFILE", "demo_fast");
+    vi.stubEnv("VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED", "true");
+    vi.stubEnv("VITE_YIJIE_INTERACTION_TOOLS", "true");
+    vi.spyOn(runtimePermissionClient, "get").mockResolvedValue({ mode: "ask", busy: false, fullAccessConfirmed: false });
+    vi.spyOn(runtimePermissionClient, "approvals").mockResolvedValue([]);
+    let rejectRead!: (reason: Error) => void;
+    const snapshot = vi.spyOn(userInputClient, "snapshot").mockRejectedValueOnce(new Error("unavailable"))
+      .mockImplementation(() => new Promise((_resolve, reject) => { rejectRead = reject; }));
+    const pending = {
       operationId: "019c1a00-0000-7000-8000-000000000007",
       desktopState: "complete",
       hostState: "pending",
@@ -2264,10 +2370,36 @@ describe("FEAT-126 ChatPage", () => {
       requestedAt: 1,
       completedAt: null,
       expiresAt: null,
-    };
-    await flushPromises();
-    expect(wrapper.text()).toContain("正在永久删除任务");
-    expect(wrapper.text()).not.toContain("任务已永久删除");
+    } as const;
+    let acceptDelete!: (status: typeof pending) => void;
+    vi.spyOn(chatClient, "deleteSession").mockImplementation(() => new Promise(resolve => { acceptDelete = resolve; }));
+    const check = vi.spyOn(chatClient, "getCleanupStatus").mockResolvedValue(pending);
+    const { wrapper, store, pinia } = await mountPage(`/chat/${SESSION_ID}`, true);
+    try {
+      usePermissionStore(pinia).$patch({ selectedTenantId: PROJECT_ID, authorizationRevision: 1,
+        expiresAt: new Date(Date.now() + 300_000).toISOString(), capabilities: ["task.read", "task.create"], phase: "ready" });
+      await flushPromises();
+      const error = "暂时无法同步问题或回答回执";
+      expect(wrapper.text()).toContain(error);
+      await wrapper.findAll("button").find(button => button.text() === "重新读取")!.trigger("click");
+      expect(snapshot).toHaveBeenCalledTimes(2);
+
+      const deleting = store.deleteSelected();
+      rejectRead(new Error("session no longer available"));
+      await flushPromises();
+      expect(wrapper.text()).not.toContain(error);
+      acceptDelete(pending);
+      await deleting;
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(check).toHaveBeenCalledWith(store.context!.contextId, pending.operationId);
+      expect(snapshot).toHaveBeenCalledTimes(2);
+      expect(wrapper.text()).not.toContain(error);
+      expect(wrapper.text()).not.toContain("正在永久删除任务");
+      expect(wrapper.text()).not.toContain("检查删除状态");
+      expect(wrapper.text()).not.toContain("任务已永久删除");
+      expect(store.selectedSessionId).toBe(SESSION_ID);
+      expect(store.canSend).toBe(false);
+    } finally { wrapper.unmount(); await store.dispose(); }
   });
 
   it("retries an already confirmed deletion after its automatic retry budget is exhausted", async () => {

@@ -12,7 +12,10 @@ import ExpertMarketPanel from "../../components/experts/ExpertMarketPanel.vue";
 import ExtensionsPage from "./ExtensionsPage.vue";
 
 const navigation = vi.hoisted(() => ({ route: { path: "/plugins", fullPath: "/plugins", query: {} as Record<string, string> }, replace: vi.fn(), push: vi.fn() }));
-const native = vi.hoisted(() => ({ list: vi.fn(), scan: vi.fn(), subscribeDirectoryChanged: vi.fn() }));
+const native = vi.hoisted(() => ({
+  list: vi.fn(), scan: vi.fn(), subscribeDirectoryChanged: vi.fn(),
+  importSkill: vi.fn(), importDialog: { open: vi.fn(), close: vi.fn() },
+}));
 vi.mock("vue-router", () => ({ useRoute: () => navigation.route, useRouter: () => navigation }));
 vi.mock("../../authorization/experts-ui-config", () => ({ expertsUiEnabled: true }));
 vi.mock("../../composables/useExpertsBinding", () => ({ useExpertsBinding: vi.fn() }));
@@ -33,6 +36,8 @@ beforeEach(() => {
   const snapshot = { schemaVersion: 1, scannedAt: "2026-10-11T00:00:00Z", skills: [] };
   native.list.mockResolvedValue(snapshot); native.scan.mockResolvedValue(snapshot);
   native.subscribeDirectoryChanged.mockResolvedValue(() => {});
+  native.importDialog.open.mockResolvedValue(undefined);
+  native.importDialog.close.mockResolvedValue(undefined);
   const experts = useExpertsStore(); experts.contextId = expertTestId(1); experts.scope = "local:test";
   experts.snapshot = { ...expertSnapshot({ ...expertEntry, state: "ready" }), executionAvailable: true };
 });
@@ -43,6 +48,39 @@ function render() {
 }
 
 describe("extensions page tab continuity", () => {
+  it("refreshes only the active catalog and puts its import action immediately to the right", async () => {
+    const refreshExperts = vi.spyOn(useExpertsStore(), "refresh").mockResolvedValue();
+    const page = render(); await flushPromises();
+    const header = page.get(".yj-page-header__actions");
+    const refresh = header.get('button[aria-label="刷新数据"]');
+    expect(refresh.text()).toBe("");
+    expect(refresh.find("svg").exists()).toBe(true);
+    expect(refresh.attributes("data-yj-tooltip")).toBe("刷新数据");
+    expect(refresh.find(".n-button__border").exists()).toBe(false);
+    const upcoming = header.get('[data-yj-tooltip="即将支持"]');
+    expect(upcoming.attributes("tabindex")).toBe("0");
+    expect(header.findAll("button").map(button => button.text())).toEqual(["", "导入专家"]);
+    expect(upcoming.get("button").attributes("disabled")).toBeDefined();
+    await upcoming.trigger("mouseenter"); await flushPromises();
+    expect(document.body.textContent).toContain("即将支持");
+    await upcoming.get("button").trigger("click");
+    expect(native.importDialog.open).not.toHaveBeenCalled();
+    await refresh.trigger("click");
+    expect(refreshExperts).toHaveBeenCalledOnce();
+    expect(native.scan).not.toHaveBeenCalled();
+
+    await page.findAll('[role="tab"]')[1]!.trigger("click"); await flushPromises();
+    expect(header.findAll("button").map(button => button.text())).toEqual(["", "导入技能"]);
+    expect(page.findAll("button").filter(button => button.text() === "导入技能")).toHaveLength(1);
+    await header.get('button[aria-label="刷新数据"]').trigger("click"); await flushPromises();
+    expect(native.scan).toHaveBeenCalledWith("user_retry", expect.any(AbortSignal));
+    expect(refreshExperts).toHaveBeenCalledOnce();
+    await header.get('button[aria-haspopup="dialog"]').trigger("click"); await flushPromises();
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("安装技能");
+    expect(native.importDialog.open).toHaveBeenCalledOnce();
+    expect(native.importSkill).not.toHaveBeenCalled();
+  });
+
   it("keeps keyboard focus, search terms and scroll positions independent across tabs", async () => {
     const page = render(); await flushPromises();
     const tabs = page.findAll<HTMLButtonElement>('[role="tab"]');
@@ -92,6 +130,7 @@ describe("extensions page tab continuity", () => {
     const names = () => panel.findAll(".skill-card__title").map(card => card.text());
 
     expect(panel.get(".skill-marketplace__count").text()).toBe("3 个技能");
+    expect(panel.get(".skill-marketplace__summary p").text()).toBe("在对话中选择已启用的技能，再发送消息开始任务。");
     await search.setValue("  b2b  ");
     expect(names()).toEqual(["销售谈判专家"]);
     expect(panel.get(".skill-marketplace__count").text()).toBe("1 个技能");

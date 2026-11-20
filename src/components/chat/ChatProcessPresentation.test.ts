@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import {mount} from "@vue/test-utils";
 import {describe, expect, it} from "vitest";
-import {h} from "vue";
+import {h, nextTick} from "vue";
 import type {NativeConversationView} from "../../api/generated/native-conversation-private.gen";
 import {composeConversationView, type ConversationSnapshot} from "../../domain/conversation-view";
 import {selectConversationTimeline} from "../../domain/conversation-timeline";
@@ -31,12 +31,16 @@ function turn(view = native(), protect = false) {
 }
 
 describe("native process reading layout", () => {
-  it.each([undefined, "final_answer"] as const)("retains answer actions for an unphased body without tools or an explicit final with trailing tools (%s)", phase => {
+  it.each([undefined, "final_answer"] as const)("retains answer actions for an unphased body without tools or an explicit final with trailing tools (%s)", async phase => {
     const view=native();
-    view.items=[view.items[0]!,record({id:"answer",type:"agentMessage",text:"文档已生成。",availability:"available",...(phase ? {phase} : {})},1)];
-    if (phase) view.items.push(record({id:"trailing-command",type:"commandExecution",status:"failed",commandLabel:"后续检查",exitCode:1,availability:"partial"},2));
+    view.items=[view.items[0]!,
+      record({id:"interim",type:"agentMessage",text:"我在整理文档。",availability:"available"},1),
+      record({id:"answer",type:"agentMessage",text:"文档已生成。",availability:"available",...(phase ? {phase} : {})},2)];
+    if (phase) view.items.push(record({id:"trailing-command",type:"commandExecution",status:"failed",commandLabel:"后续检查",exitCode:1,availability:"partial"},3));
     const wrapper=mount(ChatTurnGroup,{props:{turn:turn(view),position:1},slots:{"item-actions":({item}:{item:{itemId:string}})=>h("button",{"data-copy-item":item.itemId},"复制")}});
+    await nextTick();
     expect(wrapper.get('[data-copy-item="answer"]').isVisible()).toBe(true);
+    expect(wrapper.find('[data-copy-item="interim"]').exists()).toBe(false);
     wrapper.unmount();
   });
 

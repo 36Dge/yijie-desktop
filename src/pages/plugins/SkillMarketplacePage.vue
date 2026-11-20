@@ -18,10 +18,11 @@ import {
 } from "../../stores/skill.store";
 import SkillCard from "../../components/skills/SkillCard.vue";
 import YjEmpty from "../../components/yijie/YjEmpty.vue";
-import YjIcon from "../../components/yijie/YjIcon.vue";
 import YjPage from "../../components/yijie/YjPage.vue";
 import YjPageHeader from "../../components/yijie/YjPageHeader.vue";
+import YjRefreshButton from "../../components/yijie/YjRefreshButton.vue";
 import YjSection from "../../components/yijie/YjSection.vue";
+import ExtensionImportButton from "./ExtensionImportButton.vue";
 import SkillImportDialog from "./SkillImportDialog.vue";
 
 const props = withDefaults(defineProps<{ title?: string; embedded?: boolean; active?: boolean; query?: string }>(), { title: "Skill 广场", embedded: false, active: true, query: "" });
@@ -38,6 +39,8 @@ let pageUnmounted = false;
 const acceptanceEnvironment = import.meta.env.VITE_YIJIE_FEAT174_ACCEPTANCE === "true";
 const canManage = computed(() => permissionStore.hasCapability("plugin.manage"));
 const canImport = computed(() => skillStore.canImport && canManage.value);
+const rescanDisabled = computed(() => skillStore.phase === "loading" || Object.keys(skillStore.operations).length > 0);
+const importDisabled = computed(() => skillStore.phase === "loading" || skillStore.importing);
 const visibleCategories = computed(() => {
   const keyword = props.query.trim().toLocaleLowerCase();
   if (!keyword) return skillStore.categories;
@@ -76,11 +79,14 @@ async function retry(): Promise<void> {
 defineExpose({
   rescan: retry,
   refreshing: computed(() => skillStore.refreshing),
-  rescanDisabled: computed(() => skillStore.phase === "loading" || Object.keys(skillStore.operations).length > 0),
+  rescanDisabled,
+  canImport,
+  importDisabled,
+  openImportDialog,
 });
 
 function openImportDialog(): void {
-  if (!props.active || !canManage.value || skillStore.importing) return;
+  if (!props.active || !canImport.value || importDisabled.value) return;
   skillStore.importError = null;
   importDialogOpen.value = true;
 }
@@ -202,35 +208,17 @@ onBeforeUnmount(() => {
       description="发现、离线安装和管理跨境电商 Skill。只有已安装且已启用的 Skill 才会向模型开放。"
     >
       <template #actions>
-        <n-button
-          secondary
-          :loading="skillStore.refreshing"
-          :disabled="skillStore.phase === 'loading' || Object.keys(skillStore.operations).length > 0"
-          aria-label="重新扫描本地 Skill"
-          @click="retry"
-        >
-          <template #icon><YjIcon name="refresh" /></template>
-          重新扫描
-        </n-button>
+        <YjRefreshButton :loading="skillStore.refreshing" :disabled="rescanDisabled" @refresh="retry" />
+        <ExtensionImportButton v-if="canImport" kind="skills" :disabled="importDisabled" @import-skill="openImportDialog" />
       </template>
     </YjPageHeader>
 
     <slot />
     <n-alert v-if="acceptanceEnvironment" type="info" :bordered="false">独立技能验收环境：操作使用单独的数据，不改变日常技能和聊天。</n-alert>
 
-    <div v-if="visibleSkillCount !== null || canImport" class="skill-marketplace__summary">
-      <span v-if="visibleSkillCount !== null" class="skill-marketplace__count">{{ visibleSkillCount }} 个技能</span>
-      <button
-        v-if="canImport"
-        type="button"
-        class="yj-control skill-marketplace__import-button"
-        aria-haspopup="dialog"
-        :disabled="skillStore.phase === 'loading' || skillStore.importing"
-        @click="openImportDialog"
-      >
-        <YjIcon name="plus" size="sm" />
-        导入技能
-      </button>
+    <div v-if="visibleSkillCount !== null" class="skill-marketplace__summary">
+      <span class="skill-marketplace__count">{{ visibleSkillCount }} 个技能</span>
+      <p v-if="embedded" class="skill-marketplace__hint">在对话中选择已启用的技能，再发送消息开始任务。</p>
     </div>
     <n-alert v-if="skillStore.notice" type="info" :bordered="false">{{ skillStore.notice }}</n-alert>
     <n-alert v-if="skillStore.importError && !importDialogOpen" type="warning" :bordered="false" role="alert">{{ skillStore.importError }}</n-alert>
@@ -277,36 +265,24 @@ onBeforeUnmount(() => {
     <YjEmpty
       v-else-if="skillStore.phase === 'incompatible'"
       title="Skill 数据版本不兼容"
-      description="当前客户端无法安全识别本地 Skill 状态。请升级客户端后重新扫描。"
+      description="当前客户端无法安全识别本地 Skill 状态。请升级客户端后刷新数据。"
       icon="warning"
       role="alert"
-    >
-      <template #actions>
-        <n-button secondary @click="retry">重新扫描</n-button>
-      </template>
-    </YjEmpty>
+    />
 
     <YjEmpty
       v-else-if="skillStore.phase === 'unavailable'"
       title="本地 Skill 服务暂不可用"
-      :description="refreshFailure ?? '请确认易界本地服务已启动，然后重新扫描。'"
+      :description="refreshFailure ?? '请确认易界本地服务已启动，再点击右上角的刷新按钮。'"
       icon="warning"
       role="alert"
-    >
-      <template #actions>
-        <n-button type="primary" @click="retry">重新扫描</n-button>
-      </template>
-    </YjEmpty>
+    />
 
     <YjEmpty
       v-else-if="skillStore.phase === 'empty'"
       title="当前客户端没有可展示的 Skill"
-      description="本地安装包未包含已审核的 Skill。升级客户端后可重新扫描内置清单。"
-    >
-      <template #actions>
-        <n-button secondary @click="retry">重新扫描</n-button>
-      </template>
-    </YjEmpty>
+      description="本地安装包未包含已审核的 Skill。升级客户端后可点击右上角的刷新按钮更新清单。"
+    />
 
     <YjEmpty
       v-else-if="visibleCategories.length === 0"
@@ -385,26 +361,18 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.skill-marketplace__summary { display: flex; align-items: center; flex-wrap: wrap; gap: var(--yj-space-3); }
-.skill-marketplace__count {
-  padding-inline-start: var(--yj-space-1);
-  color: var(--yj-color-text-secondary);
+.skill-marketplace__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--yj-space-2) var(--yj-space-4);
+  padding: var(--yj-space-1) var(--yj-space-1) 0;
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
 }
-.skill-marketplace__import-button {
-  margin-inline-start: auto;
-  padding-inline: var(--yj-space-4);
-  border: 0;
-  background: var(--yj-color-brand-primary);
-  color: var(--yj-color-on-brand);
-  cursor: pointer;
-}
-.skill-marketplace__import-button :deep(.yj-icon) { color: inherit; }
-.skill-marketplace__import-button:hover:enabled { background: var(--yj-color-brand-hover); }
-.skill-marketplace__import-button:active:enabled { background: var(--yj-color-brand-active); }
-.skill-marketplace__import-button:disabled { background: var(--yj-color-control-disabled-bg); color: var(--yj-color-text-disabled); cursor: default; }
-.skill-marketplace__import-button:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: 2px; }
+.skill-marketplace__count { color: var(--yj-color-text-secondary); }
+.skill-marketplace__hint { margin: 0; color: var(--yj-color-text-tertiary); }
 
 .skill-marketplace {
   display: grid;

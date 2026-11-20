@@ -8,8 +8,8 @@ import type { MessageFileReference } from "../../domain/message-file-reference";
 import { messageFileActionKey, messageFileLocationKey, messageFileWorkspaceKey, messageLinkTargetKey, useChatMessageLink } from "../../composables/useChatMessageLink";
 import ChatStreamText from "./ChatStreamText.vue";
 
-const props = defineProps<{ text: string; file?: MessageFileReference; destination: string | null; offset: number; streaming: boolean }>();
-const {href, pending, error, open} = useChatMessageLink(() => props.destination);
+const props = defineProps<{ text: string; file?: MessageFileReference; destination: string | null; offset: number; streaming: boolean; userUrl?: boolean }>();
+const {href, pending, error, open} = useChatMessageLink(() => props.destination, () => !!props.userUrl);
 const fileAction = inject(messageFileActionKey, null);
 const target = inject(messageLinkTargetKey, () => undefined);
 function openFile() {
@@ -42,8 +42,21 @@ const reveal = inject(chatTextRevealKey, null);
 const shown = computed(() => !reveal || reveal.frame.value.cursor > props.offset);
 const hovered = ref(false), focused = ref(false);
 const tooltipId = `${useId()}-link-address`;
-const tooltipVisible = computed(() => Boolean(props.destination) && shown.value && (hovered.value || focused.value));
+const tooltipVisible = computed(() => Boolean(props.destination) && props.text.trim() !== props.destination &&
+  shown.value && (hovered.value || focused.value));
 function dismiss() { hovered.value = false; focused.value = false; }
+function activateWithEnter(event: KeyboardEvent) {
+  if (!props.userUrl || !href.value) return;
+  event.preventDefault();
+  if (!event.repeat) void open();
+}
+function activate(event: MouseEvent) {
+  if (props.userUrl && event.detail > 0) {
+    const selection = (event.currentTarget as HTMLElement).ownerDocument.getSelection();
+    if (selection && !selection.isCollapsed && selection.containsNode(event.currentTarget as HTMLElement, true)) return;
+  }
+  void open();
+}
 watch(() => props.destination, dismiss);
 </script>
 
@@ -54,10 +67,11 @@ watch(() => props.destination, dismiss);
   <NTooltip arrow-point-to-center v-else-if="shown" :show="tooltipVisible" trigger="manual" placement="top">
     <template #trigger>
       <component :is="href ? 'a' : 'span'" class="chat-text-link" :class="{'chat-text-link--enabled': href}"
-        :href="href" :target="href ? '_blank' : undefined" :rel="href ? 'noopener noreferrer' : undefined"
+        :href="userUrl ? undefined : href" :target="href && !userUrl ? '_blank' : undefined" :rel="href && !userUrl ? 'noopener noreferrer' : undefined"
+        :role="userUrl && href ? 'link' : undefined" :tabindex="userUrl && href ? 0 : undefined"
         :aria-describedby="tooltipVisible ? tooltipId : undefined" :aria-busy="pending ? 'true' : undefined"
         @mouseenter="hovered = true" @mouseleave="hovered = false" @focus="focused = true" @blur="focused = false"
-        @keydown.esc="dismiss" @click.prevent="open" @auxclick.middle.prevent="open">
+        @keydown.esc="dismiss" @keydown.enter="activateWithEnter" @click.prevent="activate" @auxclick.middle.prevent="activate">
         <ChatStreamText :text="text" :streaming="streaming" :offset="offset" />
       </component>
     </template>

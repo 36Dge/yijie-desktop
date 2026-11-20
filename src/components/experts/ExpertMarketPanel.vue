@@ -104,8 +104,8 @@ watch(() => experts.scope, () => { selectedKey.value = null; query.value = ""; }
     <div v-if="experts.refreshing && !experts.snapshot" class="expert-market__grid" role="status" aria-label="正在读取专家目录">
       <NSkeleton v-for="index in 3" :key="index" class="expert-market__skeleton" />
     </div>
-    <YjEmpty v-else-if="liveUnavailable && !showcaseEntries.length" title="专家服务暂不可用" :description="`${experts.error ?? '本机身份尚未就绪。'} 可点击「重新读取」重试。`" role="alert" />
-    <NAlert v-else-if="liveUnavailable" type="info" :bordered="false">易界专家服务暂不可用，展示资料仍可查看。可点击「重新读取」重试。</NAlert>
+    <YjEmpty v-else-if="liveUnavailable && !showcaseEntries.length" title="专家服务暂不可用" :description="`${experts.error ?? '本机身份尚未就绪。'} 可点击右上角的刷新按钮重试。`" role="alert" />
+    <NAlert v-else-if="liveUnavailable" type="info" :bordered="false">易界专家服务暂不可用，展示资料仍可查看。可点击右上角的刷新按钮重试。</NAlert>
     <YjEmpty v-if="!resultCount && !(experts.refreshing && !experts.snapshot) && (!liveUnavailable || showcaseEntries.length)" :title="query.trim() ? '未找到匹配专家' : '暂无可用专家'" :description="query.trim() ? '试试其他名称、平台或领域。' : '当前客户端清单还没有可展示的专家。'" />
     <div v-if="resultCount" class="expert-market__grid">
       <article v-for="entry in visibleEntries" :key="key(entry)" class="expert-card" :class="{ 'expert-card--selected': isSelected(entry), 'expert-card--action-visible': isSelected(entry) || summonBusy || !canSummon(entry) }">

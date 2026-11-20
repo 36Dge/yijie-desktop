@@ -429,6 +429,7 @@ export function createChatStoreDefinition(
     const liveTurnStatus = ref<string | null>(null);
     const cleanupStatus = shallowRef<ChatCleanupStatus | null>(null);
     const deleteInFlightSessionId = ref<string | null>(null);
+    const cleanupNeedsStatusCheck = ref(false);
     const controlPlane = shallowRef<ChatSessionControlPlane | null>(null);
     const localReadiness = shallowRef<ChatLocalReadiness | null>(null);
     const draftTarget = shallowRef<ChatDraftTarget | null>(null);
@@ -480,8 +481,14 @@ export function createChatStoreDefinition(
       }
     }
     watch([() => context.value?.contextId, () => hasAction("read_sessions")], clearReadingSnapshots, { flush: "sync" });
-    watch(cleanupStatus, status => {
-      if (status !== null && selectedSessionId.value) forgetReadingSnapshot(selectedSessionId.value);
+    watch(cleanupStatus, (status, previous) => {
+      const bound = context.value, sessionId = selectedSessionId.value;
+      if (!status || !sessionId) return;
+      forgetReadingSnapshot(sessionId);
+      if (bound && hasAction("read_cleanup") && deleteInFlightSessionId.value === null &&
+        previous?.operationId !== status.operationId && !cleanupIsFinished(status) && status.outcomeCode !== "retry_limit_exceeded") {
+        scheduleSelectedCleanupPoll(bound, sessionId, status.operationId);
+      }
     }, { flush: "sync" });
     const isReady = computed(() => phase.value === "ready" || phase.value === "streaming");
     const hasSendPermission = computed(() => selectedSessionId.value === null
@@ -747,6 +754,7 @@ export function createChatStoreDefinition(
 
     function clearCleanupPoll(): void {
       cleanupPollEpoch += 1;
+      cleanupNeedsStatusCheck.value = false;
       if (cleanupPollTimer !== null) {
         clearTimeout(cleanupPollTimer);
         cleanupPollTimer = null;
@@ -3707,7 +3715,7 @@ export function createChatStoreDefinition(
         attachment,
       ]));
       return Object.freeze(blocks.flatMap((block): readonly ChatMessageContentBlock[] => {
-        if (block.type === "text") return [Object.freeze({ type: "text", text: block.text })];
+        if (block.type === "text") return [Object.freeze({ ...block })];
         const attachment = attachmentsById.get(block.attachmentId);
         return attachment === undefined
           ? []
@@ -4306,11 +4314,10 @@ export function createChatStoreDefinition(
           // A manual status check remains available; keep polling while this selection is current.
         }
         attempts += 1;
-        if (
-          attempts >= CLEANUP_POLL_MAX_ATTEMPTS || cleanupPollEpoch !== pollEpoch ||
-          cleanupObservationGeneration !== pollCleanupGeneration
-        ) {
+        if (cleanupPollEpoch !== pollEpoch || cleanupObservationGeneration !== pollCleanupGeneration) return;
+        if (attempts >= CLEANUP_POLL_MAX_ATTEMPTS) {
           clearCleanupPoll();
+          cleanupNeedsStatusCheck.value = true;
           return;
         }
         cleanupPollTimer = setTimeout(() => { void poll(); }, CLEANUP_POLL_INTERVAL_MS);
@@ -4548,6 +4555,8 @@ export function createChatStoreDefinition(
       liveReasoning,
       liveTurnStatus,
       cleanupStatus,
+      cleanupNeedsStatusCheck,
+      deleteRequestPending: computed(() => deleteInFlightSessionId.value !== null),
       controlPlane,
       localReadiness,
       draftTarget,

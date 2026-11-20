@@ -461,16 +461,27 @@ describe("ChatSidebarTree", () => {
     expect(wrapper.text()).not.toContain("暂无任务记录");
   });
 
-  it("opens rename and destructive confirmation dialogs without mutating first", async () => {
-    const { wrapper, store } = await mountTree();
+  const titleAtLimit = "春季行程安排".repeat(3) + "与👨‍👩‍👧‍👦";
+  it.each([
+    ["Synthetic Session", "Synthetic Session"],
+    [titleAtLimit, titleAtLimit],
+    [titleAtLimit + "的完整行程", titleAtLimit + "…"],
+  ])("previews the deletion target %s without truncating the warning or mutating", async (title, preview) => {
+    const { wrapper, store } = await mountTree(state => {
+      state.sessions = [{ ...state.sessions[0]!, title }];
+    });
     const deleteSelected = vi.spyOn(store, "deleteSelected").mockResolvedValue(null);
     const dropdowns = wrapper.findAllComponents(NDropdown);
 
     dropdowns[1].vm.$emit("select", "delete");
     await flushPromises();
     expect(wrapper.findAllComponents(NModal)[1].props("show")).toBe(true);
-    expect(document.body.textContent).toContain("此操作不能撤销");
+    const dialog = document.body.querySelector('[role="alertdialog"]')!;
+    expect(document.getElementById(dialog.getAttribute("aria-labelledby")!)?.textContent).toBe("永久删除任务？");
+    expect(document.getElementById(dialog.getAttribute("aria-describedby")!)?.textContent?.trim()).toBe(`将删除“${preview}”的本地对话。此操作不能撤销。`);
+    expect(store.sessions[0]!.title).toBe(title);
     expect(deleteSelected).not.toHaveBeenCalled();
+    wrapper.unmount();
   });
 
   it("requires confirmed navigation to the background deletion target and never deletes the still-active task", async () => {

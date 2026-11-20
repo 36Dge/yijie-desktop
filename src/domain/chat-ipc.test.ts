@@ -69,6 +69,25 @@ describe("private chat IPC v1 contract", () => {
     ]);
   });
 
+  it("keeps legacy text blocks readable and accepts only ordered, unique saved user skill identities", () => {
+    const read = (role: string, blocks: Record<string, unknown>[]) => parseHistoryPageResponseV2({
+      schemaVersion: 2, requestId: "019c1a00-0000-7000-8000-000000000020",
+      data: {nextCursor: null, turns: [{turnId: "019c1a00-0000-7000-8000-000000000022", status: "completed", terminalAt: 3,
+        reasoningStatus: "unavailable", reasoningReasonCode: null, reasoning: [], messages: [{
+          messageId: "019c1a00-0000-7000-8000-000000000023", role, content: blocks.map(block => block.text).join("\n"),
+          contentBlocks: blocks, status: "committed", ordinal: 0, createdAt: 2,
+        }]}]},
+    }).turns[0]!.messages[0]!.contentBlocks;
+    const plain = {type: "text", text: "原始正文"};
+    const skill = {id: "listing-skill", version: "1.0.0"};
+    const selected = {...plain, skills: [skill]};
+    expect(read("user", [plain])).toEqual([plain]);
+    expect(read("user", [selected, plain])).toEqual([selected, plain]);
+    expect(() => read("assistant", [selected])).toThrow(ChatContractError);
+    expect(() => read("user", [selected, {...plain, skills: [{...skill, version: "2.0.0"}]}])).toThrow(ChatContractError);
+    expect(() => read("user", [{...plain, skills: [{id: skill.id}]}])).toThrow(ChatContractError);
+  });
+
   it("keeps private v3 history metadata-only and rejects inconsistent artifact state", () => {
     expect(CHAT_V3_COMMAND_NAMES).toEqual(["chat_load_history_v3"]);
     const schema = JSON.parse(

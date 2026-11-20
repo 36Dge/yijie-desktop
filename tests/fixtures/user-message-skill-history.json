@@ -1,0 +1,16 @@
+[
+  {
+    "type": "text",
+    "text": "https://example.org/products/camera?sku=42&th=1 给出这个商品的优化建议。",
+    "skills": [
+      { "id": "listing-skill", "version": "1.0.0" },
+      { "id": "copy-review", "version": "2.0.0" }
+    ]
+  },
+  { "type": "text", "text": "保留这段没有选择技能的正文。" },
+  {
+    "type": "text",
+    "text": "补充：核对标题和描述。",
+    "skills": [{ "id": "title-review", "version": "1.2.0" }]
+  }
+]

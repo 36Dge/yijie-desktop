@@ -101,7 +101,7 @@ function selectAction(key: string | number): void {
     >
       <ChatSidebarSessionTitle class="chat-tree__session-title" :text="session.title" :active="(titleHovered || titleFocused) && !menuVisible && !actionPending" />
       <span class="chat-tree__session-status" aria-hidden="true">
-        <YjIcon v-if="status === 'running'" class="chat-tree__session-running" name="taskRunning" size="xs" />
+        <YjIcon v-if="status === 'running'" class="chat-tree__session-running" name="taskRunning" size="sm" />
         <span v-else-if="status === 'completed'" class="chat-tree__session-completed" />
       </span>
     </button>
@@ -169,10 +169,10 @@ function selectAction(key: string | number): void {
   align-items: center;
   justify-content: center;
   flex: none;
-  color: var(--yj-color-chat-link);
+  color: var(--yj-color-chat-task-indicator);
 }
 
-.chat-tree__session-status .chat-tree__session-running { color: var(--yj-color-chat-task-running); }
+.chat-tree__session-status .chat-tree__session-running { color: inherit; }
 @media (prefers-reduced-motion: no-preference) {
   .chat-tree__session-running { animation: chat-task-spin var(--yj-motion-chat-task-spin) linear infinite; }
 }
@@ -183,7 +183,7 @@ function selectAction(key: string | number): void {
   width: var(--yj-size-chat-completion-dot);
   height: var(--yj-size-chat-completion-dot);
   border-radius: var(--yj-radius-full);
-  background: currentColor;
+  background: var(--yj-color-chat-completion-dot);
 }
 
 .chat-tree__session-description {

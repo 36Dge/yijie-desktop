@@ -9,25 +9,26 @@ export const messageFileWorkspaceKey: InjectionKey<ComputedRef<string | null>> =
 export const messageFileLocationKey: InjectionKey<ComputedRef<((target: MessageLinkTarget, file: MessageFileReference) => Promise<string>) | undefined>> = Symbol("message-file-location");
 export const messageLinkTargetKey: InjectionKey<() => MessageLinkTarget | undefined> = Symbol("message-link-target");
 
-export function useChatMessageLink(destination: () => string | null) {
+export function useChatMessageLink(destination: () => string | null, userUrl = () => false) {
   const scope = inject(messageLinkTargetKey, () => undefined);
   const actions = inject(webSourceActionsKey, null);
   const pending = ref(false);
   const error = ref<string | null>(null);
-  const href = computed(() => actions?.openMessageLink && scope() ? sourceHref(destination() ?? "") : undefined);
+  const opener = computed(() => userUrl() ? actions?.openUserMessageLink : actions?.openMessageLink);
+  const href = computed(() => opener.value && scope() ? sourceHref(destination() ?? "") : undefined);
   let generation = 0;
   watch(() => {
     const target = scope();
-    return JSON.stringify([target?.sessionId, target?.turnId, target?.itemId, destination()]);
+    return JSON.stringify([target?.sessionId, target?.turnId, target?.itemId, destination(), userUrl()]);
   }, () => { generation++; pending.value = false; error.value = null; });
   onBeforeUnmount(() => { generation++; });
   async function open() {
     const target = scope();
     const url = href.value;
-    if (pending.value || !target || !url || !actions?.openMessageLink) return;
+    if (pending.value || !target || !url || !opener.value) return;
     const current = generation;
     pending.value = true; error.value = null;
-    try { await actions.openMessageLink({...target, url}); }
+    try { await opener.value({...target, url}); }
     catch { if (current === generation) error.value = "暂时无法打开链接，请再次点击重试。"; }
     finally { if (current === generation) pending.value = false; }
   }

@@ -1,3 +1,4 @@
+import type { SelectedSkillRef } from "./market-selection-v2.generated";
 import { traceDiagnosticBlocksLive } from "./conversation-trace-liveness";
 import {
 selectConversationApprovalForCommand,
@@ -81,6 +82,7 @@ type TimelineContentBlockBase = Readonly<{
 export type ConversationTimelineTextContentBlock = TimelineContentBlockBase & Readonly<{
   type: "text";
   text: string;
+  skills?: readonly SelectedSkillRef[];
   reasoningSource?: "summary" | "content";
 }>;
 
@@ -159,6 +161,7 @@ export type ConversationTimelinePlanViewModel = Readonly<{
 
 export type ConversationTimelineItemViewModel = Readonly<{
   publication?: ConversationItem["publication"];
+  userLinkSourceId?: string;
   contextUpdateState?: "in_progress" | "completed" | "interrupted" | "unknown";
   webSearch?: ConversationItem["webSearch"];
   identity: string;
@@ -309,6 +312,7 @@ function projectContentBlock(
         blockIndex,
         type: block.type,
         text: block.text,
+        ...(block.skills?.length && { skills: block.skills }),
       });
     case "code":
       return Object.freeze({
@@ -515,6 +519,7 @@ function projectItem(
     threadId: item.threadId,
     turnId: item.turnId,
     itemId: item.itemId,
+    ...(item.userLinkSourceId && { userLinkSourceId: item.userLinkSourceId }),
     ordinal: item.ordinal,
     kind,
     presentation,

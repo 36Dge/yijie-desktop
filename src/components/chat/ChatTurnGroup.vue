@@ -5,6 +5,7 @@ import type { SelectedChatSkill } from "../../domain/chat-skills";
 import type { YjIconName } from "../../icons/registry";
 import { conversationActivityPresentation, traceCurrentStatus, traceIsLive } from "../../domain/conversation-activity-presentation";
 import { groupConversationTurnOutput, type ConversationTurnReadingNode } from "../../domain/conversation-turn-output";
+import { completedTurnAnswer } from "../../domain/conversation-process";
 import { chatTracePresentationKey, createChatTracePresentationStore } from "../../stores/chat-trace-presentation.store";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatActivityGroup from "./ChatActivityGroup.vue";
@@ -44,6 +45,7 @@ provide(chatTracePresentationKey, choices);
 const processId = `${useId()}-trace`;
 const attentionIds = computed(() => new Set(props.turn.items.filter(item => item.approval && ["submitting", "reconciling", "error"].includes(props.approvalTransients[item.approval.approvalRequestId]?.phase ?? "idle")).map(item => item.identity)));
 const nodes = computed(() => conversationActivityPresentation(props.turn, attentionIds.value, Boolean(slots["structured-answer"])));
+const completedAnswerId = computed(() => completedTurnAnswer(props.turn)?.identity);
 const hasReadableFinal = computed(() => props.turn.items.some(item =>
   item.presentation === "final_answer" && item.contentBlocks.some(block =>
     (block.type === "text" || block.type === "code") && block.text.trim().length > 0)));
@@ -53,7 +55,7 @@ watch([() => props.turn.identity, hasReadableFinal], ([turnIdentity, readable]) 
 const answerStarted = computed(() => choices.has(`${props.turn.identity}:final-started`));
 const nativeLiveProgress = computed(() => traceIsLive(props.turn));
 const reasoningSummary = computed(() => conversationReasoningSummary(props.turn, nativeLiveProgress.value));
-const hasProcess = computed(() => Boolean(props.turn.plan || (answerStarted.value && reasoningSummary.value)) || nodes.value.some(isProcess));
+const hasProcess = computed(() => Boolean(props.turn.plan || ((answerStarted.value || completedAnswerId.value) && reasoningSummary.value)) || nodes.value.some(isProcess));
 const reasoningHeader = useActivitySummary(computed(() => ({
   heading: reasoningSummary.value?.heading,
   key: reasoningSummary.value?.key ?? "empty",
@@ -270,7 +272,7 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
           <ChatTurnPlan :plan="plan" :ended="['completed', 'failed', 'interrupted'].includes(turn.domainStatus)" />
         </li>
         <li v-else-if="node.kind === 'output'" class="chat-turn-group__item chat-turn-group__item--output">
-          <ChatTurnOutput :output="node" :turn="turn">
+          <ChatTurnOutput :output="node" :turn="turn" :completed-answer-id="completedAnswerId">
             <template v-if="slots['structured-answer']" #structured-answer="scope"><slot name="structured-answer" v-bind="scope" /></template>
             <template v-if="slots['artifact-reference']" #artifact-reference="scope"><slot name="artifact-reference" v-bind="scope" /></template>
             <template v-if="slots['attachment-reference']" #attachment-reference="scope"><slot name="attachment-reference" v-bind="scope" /></template>
@@ -284,7 +286,7 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
               <ChatActivityRow :item="item" :activity-entry="entry" :turn="turn" process-presentation :visible="visible" :can-decide-approvals="canDecideApprovals" :approval-authority-revision="approvalAuthorityRevision" :approval-transients="approvalTransients" @disclosure-change="forwardDisclosure" @approval-decision="emit('approval-decision', $event)" />
             </template>
           </ChatActivityGroup>
-          <ChatActivityRow v-else :search-calls="node.searchCalls" :item="node.item" :turn="turn" :answer-candidate="node.answerCandidate" :process-presentation="node.process" :visible="!isProcess(node) || processExpanded" :skill-catalog="skillCatalog" :connector-names="connectorNames" :can-decide-approvals="canDecideApprovals" :approval-authority-revision="approvalAuthorityRevision" :approval-transients="approvalTransients" @disclosure-change="forwardDisclosure" @approval-decision="emit('approval-decision', $event)">
+          <ChatActivityRow v-else :search-calls="node.searchCalls" :item="node.item" :turn="turn" :answer-candidate="node.answerCandidate" :completed-answer-id="completedAnswerId" :process-presentation="node.process" :visible="!isProcess(node) || processExpanded" :skill-catalog="skillCatalog" :connector-names="connectorNames" :can-decide-approvals="canDecideApprovals" :approval-authority-revision="approvalAuthorityRevision" :approval-transients="approvalTransients" @disclosure-change="forwardDisclosure" @approval-decision="emit('approval-decision', $event)">
             <template v-if="slots['structured-answer']" #structured-answer="slotProps"><slot name="structured-answer" v-bind="slotProps" /></template>
 <template v-if="slots['legacy-records']" #legacy-records="slotProps"><slot name="legacy-records" v-bind="slotProps" /></template>
 <template v-if="slots['artifact-reference']" #artifact-reference="slotProps"><slot name="artifact-reference" v-bind="slotProps" /></template>

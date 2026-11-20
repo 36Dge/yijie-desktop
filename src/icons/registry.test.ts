@@ -125,6 +125,7 @@ describe("iconRegistry", () => {
       "skillMarketplaceTags",
       "skillNegotiation",
       "skillOperations",
+      "skillMention",
       "skillPaymentRisk",
       "skillPpcCampaign",
       "skillPrivacyCompliance",

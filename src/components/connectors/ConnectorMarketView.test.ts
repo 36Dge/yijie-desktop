@@ -42,6 +42,28 @@ function button(label: string): DOMWrapper<HTMLButtonElement> {
 }
 function hasButton(label: string): boolean { return [...document.querySelectorAll("button")].some(candidate => candidate.textContent?.trim() === label); }
 
+it("keeps a single icon-only header refresh for empty and unavailable catalogs and blocks repeat clicks while busy", async () => {
+  const model = { phase: "ready" as const, entries: [], refreshing: false, canManage: false, error: null };
+  const wrapper = mount(ConnectorMarketView, { props: { model, canReturn: true }, attachTo: document.body });
+  wrappers.push(wrapper);
+  const header = wrapper.get(".yj-page-header__actions");
+  const refresh = header.get<HTMLButtonElement>('button[aria-label="刷新数据"]');
+  expect(refresh.text()).toBe("");
+  expect(refresh.get("svg").attributes("aria-hidden")).toBe("true");
+  expect(refresh.attributes("data-yj-tooltip")).toBe("刷新数据");
+  expect(refresh.find(".n-button__border").exists()).toBe(false);
+  expect(header.text()).toBe("返回对话");
+  expect(wrapper.findAll("button").some(button => button.text() === "刷新")).toBe(false);
+  await wrapper.setProps({ model: { ...model, phase: "unavailable" } });
+  expect(wrapper.findAll("button").some(button => button.text() === "重新读取")).toBe(false);
+  await refresh.trigger("click");
+  expect(wrapper.emitted("refresh")).toHaveLength(1);
+  await wrapper.setProps({ model: { ...model, refreshing: true } });
+  expect(refresh.element.disabled).toBe(true);
+  await refresh.trigger("click");
+  expect(wrapper.emitted("refresh")).toHaveLength(1);
+});
+
 describe("connector uninstall recovery", () => {
   it("lets a pending authorization reopen its page while keeping close, query and cancel available", async () => {
     const receipt = { ...operation("original-auth"), action: "authorize" as const };

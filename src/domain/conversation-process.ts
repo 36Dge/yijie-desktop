@@ -87,13 +87,28 @@ export function hasUnclassifiedToolContinuation(item: ConversationTimelineItemVi
   return false;
 }
 
-/** Shared by standalone messages and the footer of a response with artifacts. */
-export function showConversationItemActions(item: ConversationTimelineItemViewModel, turn: ConversationTimelineTurnViewModel, processPresentation = false, structuredAnswer = false): boolean {
-  return !processPresentation && item.presentation !== "commentary" &&
-    !hasUnclassifiedToolContinuation(item, turn.items) &&
-    !(["final_answer", "assistant_unclassified"].includes(item.presentation) && structuredAnswer) &&
-    item.presentation !== "command" && item.presentation !== "tool" &&
-    item.copyPolicy === "text_and_code" && (item.kind !== "assistant_message" || item.domainStatus === "completed");
+/** Prefer the explicit final. Older turns can have only unphased public messages. */
+export function completedTurnAnswer(turn: ConversationTimelineTurnViewModel): ConversationTimelineItemViewModel | undefined {
+  // Recovery can confirm completion with a read after a missed terminal notification.
+  if (turn.domainStatus !== "completed" || (turn.terminalStatus !== "completed" && turn.statusSource !== "runtime_read")) return;
+  let candidate: ConversationTimelineItemViewModel | undefined;
+  for (let index = turn.items.length - 1; index >= 0; index--) {
+    const item = turn.items[index]!;
+    if (item.presentation === "user_message") break;
+    if (item.kind !== "assistant_message") continue;
+    if (item.presentation === "final_answer") {
+      candidate = item;
+      break;
+    }
+    // A later unfinished reply also rules out an earlier unphased preamble.
+    if (!candidate && (item.domainStatus !== "completed" || hasReadableProcessContent(item))) {
+      candidate = item;
+    }
+  }
+  if (candidate?.domainStatus !== "completed" || candidate.copyPolicy !== "text_and_code" ||
+      candidate.presentation === "commentary" || hasUnclassifiedToolContinuation(candidate, turn.items)) return;
+  const hasText = candidate.contentBlocks.some(block => (block.type === "text" || block.type === "code") && block.text.trim());
+  return hasText ? candidate : undefined;
 }
 
 export function processDetailItems(items: readonly ConversationTimelineItemViewModel[]): ReadonlySet<string> {

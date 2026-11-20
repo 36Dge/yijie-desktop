@@ -173,6 +173,7 @@ describe("SkillMarketplacePage", () => {
     const wrapper = mountPage();
     await flushPromises();
     const trigger = buttonByText(wrapper, "导入技能");
+    expect(wrapper.get(".yj-page-header__actions").findAll("button").map(button => button.attributes("aria-label") ?? button.text())).toEqual(["刷新数据", "导入技能"]);
     expect(trigger.find("svg").exists()).toBe(true);
     await trigger.trigger("click");
     await flushPromises();
@@ -353,7 +354,7 @@ describe("SkillMarketplacePage", () => {
     expect(nativeMock.list).toHaveBeenCalledWith(expect.any(AbortSignal));
     expect(nativeMock.scan).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain("当前仅可查看 Skill");
-    expect(wrapper.find(".skill-marketplace__import-button").exists()).toBe(false);
+    expect(wrapper.findAll("button").some(button => button.text() === "导入技能")).toBe(false);
     expect(wrapper.find(`button[aria-label="安装 跨境营销文案"]`).exists()).toBe(false);
   });
 

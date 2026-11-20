@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import YjTooltip from "../yijie/YjTooltip.vue";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
 import type {
   ChatComposerFocusSnapshot,
   ChatComposerSubmissionState,
@@ -17,7 +17,8 @@ import {
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatConnectorChips from "./ChatConnectorChips.vue";
 import ChatSkillChips from "./ChatSkillChips.vue";
-import type { ChatSkillChip } from "../../domain/chat-skills";
+import ChatSkillSlashMenu from "./ChatSkillSlashMenu.vue";
+import { chatSkillSlashQuery, type ChatSkillChip, type ChatSkillSuggestionCatalog } from "../../domain/chat-skills";
 import ChatReadinessNotice from "./ChatReadinessNotice.vue";
 import ChatAddControl from "./ChatAddControl.vue";
 import ChatAttachmentChip from "./ChatAttachmentChip.vue";
@@ -48,6 +49,7 @@ const props = withDefaults(defineProps<{
   dragActive?: boolean;
   connectors?: readonly ConnectorChipView[];
   skills?: readonly ChatSkillChip[];
+  skillSuggestions?: ChatSkillSuggestionCatalog;
   expertsAvailable?: boolean;
   textLocked?: boolean;
 }>(), {
@@ -75,6 +77,8 @@ const emit = defineEmits<{
   "dismiss-attachment-import": [operationId: string];
   "unsupported-input": [message: string];
   "remove-skill": [id: string];
+  "select-suggested-skill": [id: string, text: string];
+  "read-skill-suggestions": [];
 }>();
 
 defineSlots<{
@@ -101,8 +105,28 @@ const textareaElement = ref<HTMLTextAreaElement | null>(null);
 const connectorPrefixElement = ref<HTMLElement | null>(null);
 const connectorPrefixWidth = ref(0);
 const inputScrollTop = ref(0);
+const inputViewportWidth = ref(0);
 const compactLayout = computed(() => props.compact && props.mode === "reply" && !props.textOnly);
 const hasSkillPrefix = computed(() => !compactLayout.value && !props.textOnly && props.skills.length > 0);
+const placeholder = computed(() => {
+  if (hasSkillPrefix.value) return "";
+  if (props.textOnly) return "描述计划内容、时间、时区和运行方式…";
+  if (props.skillSuggestions && !compactLayout.value) return "描述你想完成的事，输入 / 调用技能";
+  return props.mode === "new" ? "描述你想完成的事，或添加相关文件…" : "继续输入任务需求…";
+});
+const slashMenu = ref<InstanceType<typeof ChatSkillSlashMenu> | null>(null);
+const slashListId = useId();
+const slashQuery = ref<ReturnType<typeof chatSkillSlashQuery>>(null);
+const slashHintPrefix = computed(() => {
+  const token = slashQuery.value;
+  if (!token || token.query || composing.value) return null;
+  // Only draw into empty space after the slash on this line.
+  const nextCharacter = props.modelValue[token.end];
+  if (nextCharacter !== undefined && nextCharacter !== "\n") return null;
+  return props.modelValue.slice(0, token.end);
+});
+const canSuggestSkills = computed(() => Boolean(props.skillSuggestions && !props.skillSuggestions.disabled) &&
+  !props.textOnly && !compactLayout.value && !props.textLocked && !props.streaming && props.submissionState === "idle");
 let resizeObserver: ResizeObserver | null = null;
 let observedComposerWidth: number | null = null;
 const selectedProject = computed(() => props.projects.find((project) =>
@@ -170,7 +194,39 @@ function updateInput(event: Event): void {
   const textarea = event.target as HTMLTextAreaElement;
   syncTextareaHeight(textarea);
   emit("update:modelValue", textarea.value);
+  updateSlashQuery(textarea);
 }
+
+function updateSlashQuery(textarea: HTMLTextAreaElement): void {
+  const caret = textarea.selectionStart;
+  const opening = !slashQuery.value;
+  slashQuery.value = canSuggestSkills.value && props.skillSuggestions && caret === textarea.selectionEnd
+    ? chatSkillSlashQuery(textarea.value.slice(0, caret), props.skillSuggestions.entries)
+    : null;
+  if (opening && slashQuery.value) emit("read-skill-suggestions");
+}
+
+function syncOpenSlashQuery(): void {
+  const token = slashQuery.value, textarea = textareaElement.value;
+  if (token && textarea && (textarea.selectionStart !== token.end || textarea.selectionEnd !== token.end ||
+    textarea.value.slice(token.start, token.end) !== "/" + token.query)) slashQuery.value = null;
+}
+
+async function selectSuggestedSkill(id: string): Promise<void> {
+  syncOpenSlashQuery();
+  const textarea = textareaElement.value, token = slashQuery.value;
+  if (!canSuggestSkills.value || !textarea || !token || composing.value) return;
+  const text = textarea.value.slice(0, token.start) + textarea.value.slice(token.end);
+  slashQuery.value = null;
+  emit("select-suggested-skill", id, text);
+  await nextTick();
+  if (textareaElement.value === textarea && textarea.value === text) {
+    restoreInputFocus({ selectionStart: token.start, selectionEnd: token.start, selectionDirection: "none" });
+  }
+}
+
+watch([canSuggestSkills, () => props.mode, () => props.presentationScope], () => { slashQuery.value = null; });
+watch(() => props.modelValue, syncOpenSlashQuery, { flush: "post" });
 
 function syncTextareaHeight(textarea = textareaElement.value): void {
   if (textarea === null) return;
@@ -190,6 +246,7 @@ function syncTextareaHeight(textarea = textareaElement.value): void {
   else textarea.style.removeProperty("height");
   textarea.style.overflowY = textarea.scrollHeight > textarea.clientHeight + 1 ? "auto" : "hidden";
   inputScrollTop.value = textarea.scrollTop;
+  inputViewportWidth.value = textarea.clientWidth;
 }
 
 function syncInputLayout(): void {
@@ -319,8 +376,11 @@ function requestActiveTurnInterrupt(): void {
 }
 
 function handleKeydown(event: KeyboardEvent): void {
+  if (event.isComposing || composing.value || event.keyCode === 229) return;
   const textarea = textareaElement.value;
-  if (event.key === "Backspace" && !event.isComposing && !composing.value && !props.textOnly && !compactLayout.value &&
+  syncOpenSlashQuery();
+  if (slashQuery.value && slashMenu.value?.handleKeydown(event)) return;
+  if (event.key === "Backspace" && !props.textOnly && !compactLayout.value &&
     !selectionRemovalDisabled.value && textarea?.selectionStart === 0 && textarea.selectionEnd === 0) {
     const skill = props.skills[props.skills.length - 1];
     if (skill) {
@@ -329,7 +389,7 @@ function handleKeydown(event: KeyboardEvent): void {
       return;
     }
   }
-  if (event.key !== "Enter" || event.shiftKey || composing.value || event.isComposing) return;
+  if (event.key !== "Enter" || event.shiftKey) return;
   event.preventDefault();
   submit();
 }
@@ -428,18 +488,33 @@ function handlePaste(event: ClipboardEvent): void {
           rows="1"
           :value="modelValue"
           :readonly="submissionBusy || textLocked"
-          :placeholder="hasSkillPrefix ? '' : textOnly ? '描述计划内容、时间、时区和运行方式…' : mode === 'new' ? '描述你想完成的事，或添加相关文件…' : '继续输入任务需求…'"
-          :aria-describedby="visibleValidationMessage ? 'chat-composer-validation' : undefined"
+          :placeholder="placeholder"
+          :aria-autocomplete="canSuggestSkills ? 'list' : undefined"
+          :aria-controls="slashQuery ? slashListId : undefined"
+          :aria-activedescendant="slashQuery ? slashMenu?.activeOptionId : undefined"
+          :aria-describedby="visibleValidationMessage ? 'chat-composer-validation' : slashHintPrefix ? `${slashListId}-hint` : undefined"
           :aria-invalid="visibleValidationMessage ? 'true' : undefined"
           autocomplete="off"
           spellcheck="true"
           @input="updateInput"
+          @blur="slashQuery = null"
+          @click="syncOpenSlashQuery"
+          @select="syncOpenSlashQuery"
+          @keyup="syncOpenSlashQuery"
           @scroll="inputScrollTop = ($event.target as HTMLTextAreaElement).scrollTop"
           @keydown="handleKeydown"
           @paste="handlePaste"
           @compositionstart="composing = true"
           @compositionend="composing = false"
         />
+          <div v-if="slashHintPrefix" class="chat-composer__slash-hint" aria-hidden="true">
+            <div class="chat-composer__slash-hint-line" :style="{ width: inputViewportWidth ? `${inputViewportWidth}px` : undefined, transform: `translateY(${-inputScrollTop}px)` }">
+              <span>{{ slashHintPrefix }}</span><span :id="`${slashListId}-hint`" class="chat-composer__slash-hint-label">输入以筛选</span>
+            </div>
+          </div>
+          <ChatSkillSlashMenu v-if="slashQuery && skillSuggestions" ref="slashMenu"
+            :list-id="slashListId" :catalog="skillSuggestions" :query="slashQuery.query"
+            @select="selectSuggestedSkill" @retry="emit('read-skill-suggestions')" @close="slashQuery = null" />
         </div>
         <div class="chat-composer__actions">
           <div class="chat-composer__leading-actions">
@@ -822,6 +897,12 @@ function handlePaste(event: ClipboardEvent): void {
   border-radius: var(--yj-radius-sm);
 }
 
+.chat-composer__slash-hint-line,
+.chat-composer__textarea {
+  padding: var(--yj-space-4);
+  font: inherit;
+  line-height: var(--yj-line-height-body);
+}
 .chat-composer__textarea {
   display: block;
   width: 100%;
@@ -831,15 +912,12 @@ function handlePaste(event: ClipboardEvent): void {
   overscroll-behavior: contain;
   resize: none;
   box-sizing: border-box;
-  padding: var(--yj-space-4);
   border: 0;
   border-radius: inherit;
   outline: none;
   color: var(--yj-color-text-primary);
   background: transparent;
   caret-color: var(--yj-color-text-primary);
-  font: inherit;
-  line-height: var(--yj-line-height-body);
 }
 
 .chat-composer--reply .chat-composer__textarea {
@@ -871,6 +949,28 @@ function handlePaste(event: ClipboardEvent): void {
 }
 .chat-composer__input--skills .chat-composer__connector-prefix::-webkit-scrollbar { display: none; }
 .chat-composer__textarea::placeholder { color: var(--yj-color-text-tertiary); opacity: 1; }
+.chat-composer__slash-hint {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+.chat-composer__slash-hint-line {
+  position: relative;
+  visibility: hidden;
+  text-indent: var(--connector-prefix-width);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.chat-composer__slash-hint-label {
+  position: absolute;
+  visibility: visible;
+  margin-inline-start: var(--yj-space-1);
+  color: var(--yj-color-text-tertiary);
+  text-indent: 0;
+  white-space: nowrap;
+}
 
 .chat-composer__actions {
   position: relative;

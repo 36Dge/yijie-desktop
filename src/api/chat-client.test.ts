@@ -144,6 +144,7 @@ describe("chat client", () => {
       20,
     )).rejects.toBeDefined();
     expect(nativeInvoke).toHaveBeenCalledWith("chat_resync_session_v2", {
+      includeUserMessageSkills: true,
       request: {
         schemaVersion: 6,
         requestId: REQUEST_ID,
@@ -327,6 +328,7 @@ describe("chat client", () => {
     await client.loadHistoryV5(CONTEXT_ID, SESSION_ID, undefined, 20);
 
     expect(nativeInvoke).toHaveBeenCalledWith("chat_load_history_v3", {
+      includeUserMessageSkills: true,
       request: {
         schemaVersion: 5,
         requestId: REQUEST_ID,
@@ -403,6 +405,7 @@ describe("chat client", () => {
     );
 
     expect(nativeInvoke).toHaveBeenCalledWith("chat_load_history_v3", {
+      includeUserMessageSkills: true,
       request: {
         schemaVersion: 3,
         requestId: REQUEST_ID,

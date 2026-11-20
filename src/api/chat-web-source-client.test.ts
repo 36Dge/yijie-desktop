@@ -2,6 +2,12 @@ import {describe, it, expect, vi} from "vitest";
 import {createWebSourceClient} from "./chat-web-source-client";
 const target = {sessionId:"00000000-0000-4000-8000-000000000001", turnId:"00000000-0000-4000-8000-000000000002",itemId:"search",url:"https://example.org/guide"};
 describe("versioned web source client", () => {
+  it("sends a user URL only with the explicit user action and original message locator", async () => {
+    const userTarget = {...target, itemId: `${target.turnId}:user:0`};
+    const invoke = vi.fn(async (_command, args) => ({schemaVersion:1,requestId:args.request.requestId,data:{status:"opened",icon:null}}));
+    await createWebSourceClient(invoke)("context", {action:"open_user_message_link",target:userTarget});
+    expect(invoke.mock.calls[0]![1].request.payload).toEqual({action:"open_user_message_link", target:userTarget});
+  });
   it("uses the additive message-link action with the original message identity", async () => {
     const invoke = vi.fn(async (_command, args) => ({schemaVersion:1,requestId:args.request.requestId,data:{status:"opened",icon:null}}));
     expect(await createWebSourceClient(invoke)("context", {action:"open_message_link",target})).toEqual({status:"opened",icon:null});

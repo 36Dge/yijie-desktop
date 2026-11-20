@@ -38,6 +38,17 @@ describe("per-turn explicit skill selection", () => {
 
 describe("sent skill message presentation", () => {
   const textBlock = (text: string) => Object.freeze({ identity: "text", blockIndex: 0, type: "text" as const, text });
+  it("uses ordered selected identities, retaining the saved ID if that version is no longer in the catalog", () => {
+    const selected = { id: installedSkill.id, version: installedSkill.version };
+    const removed = { id: "older-listing-skill", version: "1.0.0" };
+    const blocks = [{ ...textBlock("比较这两个商品"), skills: [removed, selected] }];
+    const catalog = [installedSkill, { ...installedSkill, ...removed, version: "2.0.0", displayName: "另一个版本" }];
+    const result = presentSkillMessage(blocks, catalog);
+    expect(result.skills.map(skill => skill.displayName)).toEqual([removed.id, installedSkill.displayName]);
+    expect(result.blocks).toBe(blocks);
+    const both = [{ ...textBlock(compileSkillInput("原文", [installedSkill])), skills: [selected] }];
+    expect(presentSkillMessage(both, catalog)).toMatchObject({ blocks: [{text: "原文"}], skills: [{id: selected.id}] });
+  });
   it("projects multiple mentions inline without changing original input or subsequent paragraphs", () => {
     const second = { ...installedSkill, id: "invoice", runtimeName: "invoice-generator", displayName: "发票生成" };
     const body = "生成一张发票\n\n备注：保留 $copywriting 原文。";

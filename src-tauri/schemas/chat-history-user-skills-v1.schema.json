@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "yijie:desktop:chat-history-user-skills:v1",
+  "title": "Opt-in saved user text block in Desktop chat history",
+  "description": "Only for a user message already included in the authorized history page. Entries are the original saved selections in skill_ordinal order for this message_id and block_ordinal, not current catalog or execution state. Omit skills if none were saved. Other blocks and envelopes are unchanged.",
+  "x-yijie-tauri-option": { "name": "includeUserMessageSkills", "type": "boolean", "default": false, "location": "sibling of request" },
+  "x-yijie-commands": { "chat_load_history_v2": [2], "chat_load_history_v3": [3, 4, 5, 6], "chat_resync_session_v2": [2, 4, 5, 6] },
+  "x-yijie-capability": "read_sessions",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "text"],
+  "properties": {
+    "type": { "const": "text" },
+    "text": { "type": "string", "minLength": 1, "maxLength": 1048576 },
+    "skills": { "$ref": "https://schemas.yijie.ai/chat/market-selection/v2#/$defs/SelectedSkills" }
+  }
+}

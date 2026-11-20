@@ -1,3 +1,4 @@
+import type { SelectedSkillRef } from "./market-selection-v2.generated";
 import type {LocalSubmissionView, NativeRecordDiagnostic} from "../api/generated/native-conversation-history.gen";
 import type { NativeConversationView } from "../api/generated/native-conversation-private.gen";
 import { safeConversationDiagnostic } from "./conversation-diagnostics";
@@ -171,6 +172,7 @@ export interface ConversationReasoningState {
 
 export interface TextContentBlock {
   readonly reasoningSource?: "summary" | "content";
+  readonly skills?: readonly SelectedSkillRef[];
   readonly blockIndex: number;
   readonly type: "text";
   readonly text: string;
@@ -252,6 +254,7 @@ export interface ConversationTurn {
 
 export interface ConversationItem {
   readonly publication?: NativeConversationView["items"][number]["item"]["publication"];
+  readonly userLinkSourceId?: string;
   readonly webSearch?: NativeConversationView["items"][number]["item"]["webSearch"];
   readonly availability?: NativeConversationView["availability"];
   readonly threadId: string;
@@ -295,6 +298,7 @@ export interface ConversationTurnSnapshot {
 }
 
 export interface ConversationItemSnapshot {
+  readonly userLinkSourceId?: string;
   readonly threadId: string;
   readonly turnId: string;
   readonly itemId: string;
@@ -427,21 +431,25 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
       for (const item of cached.items) items[itemKey(item.threadId, item.turnId, item.itemId)] = item;
       turns[key] = cached.turn;
     } else {
-      const localUsers = (old?.itemKeys ?? []).map(k => items[k]).filter(item =>
-        item?.kind === "user_message" && item.contentBlocks.some(block => block.type === "attachment_reference"));
+      const localUsers = (old?.itemKeys ?? []).map(k => items[k]).filter(item => item?.kind === "user_message");
+      const nativeUserCount = view.items.filter(entry => entry.item.type === "userMessage").length;
       // The persisted local session/turn binding is authority for the submitted
       // display text. Runtime's userMessage may contain Host-added file context.
       // Only the unambiguous local submission replaces that view text; no native
       // Item or wire content is changed, and cold/ambiguous history stays native.
-      const submittedText = localUsers.length === 1 && view.items.filter(entry => entry.item.type === "userMessage").length === 1
-        ? localUsers[0]!.contentBlocks.filter((block): block is TextContentBlock => block.type === "text")
+      const submittedUser = localUsers.length === 1 && nativeUserCount === 1 ? localUsers[0] : undefined;
+      const keepSubmittedText = (item: ConversationItem) => item.userLinkSourceId || item.contentBlocks.some(block =>
+        block.type === "attachment_reference" || (block.type === "text" && block.skills?.length));
+      const submittedText = submittedUser && keepSubmittedText(submittedUser)
+        ? submittedUser.contentBlocks.filter((block): block is TextContentBlock => block.type === "text")
         : null;
       // Local attachments and Artifact references are separate product records, not native Items.
       const priorReferences = old?.itemKeys.flatMap(k => {
         const item = items[k];
         if (!item) return [];
         const blocks = item.contentBlocks.filter(b => b.type === "attachment_reference" || b.type === "artifact_reference");
-        return blocks.length ? [{...item, contentBlocks: item.kind === "user_message" && !view.items.some(entry => entry.item.type === "userMessage") ? item.contentBlocks : blocks}] : [];
+        if (item.kind === "user_message" && nativeUserCount === 0 && (blocks.length || keepSubmittedText(item))) return [item];
+        return blocks.length ? [{...item, contentBlocks: blocks}] : [];
       }) ?? [];
       const localReferences = [...new Map([
         ...priorReferences,
@@ -458,6 +466,7 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
             (item[reasoningSource] ?? []).map((text, blockIndex) => ({type: "text", text, blockIndex, reasoningSource})))
           : item.text == null ? [] : [{type: "text", text: item.type === "agentMessage" ? readablePublicAssistantText(item.text, item.phase) : item.text, blockIndex: 0}];
         return {threadId: view.sessionId, turnId: view.turnId, itemId: item.id, ordinal: entry.ordinal, kind,
+          ...(item.type === "userMessage" && submittedUser?.userLinkSourceId && { userLinkSourceId: submittedUser.userLinkSourceId }),
           availability: item.availability,
           ...(item.publication && {publication: item.publication}),
           ...(item.webSearch ? {webSearch: item.webSearch} : {}),

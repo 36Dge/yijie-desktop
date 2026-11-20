@@ -98,7 +98,7 @@ describe("ten adapted experts use the existing Native catalog and summon flow", 
     expect(view.findAll(".expert-showcase-card")).toHaveLength(0);
     for (const [, name] of integrated) expect(view.text()).not.toContain(name);
     if (condition === "initial loading") expect(view.find('[role="status"]').exists()).toBe(true);
-    if (condition === "read failure") expect(view.text()).toContain("可点击「重新读取」重试");
+    if (condition === "read failure") expect(view.text()).toContain("可点击右上角的刷新按钮重试");
   });
 
   it.each(integrated)("prepares %s through the existing client and only prefills its quick question", async (expertId, name) => {

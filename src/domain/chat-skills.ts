@@ -20,6 +20,34 @@ export interface ChatSkillChip extends SelectedChatSkill {
   readonly unavailableReason: string | null;
 }
 
+export interface ChatSkillSuggestionCatalog {
+  readonly entries: readonly ManagedSkillProjection[];
+  readonly disabled: boolean;
+  readonly loading: boolean;
+  readonly error: string | null;
+}
+
+export function matchingChatSkills(entries: readonly ManagedSkillProjection[], query: string): readonly ManagedSkillProjection[] {
+  const search = query.trim().toLocaleLowerCase();
+  return search
+    ? entries.filter(entry => `${entry.displayName} ${entry.description} ${entry.runtimeName}`.toLocaleLowerCase().includes(search))
+    : entries;
+}
+
+export function chatSkillSlashQuery(beforeCaret: string, entries: readonly ManagedSkillProjection[]) {
+  const start = beforeCaret.lastIndexOf("/");
+  if (start < 0) return null;
+  // Chinese prose often has no space before the slash. Keep URLs, paths and
+  // expressions such as 1/2 available for ordinary text entry.
+  const precedingWord = beforeCaret.slice(0, start).split(/[\s，。！？：；、（]/u).pop();
+  if (precedingWord && (!/\p{Script=Han}$/u.test(precedingWord) || /[/\\]/u.test(precedingWord))) return null;
+  const query = beforeCaret.slice(start + 1);
+  if (/^\s|[\r\n]/u.test(query)) return null;
+  // Allow a space within a matching name such as “电商 SEO 优化”.
+  if (/\s/u.test(query) && !matchingChatSkills(entries, query).length) return null;
+  return { start, end: beforeCaret.length, query };
+}
+
 export function skillSelectionIssue(skill: ManagedSkillProjection | undefined): string | null {
   if (!skill) return "技能已卸载，请重新安装";
   if (skill.installationStatus === "not_installed") return "技能尚未安装，请在管理技能中安装";
@@ -67,7 +95,7 @@ export function compileSelectedSkillRefs(selection: readonly SelectedChatSkill[]
  * Only the complete, canonical leading mention line is eligible for display.
  * Unknown/ambiguous names and prose containing dollar signs stay literal.
  */
-export function presentSkillMessage(
+function legacySkillMessage(
   blocks: readonly ConversationTimelineContentBlock[],
   catalog: readonly SelectedChatSkill[],
 ): { blocks: readonly ConversationTimelineContentBlock[]; skills: readonly SelectedChatSkill[] } {
@@ -88,4 +116,26 @@ export function presentSkillMessage(
     skills: selected,
     blocks: blocks.map((block, position) => position === index ? { ...first, text: first.text.slice(prefix[0].length) } : block),
   };
+}
+
+export type SentChatSkill = Pick<SelectedChatSkill, "id" | "displayName">;
+
+export function presentSkillMessage(
+  blocks: readonly ConversationTimelineContentBlock[],
+  catalog: readonly SelectedChatSkill[],
+): { blocks: readonly ConversationTimelineContentBlock[]; skills: readonly SentChatSkill[] } {
+  const refs = blocks.flatMap(block => block.type === "text" ? block.skills ?? [] : []);
+  if (!refs.length) return legacySkillMessage(blocks, catalog);
+  const labels = new Map<string, SentChatSkill>();
+  const resolved: SelectedChatSkill[] = [];
+  for (const ref of refs) {
+    if (labels.has(ref.id)) continue;
+    const skill = catalog.find(entry => entry.id === ref.id && entry.version === ref.version);
+    if (skill) resolved.push(skill);
+    labels.set(ref.id, { id: ref.id, displayName: skill?.displayName ?? ref.id });
+  }
+  const legacy = legacySkillMessage(blocks, resolved);
+  const samePrefix = refs.length === legacy.skills.length && refs.every((ref, index) =>
+    ref.id === legacy.skills[index]?.id && ref.version === legacy.skills[index]?.version);
+  return { blocks: samePrefix ? legacy.blocks : blocks, skills: [...labels.values()] };
 }

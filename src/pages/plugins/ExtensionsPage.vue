@@ -13,8 +13,10 @@ import { expertShowcaseCatalog } from "../../data/expert-showcase-catalog";
 import ExpertMarketPanel from "../../components/experts/ExpertMarketPanel.vue";
 import YjPage from "../../components/yijie/YjPage.vue";
 import YjPageHeader from "../../components/yijie/YjPageHeader.vue";
+import YjRefreshButton from "../../components/yijie/YjRefreshButton.vue";
 import YjTabs from "../../components/yijie/YjTabs.vue";
 import YjIcon from "../../components/yijie/YjIcon.vue";
+import ExtensionImportButton from "./ExtensionImportButton.vue";
 import SkillMarketplacePage from "./SkillMarketplacePage.vue";
 
 const route = useRoute(), router = useRouter(), chat = useChatStore(), experts = useExpertsStore();
@@ -29,7 +31,11 @@ const returnTo = computed(() => typeof route.query.from === "string" && /^\/chat
 if (expertsUiEnabled) useExpertsBinding(computed(() => chat.context?.contextId ?? null));
 watch(() => experts.scope, () => { queries.skills = ""; });
 function changeTab(value: string): void { void router.replace({ path: "/plugins", query: { ...route.query, tab: value } }); }
-async function refresh(): Promise<void> { if (!chat.context) await retryAuthority(); await experts.refresh(); }
+async function refresh(): Promise<void> {
+  if (tab.value === "skills") return skillsPage.value?.rescan();
+  if (!chat.context) await retryAuthority();
+  await experts.refresh();
+}
 </script>
 
 <template>
@@ -37,11 +43,14 @@ async function refresh(): Promise<void> { if (!chat.context) await retryAuthorit
   <YjPage v-else width="full" class="extensions-page">
     <YjPageHeader title="扩展" :description="tab === 'skills' ? '发现、离线安装和管理跨境电商 Skill。只有已安装且已启用的 Skill 才会向模型开放。' : '选择适合的专家，让经营问题得到专业解答。'">
       <template #actions>
-        <NButton v-if="tab === 'skills'" secondary :loading="skillsPage?.refreshing" :disabled="skillsPage?.rescanDisabled" aria-label="重新扫描本地 Skill" @click="skillsPage?.rescan()"><template #icon><YjIcon name="refresh" /></template>重新扫描</NButton>
-        <template v-else>
-          <NButton v-if="returnTo" secondary @click="router.push(returnTo)">返回对话</NButton>
-          <NButton secondary :loading="experts.refreshing" @click="refresh"><template #icon><YjIcon name="refresh" size="sm" /></template>重新读取</NButton>
-        </template>
+        <NButton v-if="tab === 'experts' && returnTo" secondary @click="router.push(returnTo)">返回对话</NButton>
+        <YjRefreshButton
+          :loading="tab === 'skills' ? skillsPage?.refreshing : experts.refreshing"
+          :disabled="tab === 'skills' && (!skillsPage || skillsPage.rescanDisabled)"
+          @refresh="refresh"
+        />
+        <ExtensionImportButton v-if="tab === 'experts'" kind="experts" />
+        <ExtensionImportButton v-else-if="skillsPage?.canImport" kind="skills" :disabled="skillsPage.importDisabled" @import-skill="skillsPage.openImportDialog()" />
       </template>
     </YjPageHeader>
     <div class="extensions-page__toolbar">

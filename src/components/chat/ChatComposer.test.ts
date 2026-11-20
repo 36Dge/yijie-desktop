@@ -13,6 +13,7 @@ import ChatComposer from "./ChatComposer.vue";
 import ChatSkillControl from "./ChatSkillControl.vue";
 import { readinessNotice } from "../../domain/chat-ui";
 import { installedSkill } from "../../test/skill-fixture";
+import { skillCardArtwork } from "../../icons/skill-artwork";
 
 enableAutoUnmount(afterEach);
 
@@ -48,7 +49,7 @@ it("replaces the placeholder with removable skill selections and blocks unavaila
   expect(view.emitted("remove-skill")).toEqual([[installedSkill.id]]);
   expect(view.get('textarea').attributes('placeholder')).toBe('');
   await view.setProps({ skills: [] });
-  expect(view.get('textarea').attributes('placeholder')).toBe('描述你想完成的事，或添加相关文件…');
+  expect(view.get('textarea').attributes('placeholder')).toBe('描述你想完成的事，输入 / 调用技能');
   await view.setProps({ skills: [{ ...installedSkill, unavailableReason: "技能已停用" }] });
   expect(view.get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
 });
@@ -88,9 +89,10 @@ function importEvent(
 }
 
 function mountComposer(overrides: Record<string, unknown> = {}, slots = {}) {
-  return mount(ChatComposer, {
+  const wrapper = mount(ChatComposer, {
     props: {
       modelValue: "检查商品标题",
+      "onUpdate:modelValue": (modelValue: string): void => { void wrapper.setProps({ modelValue }); },
       mode: "new",
       projects: [PROJECT],
       selectedProjectId: PROJECT.projectId,
@@ -100,11 +102,13 @@ function mountComposer(overrides: Record<string, unknown> = {}, slots = {}) {
       submissionState: "idle",
       streaming: false,
       recoveryAvailable: false,
+      skillSuggestions: { entries: [installedSkill], disabled: false, loading: false, error: null },
       ...overrides,
     },
     slots,
     attachTo: document.body,
   });
+  return wrapper;
 }
 
 afterEach(() => {
@@ -113,6 +117,124 @@ afterEach(() => {
 });
 
 describe("ChatComposer", () => {
+  it.each(["new", "reply"])("shows an inline hint for an empty slash filter in %s without editing the draft", async mode => {
+    const wrapper = mountComposer({ mode, modelValue: "" });
+    const input = wrapper.get("textarea");
+    const draft = mode === "new" ? "/" : "请整理资料\n然后使用/";
+    const hint = () => wrapper.find(".chat-composer__slash-hint-label");
+    await input.setValue(draft);
+    expect(hint().text()).toBe("输入以筛选");
+    expect(input.attributes("aria-describedby")).toBe(hint().attributes("id"));
+    expect(input.element.value).toBe(draft);
+    expect(wrapper.emitted("update:modelValue")).toEqual([[draft]]);
+    await input.trigger("compositionstart");
+    expect(hint().exists()).toBe(false);
+    await input.trigger("compositionend");
+    await input.setValue(draft + "文");
+    expect(hint().exists()).toBe(false);
+    await input.setValue(draft);
+    expect(hint().exists()).toBe(true);
+    await input.trigger("keydown", { key: "Escape" });
+    expect(hint().exists()).toBe(false);
+    expect(input.element.value).toBe(draft);
+  });
+
+  it("filters slash suggestions by name, description and runtime name and navigates them from the textarea", async () => {
+    const second = { ...installedSkill, id: "yijie.market-research.jungle-scout-deep-dive-analyzer", category: "market-research" as const, displayName: "数据 Chart 趋势图", runtimeName: "charts", description: "将销量绘成图表" };
+    const wrapper = mountComposer({ modelValue: "", skillSuggestions: { entries: [installedSkill, second], disabled: false, loading: false, error: null } });
+    const input = wrapper.get("textarea");
+    input.element.focus();
+    await input.setValue("/");
+    const list = new DOMWrapper(document.getElementById(input.attributes("aria-controls")!)!);
+    expect(list.findAll('[role="option"]')).toHaveLength(2);
+    expect(list.findAll('[role="option"] img').map(icon => icon.attributes("src"))).toEqual([
+      skillCardArtwork(installedSkill), skillCardArtwork(second),
+    ]);
+    expect(list.get('[aria-selected="true"]').text()).toContain(installedSkill.displayName);
+    await input.trigger("keydown", { key: "ArrowDown" });
+    expect(document.getElementById(input.attributes("aria-activedescendant")!)?.textContent).toContain("趋势图");
+    await input.trigger("keydown", { key: "ArrowUp" });
+    expect(list.get('[aria-selected="true"]').text()).toContain(installedSkill.displayName);
+    for (const query of ["/销量", "/数据 Chart"]) {
+      await input.setValue(query);
+      expect(list.findAll('[role="option"]').map(row => row.text())).toEqual(["数据 Chart 趋势图将销量绘成图表"]);
+      expect(list.get('[role="option"] img').attributes("src")).toBe(skillCardArtwork(second));
+    }
+    await input.setValue("/COPY");
+    expect(list.get('[role="option"]').text()).toContain(installedSkill.displayName);
+    await input.setValue("/文案");
+    await input.trigger("compositionstart");
+    await input.trigger("keydown", { key: "Enter" });
+    expect(wrapper.emitted("select-suggested-skill")).toBeUndefined();
+    expect(wrapper.emitted("submit")).toBeUndefined();
+    await input.trigger("compositionend");
+    await input.trigger("keydown", { key: "Enter" });
+    expect(wrapper.emitted("select-suggested-skill")).toEqual([[installedSkill.id, ""]]);
+    expect(wrapper.emitted("read-skill-suggestions")).toHaveLength(1);
+  });
+
+  it("removes only the slash filter and restores the caret when a suggestion is clicked inside a draft", async () => {
+    const wrapper = mountComposer({
+      modelValue: "",
+      onSelectSuggestedSkill: (_id: string, text: string) => wrapper.setProps({ modelValue: text }),
+    });
+    const input = wrapper.get("textarea");
+    const text = "请整理/文案 明细";
+    input.element.focus();
+    input.element.value = text;
+    input.element.setSelectionRange(6, 6);
+    await input.trigger("input");
+    const option = new DOMWrapper(document.querySelector<HTMLElement>('[role="listbox"] [role="option"]')!);
+    await option.trigger("mousedown");
+    await option.trigger("click");
+    await flushPromises();
+    expect(input.element.value).toBe("请整理 明细");
+    expect([input.element.selectionStart, input.element.selectionEnd]).toEqual([3, 3]);
+    expect(document.activeElement).toBe(input.element);
+    expect(document.querySelector('[role="listbox"]')).toBeNull();
+  });
+
+  it("keeps unmatched slash text editable, dismisses on Escape or blur and leaves paths alone", async () => {
+    const wrapper = mountComposer({ modelValue: "" });
+    const input = wrapper.get("textarea");
+    input.element.focus();
+    await input.setValue("/没有这项");
+    expect(document.body.textContent).toContain("没有找到匹配的技能");
+    await input.trigger("keydown", { key: "Enter" });
+    expect(wrapper.emitted("submit")).toBeUndefined();
+    await input.trigger("keydown", { key: "Escape" });
+    await input.trigger("keyup", { key: "Escape" });
+    expect(input.element.value).toBe("/没有这项");
+    expect(input.attributes("aria-controls")).toBeUndefined();
+    for (const value of ["https://example.com/products", "价格 1/2", "/Users/销售/report", "/tmp 空间使用情况"]) {
+      await input.setValue(value);
+      expect(input.attributes("aria-controls")).toBeUndefined();
+    }
+    await input.setValue("/");
+    input.element.blur();
+    await flushPromises();
+    expect(document.querySelector('[role="listbox"]')).toBeNull();
+  });
+
+  it("offers a keyboard retry when the skill catalog read fails and closes on a draft or capability change", async () => {
+    const catalog = { entries: [], disabled: false, loading: true, error: null };
+    const wrapper = mountComposer({ skillSuggestions: catalog });
+    const input = wrapper.get("textarea");
+    await input.setValue("/");
+    expect(document.body.textContent).toContain("正在读取技能…");
+    await wrapper.setProps({ skillSuggestions: { ...catalog, loading: false, error: "暂时无法读取技能" } });
+    await input.trigger("keydown", { key: "Enter" });
+    expect(wrapper.emitted("read-skill-suggestions")).toHaveLength(2);
+    expect(wrapper.emitted("submit")).toBeUndefined();
+    await wrapper.setProps({ presentationScope: "another-draft" });
+    expect(input.attributes("aria-controls")).toBeUndefined();
+    for (const props of [{ textLocked: true }, { streaming: true }, { textOnly: true }, { compact: true, mode: "reply" as const }, { skillSuggestions: undefined }]) {
+      await wrapper.setProps({ textLocked: false, streaming: false, textOnly: false, compact: false, ...props });
+      await input.setValue("/文案");
+      expect(input.attributes("aria-controls")).toBeUndefined();
+    }
+  });
+
   it("retains the draft and selections across clarification layout changes", async () => {
     const wrapper = mountComposer({ mode: "reply", modelValue: "保留原任务草稿", attachments: [READY_FILE], skills: [{ ...installedSkill, unavailableReason: null }] }, {
       "permission-control": () => h("button", { "data-permission": "" }, "请求批准"),
@@ -177,7 +299,7 @@ describe("ChatComposer", () => {
   it("keeps toolbar connectors independent from text and Backspace", async () => {
     const wrapper = mountComposer({ modelValue: "今天数据如何", connectors: [{ id: "sorftime", name: "Sorftime", iconAssetId: "sorftime" }] });
     const input = wrapper.get("textarea"), element = input.element as HTMLTextAreaElement;
-    expect(input.attributes("placeholder")).toBe("描述你想完成的事，或添加相关文件…");
+    expect(input.attributes("placeholder")).toBe("描述你想完成的事，输入 / 调用技能");
     element.setSelectionRange(0, 2);
     await input.trigger("keydown", { key: "Backspace" });
     expect(wrapper.emitted("remove-connector")).toBeUndefined();

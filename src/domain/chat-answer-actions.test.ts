@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { answerCompletionTime, answerFeedbackReasons, answerModelBadge, nativeCompletedAt } from "./chat-answer-actions";
+import { traceItem, traceTurn } from "./conversation-activity-fixtures";
+import { completedTurnAnswer } from "./conversation-process";
+
+it("requires a successful observed or recovered turn end and a completed answer item", () => {
+  const message = traceItem("final", "agentMessage", {phase: "final_answer", text: "核对完成。"});
+  const turn = traceTurn([message]);
+  expect(completedTurnAnswer({...turn, terminalStatus: null})).toBeUndefined();
+  expect(completedTurnAnswer({...turn, terminalStatus: null, statusSource: "runtime_read"})?.itemId).toBe("final");
+  for (const status of ["failed", "interrupted"] as const) {
+    expect(completedTurnAnswer({...turn, domainStatus: status, terminalStatus: status})).toBeUndefined();
+  }
+  expect(completedTurnAnswer(traceTurn([{...message, status: "inProgress"}]))).toBeUndefined();
+});
+
 describe("answer metadata presentation", () => {
   it("uses exact current or retired model identities and never substitutes a default", () => {
     expect(answerModelBadge("kimi-k3-1-pro-max-v1")).toEqual({label:"Kimi K3.1 Pro",icon:"modelKimi"});

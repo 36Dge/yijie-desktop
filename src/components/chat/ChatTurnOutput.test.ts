@@ -124,6 +124,7 @@ describe("turn output stays inside the response", () => {
     const callbacks = slotsFor(complete.artifacts);
     const turn = complete.timeline.turns[0]!;
     const wrapper = mount(ChatTurnGroup, {props: {turn: {...turn, items: turn.items.slice(0, 1)}, position: 1}, slots: callbacks.slots});
+    await nextTick();
     expect(wrapper.findAll(".answer-action")).toHaveLength(1);
     await wrapper.setProps({turn});
     await wrapper.setProps({turn: {...turn, items: [...turn.items]}});

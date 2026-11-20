@@ -1,5 +1,6 @@
 use super::artifact::{load_artifacts_for_turns_from_connection, ArtifactProjection};
 use super::attachment::{PreparedAttachment, MAX_ATTACHMENTS_PER_MESSAGE, MAX_FILE_CONTEXT_BYTES};
+use super::connectors::selection_generated::SelectedSkillRef;
 use super::error::{map_sqlite_error, ChatError};
 use super::feat134::{
     Feat134HistoryProjection, Feat134HistoryTurn, Feat134Hydration, SourceIdentity, TimelineItem,
@@ -20,7 +21,7 @@ use base64::Engine;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -412,6 +413,7 @@ pub enum MessageContentBlockProjection {
     Text {
         ordinal: usize,
         text: String,
+        skills: Vec<SelectedSkillRef>,
     },
     Attachment {
         ordinal: usize,
@@ -623,6 +625,21 @@ pub struct HistoryTurn {
     pub reasoning_reason_code: Option<String>,
     pub messages: Vec<HistoryMessage>,
     pub reasoning: Vec<HistoryReasoningMetadata>,
+}
+
+#[derive(Clone, Copy)]
+pub struct HistoryReadOptions {
+    pub limit: Option<usize>,
+    pub include_user_message_skills: bool,
+}
+
+impl HistoryReadOptions {
+    pub fn new(limit: Option<usize>, include_user_message_skills: bool) -> Self {
+        Self {
+            limit,
+            include_user_message_skills,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2053,6 +2070,7 @@ impl ChatRepository {
     pub fn load_message_content_blocks(
         &mut self,
         message_ids: Vec<Uuid>,
+        include_user_message_skills: bool,
     ) -> Result<Vec<(Uuid, Vec<MessageContentBlockProjection>)>, ChatError> {
         if message_ids.len() > 100 || message_ids.iter().any(Uuid::is_nil) {
             return Err(ChatError::InvalidInput);
@@ -2062,6 +2080,7 @@ impl ChatRepository {
             &self.connection,
             &self.scope,
             message_ids,
+            include_user_message_skills,
         )
     }
 
@@ -2069,7 +2088,13 @@ impl ChatRepository {
         connection: &Connection,
         scope: &ChatScope,
         message_ids: Vec<Uuid>,
+        include_user_message_skills: bool,
     ) -> Result<Vec<(Uuid, Vec<MessageContentBlockProjection>)>, ChatError> {
+        let mut selections = if include_user_message_skills {
+            history_user_skill_selections(connection, scope, &message_ids)?
+        } else {
+            HashMap::new()
+        };
         let mut result = Vec::with_capacity(message_ids.len());
         for message_id in message_ids {
             let mut statement = connection
@@ -2123,6 +2148,9 @@ impl ChatRepository {
                 let ordinal = usize::try_from(row.0).map_err(|_| ChatError::DatabaseUnavailable)?;
                 match row.1.as_str() {
                     "text" => blocks.push(MessageContentBlockProjection::Text {
+                        skills: selections
+                            .remove(&(message_id, ordinal))
+                            .unwrap_or_default(),
                         ordinal,
                         text: row.2.ok_or(ChatError::DatabaseUnavailable)?,
                     }),
@@ -4969,26 +4997,21 @@ impl ChatRepository {
         &mut self,
         session_id: Uuid,
         before_ordinal: Option<u64>,
-        requested_limit: Option<usize>,
+        options: HistoryReadOptions,
     ) -> Result<Feat134HistorySnapshot, ChatError> {
-        self.load_feat134_history_snapshot_with_hook(
-            session_id,
-            before_ordinal,
-            requested_limit,
-            || Ok(()),
-        )
+        self.load_feat134_history_snapshot_with_hook(session_id, before_ordinal, options, || Ok(()))
     }
 
     pub fn load_feat136_history_snapshot(
         &mut self,
         session_id: Uuid,
         before_ordinal: Option<u64>,
-        requested_limit: Option<usize>,
+        options: HistoryReadOptions,
     ) -> Result<Feat134HistorySnapshot, ChatError> {
         self.load_history_snapshot_for_schema_with_hook(
             session_id,
             before_ordinal,
-            requested_limit,
+            options,
             FEAT136_SOURCE_SCHEMA_VERSION,
             false,
             || Ok(()),
@@ -4999,12 +5022,12 @@ impl ChatRepository {
         &mut self,
         session_id: Uuid,
         before_ordinal: Option<u64>,
-        requested_limit: Option<usize>,
+        options: HistoryReadOptions,
     ) -> Result<Feat134HistorySnapshot, ChatError> {
         self.load_history_snapshot_for_schema_with_hook(
             session_id,
             before_ordinal,
-            requested_limit,
+            options,
             FEAT136_SOURCE_SCHEMA_VERSION,
             true,
             || Ok(()),
@@ -5015,7 +5038,7 @@ impl ChatRepository {
         &mut self,
         session_id: Uuid,
         before_ordinal: Option<u64>,
-        requested_limit: Option<usize>,
+        options: HistoryReadOptions,
         after_base_read: F,
     ) -> Result<Feat134HistorySnapshot, ChatError>
     where
@@ -5024,7 +5047,7 @@ impl ChatRepository {
         self.load_history_snapshot_for_schema_with_hook(
             session_id,
             before_ordinal,
-            requested_limit,
+            options,
             FEAT134_SOURCE_SCHEMA_VERSION,
             false,
             after_base_read,
@@ -5035,7 +5058,7 @@ impl ChatRepository {
         &mut self,
         session_id: Uuid,
         before_ordinal: Option<u64>,
-        requested_limit: Option<usize>,
+        options: HistoryReadOptions,
         source_schema_version: u8,
         include_approvals: bool,
         after_base_read: F,
@@ -5044,7 +5067,7 @@ impl ChatRepository {
         F: FnOnce() -> Result<(), ChatError>,
     {
         validate_non_nil(session_id)?;
-        let limit = page_size(requested_limit)?;
+        let limit = page_size(options.limit)?;
         // Attachment expiry is a write and therefore must complete before the read snapshot starts.
         self.expire_attachments(unix_seconds()?)?;
         let transaction = self
@@ -5074,6 +5097,7 @@ impl ChatRepository {
             &transaction,
             &self.scope,
             message_ids,
+            options.include_user_message_skills,
         )?;
         let artifacts =
             load_artifacts_for_turns_from_connection(&transaction, &self.scope, &turn_ids)?;
@@ -7235,6 +7259,62 @@ fn bind_draft_blocks(
         }
     }
     stored_content_block_digest(transaction, message_id)
+}
+
+fn history_user_skill_selections(
+    connection: &Connection,
+    scope: &ChatScope,
+    message_ids: &[Uuid],
+) -> Result<HashMap<(Uuid, usize), Vec<SelectedSkillRef>>, ChatError> {
+    let mut selections = HashMap::new();
+    if message_ids.is_empty() {
+        return Ok(selections);
+    }
+    let version: i64 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(map_sqlite_error)?;
+    if version < migrations::SELECTED_SKILLS_SCHEMA_VERSION {
+        return Ok(selections);
+    }
+    for chunk in message_ids.chunks(100) {
+        let ids: Vec<_> = chunk.iter().map(Uuid::to_string).collect();
+        let placeholders = std::iter::repeat_n("?", ids.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut statement = connection.prepare(&format!(
+            "SELECT k.message_id,k.block_ordinal,k.skill_ordinal,k.skill_id,k.skill_version
+             FROM chat_message_skill_selections k
+             JOIN chat_message_content_blocks b ON b.message_id=k.message_id AND b.block_ordinal=k.block_ordinal
+             JOIN chat_messages m ON m.id=b.message_id JOIN chat_sessions s ON s.id=m.session_id
+             WHERE s.owner_user_id=? AND s.tenant_id=? AND m.role='user' AND b.block_type='text'
+               AND k.message_id IN ({placeholders})
+             ORDER BY k.message_id,k.block_ordinal,k.skill_ordinal"
+        )).map_err(map_sqlite_error)?;
+        let bindings = [scope.owner_user_id.as_str(), scope.tenant_id.as_str()]
+            .into_iter()
+            .chain(ids.iter().map(String::as_str));
+        let mut rows = statement
+            .query(rusqlite::params_from_iter(bindings))
+            .map_err(map_sqlite_error)?;
+        while let Some(row) = rows.next().map_err(map_sqlite_error)? {
+            let message = parse_uuid_value(&row.get::<_, String>(0).map_err(map_sqlite_error)?)?;
+            let block = usize::from(row.get::<_, u8>(1).map_err(map_sqlite_error)?);
+            let ordinal = usize::from(row.get::<_, u8>(2).map_err(map_sqlite_error)?);
+            let skill = SelectedSkillRef {
+                id: row.get(3).map_err(map_sqlite_error)?,
+                version: row.get(4).map_err(map_sqlite_error)?,
+            };
+            skill
+                .validate()
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+            let refs = selections.entry((message, block)).or_insert_with(Vec::new);
+            if ordinal != refs.len() {
+                return Err(ChatError::DatabaseUnavailable);
+            }
+            refs.push(skill);
+        }
+    }
+    Ok(selections)
 }
 
 fn stored_selected_skills(
@@ -9437,6 +9517,126 @@ mod tests {
 
     #[test]
     #[cfg(feature = "kimi-k31-pro-candidate")]
+    fn user_skill_history_reopens_the_original_message_without_rewriting_or_replaying() {
+        use super::super::{ipc::history_dto_v6, native_conversation::NativeDisplayBuffer};
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../tests/fixtures/user-message-skill-history.json"
+        )))
+        .unwrap();
+        let blocks: Vec<_> = fixture
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|block| {
+                DraftContentBlock::selected_text(
+                    block["text"].as_str().unwrap().to_owned(),
+                    block
+                        .get("skills")
+                        .map(|skills| serde_json::from_value(skills.clone()).unwrap()),
+                )
+                .unwrap()
+            })
+            .collect();
+        let root = std::env::temp_dir().join(format!("yijie-skill-history-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let owner = scope();
+        let mut repo = open_repository_for_scope(&root, 67, owner.clone());
+        let project = register_synthetic_project(&mut repo, &root);
+        let first = repo
+            .create_session_and_enqueue(project, "首条消息", Uuid::now_v7())
+            .unwrap();
+        let options = HistoryReadOptions::new(Some(1), true);
+        let read = |repo: &mut ChatRepository, before, options| {
+            let snapshot = repo.load_feat137_history_snapshot(first.session_id, before, options)?;
+            let cursor = snapshot.history.next_before_ordinal;
+            let page = history_dto_v6(
+                snapshot.history,
+                None,
+                snapshot.message_content_blocks,
+                snapshot.artifacts,
+                snapshot.feat134,
+                snapshot.approvals,
+            )?;
+            Ok::<_, ChatError>((page, cursor))
+        };
+        assert!(
+            read(&mut repo, None, options).unwrap().0["turns"][0]["messages"][0]["contentBlocks"]
+                [0]
+            .get("skills")
+            .is_none()
+        );
+        let now = unix_seconds().unwrap();
+        bind_and_accept_first_turn(&mut repo, &first, now);
+        let context = repo.active_turn_context(first.session_id).unwrap();
+        let mut buffer = NativeDisplayBuffer::new(context.clone(), None).unwrap();
+        let completed = native_test_event(
+            &context,
+            1,
+            "turn/completed",
+            serde_json::json!({
+                "turn": {"id":context.runtime_turn_id, "status":"completed", "items":[], "itemsComplete":true}
+            }),
+        );
+        assert!(buffer.observe(&completed).unwrap());
+        repo.commit_native_view(&context, buffer.view, Some(&completed), now)
+            .unwrap();
+        migrations::migrate_to_target(
+            &mut repo.connection,
+            migrations::SELECTED_SKILLS_SCHEMA_VERSION,
+        )
+        .unwrap();
+        let selected_turn = repo
+            .enqueue_turn_multimodal(first.session_id, &blocks, Uuid::now_v7())
+            .unwrap();
+        drop(repo);
+
+        let mut reopened = open_repository_for_scope(&root, 67, owner.clone());
+        let before = reopened.connection.total_changes();
+        let (page, cursor) = read(&mut reopened, None, options).unwrap();
+        let turn = &page["turns"][0];
+        let selected = &turn["messages"][0];
+        assert_eq!(turn["turnId"], selected_turn.to_string());
+        assert_eq!(selected["contentBlocks"], fixture);
+        assert_eq!(selected["content"], draft_text_projection(&blocks));
+        let ordinary = read(&mut reopened, Some(cursor.unwrap()), options)
+            .unwrap()
+            .0;
+        assert_eq!(ordinary["turns"][0]["turnId"], first.turn_id.to_string());
+        assert_eq!(
+            ordinary["turns"][0]["messages"][0]["contentBlocks"],
+            serde_json::json!([{"type":"text","text":"首条消息"}])
+        );
+        let legacy = read(&mut reopened, None, HistoryReadOptions::new(Some(1), false))
+            .unwrap()
+            .0;
+        let legacy_message = &legacy["turns"][0]["messages"][0];
+        assert_eq!(legacy_message["content"], selected["content"]);
+        assert!(legacy_message["contentBlocks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|block| block.get("skills").is_none()));
+        let message_id = Uuid::parse_str(selected["messageId"].as_str().unwrap()).unwrap();
+        for other_scope in [
+            ChatScope::new(owner.owner_user_id.clone(), Uuid::now_v7().to_string()).unwrap(),
+            ChatScope::new(Uuid::now_v7().to_string(), owner.tenant_id.clone()).unwrap(),
+        ] {
+            reopened.scope = other_scope;
+            assert!(read(&mut reopened, None, options).is_err());
+            assert!(reopened
+                .load_message_content_blocks(vec![message_id], true)
+                .unwrap()[0]
+                .1
+                .is_empty());
+        }
+        assert_eq!(reopened.connection.total_changes(), before);
+        drop(reopened);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[cfg(feature = "kimi-k31-pro-candidate")]
     fn selected_skill_metadata_survives_reopen_without_changing_legacy_history() {
         let root = std::env::temp_dir().join(format!("yijie-selected-skills-{}", Uuid::now_v7()));
         fs::create_dir(&root).unwrap();
@@ -9869,7 +10069,11 @@ mod tests {
             .unwrap()
             .is_empty());
         let history = repository
-            .load_feat134_history_snapshot(pending.session_id, None, Some(20))
+            .load_feat134_history_snapshot(
+                pending.session_id,
+                None,
+                HistoryReadOptions::new(Some(20), false),
+            )
             .unwrap();
         assert_eq!(history.history.turns[0].status, "queued");
         assert_eq!(history.history.turns[0].terminal_at, None);
@@ -9914,7 +10118,11 @@ mod tests {
             OutboxState::Failed
         );
         let snapshot = repository
-            .load_feat134_history_snapshot(pending.session_id, None, Some(20))
+            .load_feat134_history_snapshot(
+                pending.session_id,
+                None,
+                HistoryReadOptions::new(Some(20), false),
+            )
             .unwrap();
         assert_eq!(
             snapshot.session.latest_turn_status.as_deref(),
@@ -10544,6 +10752,49 @@ mod tests {
     }
 
     #[cfg(target_os = "macos")]
+    #[test]
+    fn user_message_web_link_is_bound_to_the_saved_original_after_reopen() {
+        let root = std::env::temp_dir().join(format!("yijie-user-link-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let owner = scope();
+        let mut repo = open_repository_for_scope(&root, 43, owner.clone());
+        let project = register_synthetic_project(&mut repo, &root);
+        let url = "https://example.org/product?sku=42&color=green";
+        let saved = repo
+            .create_session_and_enqueue(project, &format!("请比较（{url}）。"), Uuid::now_v7())
+            .unwrap();
+        let other = repo
+            .create_session_and_enqueue(project, "另一条普通消息", Uuid::now_v7())
+            .unwrap();
+        let item = format!("{}:user:0", saved.turn_id);
+        drop(repo);
+        let repo = open_repository_for_scope(&root, 43, owner);
+        assert!(repo
+            .user_message_contains_url(saved.session_id, saved.turn_id, &item, url)
+            .unwrap());
+        assert!(!repo
+            .user_message_contains_url(
+                saved.session_id,
+                saved.turn_id,
+                &item,
+                "https://example.org/product?sku=42"
+            )
+            .unwrap());
+        assert!(!repo
+            .user_message_contains_url(other.session_id, saved.turn_id, &item, url)
+            .unwrap());
+        assert!(!repo
+            .user_message_contains_url(saved.session_id, saved.turn_id, "other-item", url)
+            .unwrap());
+        drop(repo);
+        let other_owner = open_repository_for_scope(&root, 43, scope());
+        assert!(!other_owner
+            .user_message_contains_url(saved.session_id, saved.turn_id, &item, url)
+            .unwrap());
+        drop(other_owner);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn message_file_preview_reads_the_file_referenced_in_a_saved_assistant_answer() {
         use super::super::{
@@ -11510,7 +11761,7 @@ mod tests {
             .unwrap();
         let persisted_message_id = persisted_history.turns[0].messages[0].message_id;
         let persisted_blocks = repository
-            .load_message_content_blocks(vec![persisted_message_id])
+            .load_message_content_blocks(vec![persisted_message_id], false)
             .unwrap();
         assert!(matches!(
             persisted_blocks.as_slice(),
@@ -11626,7 +11877,7 @@ mod tests {
             .unwrap();
         let message_id = history.turns[0].messages[0].message_id;
         let projected = repository
-            .load_message_content_blocks(vec![message_id])
+            .load_message_content_blocks(vec![message_id], false)
             .unwrap();
         assert!(matches!(
             &projected[0].1[1],

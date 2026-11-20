@@ -1,6 +1,7 @@
 import { computed, createApp, defineComponent, h, provide, ref } from "vue";
 import { NConfigProvider, darkTheme } from "naive-ui";
 import { createNaiveThemeOverrides } from "../../../src/design/theme/naive-theme";
+import { historyPageToConversationSnapshot } from "../../../src/api/chat-conversation-adapter";
 import { composeConversationView } from "../../../src/domain/conversation-view";
 import { selectConversationTimeline } from "../../../src/domain/conversation-timeline";
 import { turnTimingLabel } from "../../../src/domain/chat-turn-timing";
@@ -15,18 +16,28 @@ import "../chat-preloading/preview.css";
 // client; this page records clicks without sending requests or saving history.
 const answer = "全程建议预留 **1—1.5小时**，具体取决于候车和步行情况。[路线来源：城市交通说明](https://example.org/route?from=station&to=park#guide)\n\n## 建议这样安排\n\n- **出发前准备**：留意现场指引。[相关说明](https://www.iana.org/help/example-domains)\n- **慢慢走**：留出休息时间。\n\n> [参考资料](https://example.org/reference)\n\n| 地点 | 资料 |\n| --- | --- |\n| 示例公园 | [地点介绍](https://example.org/Guide_(city)) |";
 createApp(defineComponent({setup() {
-  const phase = ref<"thinking" | "answer" | "completed" | "tool">("completed");
+  const params = new URLSearchParams(location.search);
+  const previewSkill = params.has("user-skill");
+  const previewUserLink = previewSkill || params.has("user-links");
+  const listing = { id: "listing-skill", version: "1.0.0", runtimeName: "listing-analysis", category: "content-marketing" as const, displayName: "Amazon-listing-analysis" };
+  const question = previewUserLink
+    ? "https://www.example.org/catalog/mini-camera/dp/B01234/?_encoding=UTF8&product=pan-tilt-camera&campaign=seasonal-offers&ref_=store_home_recommendations&color=white&th=1#details 给出这个商品的优化建议。"
+    : "介绍一条城市步行路线，并附上参考链接。";
+  const original = historyPageToConversationSnapshot("preview", {turns: [{turnId:"turn",status:"completed",terminalAt:2,reasoning:[],reasoningStatus:"unavailable",reasoningReasonCode:null,
+    messages:[{messageId:"saved",role:"user",content:question,status:"committed",ordinal:0,createdAt:1,
+      ...(previewSkill && { contentBlocks: [{ type: "text", text: question, skills: [{ id: listing.id, version: listing.version }] }] })}]}],nextCursor:null});
+  const phase = ref<"thinking" | "answer" | "completed" | "tool">(previewUserLink ? "thinking" : "completed");
   const dark = ref(false); const opened = ref("");
-  provide(webSourceActionsKey, {icon: async () => null, open: async () => {}, openMessageLink: async target => {opened.value = target.url;}});
+  provide(webSourceActionsKey, {icon: async () => null, open: async () => {}, openMessageLink: async target => {opened.value = target.url;}, openUserMessageLink: async target => {opened.value = target.url;}});
   const turn = computed(() => {
     const items: NativeConversationView["items"][number][] = [
-      {ordinal: 0, lastMethod: "item/completed", item: {id:"user",type:"userMessage",text:"介绍一条城市步行路线，并附上参考链接。",availability:"available"}},
+      {ordinal: 0, lastMethod: "item/completed", item: {id:"user",type:"userMessage",text:question,availability:"available"}},
       {ordinal: 1, lastMethod: phase.value === "completed" ? "item/completed" : "item/started", item: {id:"thinking",type:"reasoning",summary:["正在整理介绍与参考资料。"],availability:"available"}},
     ];
     if (phase.value === "tool") items.push({ordinal:2,lastMethod:"item/started",item:{id:"search",type:"webSearch",availability:"available",webSearch:{action:"search",queries:["城市步行路线"]}}});
     else if (phase.value !== "thinking") items.push({ordinal:2,lastMethod:phase.value === "completed" ? "item/completed" : "item/started",item:{id:"answer",type:"agentMessage",phase:"final_answer",text:answer,availability:"available"}});
     const view: NativeConversationView = {sessionId:"preview",turnId:"turn",runtimeThreadId:"preview",runtimeTurnId:"turn",source:"native_observed",revision:phase.value,status:phase.value === "completed" ? "completed" : "inProgress",statusSource:"runtime_notification",terminalObserved:phase.value === "completed",availability:"available",items};
-    return selectConversationTimeline(composeConversationView({threads:[{threadId:"preview",status:"active"}],turns:[],items:[]},[view]),"preview",undefined,{liveTurnId:"turn",protectApprovalProcessContent:false})!.turns[0]!;
+    return selectConversationTimeline(composeConversationView(original,[view]),"preview",undefined,{liveTurnId:"turn",protectApprovalProcessContent:false})!.turns[0]!;
   });
   const timing = computed(() => {
     const completed = phase.value === "completed";
@@ -47,7 +58,7 @@ createApp(defineComponent({setup() {
     ]),
     h("section",{class:"preview-window",style:{width:"min(1180px, 100%)",height:"760px"}},[
       h("header",{class:"preview-title"},"普通本地样例 · 生产组件与原生进度投影"),
-      h("div",{class:"preview-conversation"},[h(ChatTurnGroup,{turn:turn.value,position:1,timingLabel:timing.value})]),
+      h("div",{class:"preview-conversation"},[h(ChatTurnGroup,{turn:turn.value,position:1,timingLabel:timing.value,skillCatalog:previewSkill?[listing]:[]})]),
       h("div",{class:"preview-composer"},"输入区域"),
     ]),
     h("p",{"aria-label":"打开记录"},opened.value ? `已请求打开：${opened.value}` : "尚未点击链接"),

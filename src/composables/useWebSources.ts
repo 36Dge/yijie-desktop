@@ -1,16 +1,17 @@
 import { inject, onBeforeUnmount, provide, ref, watch, type InjectionKey } from "vue";
 import { webSourceClient } from "../api/chat-web-source-client";
-import type { WebSourceTarget } from "../domain/web-source.generated";
+import type { WebSourcePayload, WebSourceTarget } from "../domain/web-source.generated";
 import type { ConversationTimelineItemViewModel } from "../domain/conversation-timeline";
 
 export type WebSourceActions = {
   icon(target: WebSourceTarget): Promise<string | null>;
   open(target: WebSourceTarget): Promise<void>;
   openMessageLink?(target: WebSourceTarget): Promise<void>;
+  openUserMessageLink?(target: WebSourceTarget): Promise<void>;
 };
 export const webSourceActionsKey: InjectionKey<WebSourceActions> = Symbol("web-source-actions");
 export function provideWebSourceActions(contextId: () => string | undefined) {
-  async function run(action: "icon" | "open" | "open_message_link", target: WebSourceTarget) {
+  async function run(action: WebSourcePayload["action"], target: WebSourceTarget) {
     const id = contextId();
     if (!id) throw new Error("web_source_context_unavailable");
     return webSourceClient(id, {action, target});
@@ -19,6 +20,7 @@ export function provideWebSourceActions(contextId: () => string | undefined) {
     icon: async target => (await run("icon", target)).icon,
     open: async target => { await run("open", target); },
     openMessageLink: async target => { await run("open_message_link", target); },
+    openUserMessageLink: async target => { await run("open_user_message_link", target); },
   });
 }
 

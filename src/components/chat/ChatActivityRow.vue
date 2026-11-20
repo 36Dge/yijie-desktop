@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, useTemplateRef } from "vue";
 import type { ConversationActivityEntry } from "../../domain/conversation-activity-entry";
-import { hasReadableProcessContent, showConversationItemActions } from "../../domain/conversation-process";
+import { hasReadableProcessContent } from "../../domain/conversation-process";
 import type {
   ConversationTimelineArtifactReferenceContentBlock,
   ConversationTimelineAttachmentReferenceContentBlock,
@@ -31,6 +31,7 @@ const props = withDefaults(defineProps<{
   activityEntry?: ConversationActivityEntry;
   searchCalls?: readonly ConversationTimelineItemViewModel[];
   answerCandidate?: boolean;
+  completedAnswerId?: string;
   turn: ConversationTimelineTurnViewModel;
   processPresentation?: boolean;
   visible?: boolean;
@@ -41,7 +42,12 @@ const props = withDefaults(defineProps<{
   approvalTransients?: Readonly<Record<string, ChatApprovalTransientState | undefined>>;
 }>(), {processPresentation: false, visible: true, skillCatalog: () => [], connectorNames: () => [], canDecideApprovals: false, approvalAuthorityRevision: 0, approvalTransients: () => ({})});
 const firstUserMessage = computed(() => props.turn.items.find(item => item.presentation === "user_message")?.identity);
-const skillMessages = computed(() => new Map(props.turn.items.filter(item => item.role === "user").map(item => [item.identity, presentSkillMessage(item.contentBlocks, props.skillCatalog)])));
+const linkTarget = computed(() => {
+  const item = props.item;
+  const itemId = item.kind === "assistant_message" ? item.itemId : item.kind === "user_message" ? item.userLinkSourceId : undefined;
+  return itemId ? { sessionId: item.threadId, turnId: item.turnId, itemId } : undefined;
+});
+const skillMessage = computed(() => props.item.presentation === "user_message" ? presentSkillMessage(props.item.contentBlocks, props.skillCatalog) : null);
 const emit = defineEmits<{
   "disclosure-change": [change: ChatTimelineDisclosureChange];
   "approval-decision": [change: ChatApprovalDecisionChange];
@@ -67,8 +73,14 @@ const slots = defineSlots<{
 }>();
 
 const messageContent = useTemplateRef<InstanceType<typeof ChatSafeContent>>("messageContent");
-const actionsVisible = computed(() => showConversationItemActions(props.item, props.turn, props.processPresentation, Boolean(slots["structured-answer"])) &&
-  !messageContent.value?.revealPending);
+const actionsVisible = computed(() => {
+  const item = props.item;
+  if (props.processPresentation || item.copyPolicy !== "text_and_code") return false;
+  if (item.kind === "assistant_message") {
+    return item.identity === props.completedAnswerId && !slots["structured-answer"] && messageContent.value?.revealPending === false;
+  }
+  return item.presentation !== "command" && item.presentation !== "tool" && !messageContent.value?.revealPending;
+});
 defineExpose({ actionsVisible });
 
 function unpublishedLabel(item: ConversationTimelineItemViewModel): string {
@@ -295,17 +307,17 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange) { emit("app
             <ChatSafeContent
               v-else-if="item.presentation !== 'unknown' && item.presentation !== 'command' && item.presentation !== 'tool' && item.contentBlocks.length > 0"
               ref="messageContent"
-              :blocks="skillMessages.get(item.identity)?.blocks ?? item.contentBlocks"
+              :blocks="skillMessage?.blocks ?? item.contentBlocks"
               :file-links="item.kind === 'assistant_message'"
-              :link-target="item.kind === 'assistant_message' ? {sessionId: item.threadId, turnId: item.turnId, itemId: item.itemId} : undefined"
+              :link-target="linkTarget"
               :mode="item.presentation === 'user_message' ? 'plain' : item.contentMode"
               :typography="item.presentation === 'user_message' ? 'user' : !processPresentation && (answerCandidate || ['final_answer', 'assistant_unclassified'].includes(item.presentation)) ? 'answer' : 'compact'"
               :streaming="item.kind === 'assistant_message' && item.busy === true && visible"
               :animate="visible && !['failed', 'interrupted'].includes(turn.domainStatus)"
             >
-              <template v-if="(item.identity === firstUserMessage && connectorNames.length) || skillMessages.get(item.identity)?.skills.length" #text-prefix>
+              <template v-if="(item.identity === firstUserMessage && connectorNames.length) || skillMessage?.skills.length" #text-prefix>
                 <span v-if="item.identity === firstUserMessage && connectorNames.length" aria-label="本轮连接器"><span v-for="(name, index) in connectorNames" :key="index" class="chat-turn-group__connector-mention">/ {{ name }}</span></span>
-                <span v-if="skillMessages.get(item.identity)?.skills.length" aria-label="本轮技能"><ChatSkillPill v-for="skill in skillMessages.get(item.identity)!.skills" :key="skill.id" :entry="skill" class="chat-turn-group__skill-mention" /></span>
+                <span v-if="skillMessage?.skills.length" aria-label="本轮技能"><ChatSkillPill v-for="skill in skillMessage.skills" :key="skill.id" :entry="skill" class="chat-turn-group__skill-mention" /></span>
               </template>
               <template
                 v-if="slots['artifact-reference']"

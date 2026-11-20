@@ -1,5 +1,6 @@
 import type { AttachmentPresentation } from "./chat-file-presentation";
 import type { SelectedSkillRef } from "./market-selection-v2.generated";
+import { validateSelectedSkills } from "../api/generated/market-selection-v2-validator.gen.js";
 import { ARTIFACT_MEDIA_TYPES } from "../api/generated/artifact-media-policy.gen";
 import { isSessionPurposeView, type SessionPurposeView } from "./chat-session-purpose.generated";
 import { parseStrictRfc3339EpochNanoseconds } from "./rfc3339";
@@ -283,12 +284,13 @@ export interface ChatAttachmentImportEvent {
 export interface ChatTextContentBlock {
   readonly type: "text";
   readonly text: string;
+  readonly skills?: readonly SelectedSkillRef[];
 }
 
 export type ChatMessageContentBlock = ChatTextContentBlock | ChatAttachment;
 
 export type ChatTurnContentBlock =
-  | (ChatTextContentBlock & Readonly<{ skills?: readonly SelectedSkillRef[] }>)
+  | ChatTextContentBlock
   | Readonly<{ type: "file" | "image"; attachmentId: string }>;
 
 export interface ChatMessage {
@@ -1455,11 +1457,16 @@ function parseAttachment(value: unknown, history = false): ChatAttachment {
   });
 }
 
-function parseContentBlock(value: unknown): ChatMessageContentBlock {
+function parseContentBlock(value: unknown, userMessage: boolean): ChatMessageContentBlock {
   if (!isRecord(value)) throw new ChatContractError();
   if (value.type === "text") {
-    const block = exactObject(value, ["type", "text"]);
-    return Object.freeze({ type: "text", text: plainText(block.text, 1024 * 1024) });
+    const block = exactObject(value, ["type", "text"], userMessage ? ["skills"] : []);
+    const text = plainText(block.text, 1024 * 1024);
+    if (!("skills" in block)) return Object.freeze({ type: "text", text });
+    if (!validateSelectedSkills(block.skills)) throw new ChatContractError();
+    return Object.freeze({ type: "text", text,
+      skills: Object.freeze(block.skills.map(({id, version}) => Object.freeze({id, version}))),
+    });
   }
   return parseAttachment(value, true);
 }
@@ -1594,7 +1601,10 @@ function parseMessageV2(value: unknown): ChatMessage {
   if (!Array.isArray(message.contentBlocks) || message.contentBlocks.length === 0 || message.contentBlocks.length > 16) {
     throw new ChatContractError();
   }
-  const contentBlocks = Object.freeze(message.contentBlocks.map(parseContentBlock));
+  const role = oneOf(message.role, ["user", "assistant"] as const);
+  const contentBlocks = Object.freeze(message.contentBlocks.map(block => parseContentBlock(block, role === "user")));
+  const skillIds = contentBlocks.flatMap(block => block.type === "text" ? (block.skills ?? []).map(skill => skill.id) : []);
+  if (skillIds.length > 256 || new Set(skillIds).size !== skillIds.length) throw new ChatContractError();
   const content = plainText(message.content, 1024 * 1024, true);
   const projectedText = contentBlocks
     .filter((block): block is ChatTextContentBlock => block.type === "text")
@@ -1603,7 +1613,7 @@ function parseMessageV2(value: unknown): ChatMessage {
   if (content !== projectedText) throw new ChatContractError();
   return Object.freeze({
     messageId: uuid(message.messageId),
-    role: oneOf(message.role, ["user", "assistant"] as const),
+    role,
     content,
     contentBlocks,
     status: stringValue(message.status, 64),

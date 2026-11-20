@@ -68,7 +68,7 @@ function messageBlock(
   blockIndex: number,
 ): ConversationContentBlock {
   if (block.type === "text") {
-    return Object.freeze({ blockIndex, type: "text", text: block.text });
+    return Object.freeze({ blockIndex, type: "text", text: block.text, ...(block.skills?.length && { skills: block.skills }) });
   }
   return attachmentBlock(block, blockIndex);
 }
@@ -146,17 +146,20 @@ function messageItems(
     .map((message) => {
       const roleIndex = roleCounts[message.role];
       roleCounts[message.role] += 1;
+      const itemId = conversationMessageItemId(turn.turnId, message.role, roleIndex);
+      const contentBlocks = messageBlocks(message);
       return Object.freeze({
         threadId: "",
         turnId: turn.turnId,
-        itemId: conversationMessageItemId(turn.turnId, message.role, roleIndex),
+        itemId,
+        ...(message.role === "user" && contentBlocks.some(block => block.type === "text" && /https?:\/\//i.test(block.text)) && { userLinkSourceId: itemId }),
         ordinal: message.role === "user"
           ? USER_ITEM_ORDINAL + roleIndex
           : ASSISTANT_ITEM_ORDINAL + roleIndex,
         kind: message.role === "user" ? "user_message" : "assistant_message",
         status: message.status === "pending" ? "streaming" : "completed",
         agentMessagePhase: message.role === "assistant" ? "final_answer" : null,
-        contentBlocks: messageBlocks(message),
+        contentBlocks,
       } satisfies ConversationItemSnapshot);
     });
 }

@@ -42,7 +42,8 @@
   --yj-color-chat-generation-notice: color-mix(in srgb, var(--yj-color-text-tertiary) 70%, var(--yj-color-bg-page));
   --yj-color-chat-timing: #858585;
   --yj-color-chat-link: #6b980b;
-  --yj-color-chat-task-running: #8ac20f;
+  --yj-color-chat-task-indicator: #8ac20f;
+  --yj-color-chat-completion-dot: #8ac20f;
   --yj-color-chat-file-link: var(--yj-color-connector-composer-mention);
   --yj-color-chat-artifact-bg: #f2f2f2;
   --yj-color-chat-artifact-hover: #eceef0;
@@ -230,7 +231,7 @@
   --yj-motion-base: 180ms;
   --yj-motion-slow: 240ms;
   --yj-motion-sidebar-title-delay: 500ms;
-  --yj-motion-chat-task-spin: 1.5s;
+  --yj-motion-chat-task-spin: 1.25s;
   --yj-sidebar-title-speed: 32;
   --yj-sidebar-title-gap: var(--yj-space-8);
   --yj-motion-chat-thinking: 1800ms;
@@ -271,6 +272,7 @@
   --yj-layout-chat-workspace-control-max: 320px;
   --yj-layout-workspace-menu-width: 280px;
   --yj-layout-chat-context-menu-width: 175px;
+  --yj-layout-chat-delete-confirm-width: 420px;
   --yj-layout-workflow-menu-width: 160px;
   --yj-layout-shop-menu-width: 340px;
   --yj-layout-shop-trigger-max: 200px;

@@ -355,7 +355,8 @@ function mapFailure(error: unknown): never {
 export function createChatClient(transport: ChatClientTransport = productionTransport): ChatClient {
   async function run<T>(command: string, request: Record<string, unknown>, parse: (value: unknown) => T): Promise<T> {
     try {
-      return parse(await transport.invoke(command, { request }));
+      const history = command === "chat_load_history_v2" || command === "chat_load_history_v3" || command === "chat_resync_session_v2";
+      return parse(await transport.invoke(command, history ? { request, includeUserMessageSkills: true } : { request }));
     } catch (error: unknown) {
       mapFailure(error);
     }

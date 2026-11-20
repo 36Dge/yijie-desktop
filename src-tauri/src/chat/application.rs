@@ -9,10 +9,10 @@ use super::authorization::{ChatAction, ChatAuthorizationManager};
 use super::database::{
     ActiveTurnContext, AttachmentSummary, ClaimedDeletion, ClaimedOutbox, CleanupSurfaceState,
     DeletionStatus, DraftContentBlock, DraftTarget, Feat134HistorySnapshot, HistoryPage,
-    MessageContentBlockProjection, OutboxKind, PendingConversation, ProjectSummary,
-    PublicTaskBindingState, PublicTaskControlPlaneStatus, ReasoningItem, ReasoningPart,
-    ReasoningStatus, RecoverySnapshot, SessionPage, SessionPageCursor, SessionSummary,
-    StartTurnDispatchV2, OUTBOX_MAX_ATTEMPTS,
+    HistoryReadOptions, MessageContentBlockProjection, OutboxKind, PendingConversation,
+    ProjectSummary, PublicTaskBindingState, PublicTaskControlPlaneStatus, ReasoningItem,
+    ReasoningPart, ReasoningStatus, RecoverySnapshot, SessionPage, SessionPageCursor,
+    SessionSummary, StartTurnDispatchV2, OUTBOX_MAX_ATTEMPTS,
 };
 use super::error::ChatError;
 use super::feat134::{Feat134HistoryProjection, Feat134Hydration, Feat134Projection};
@@ -130,6 +130,24 @@ impl AuthorizedConversationApplication {
         self.authorize(context_id, ChatAction::ReadSessions)?;
         result
     }
+    pub(super) async fn user_message_contains_url(
+        &self,
+        context_id: Uuid,
+        session_id: Uuid,
+        turn_id: Uuid,
+        item_id: String,
+        url: String,
+    ) -> Result<bool, ChatError> {
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        let contains = self
+            .application
+            .database
+            .call(move |repo| repo.user_message_contains_url(session_id, turn_id, &item_id, &url))
+            .await?;
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        Ok(contains)
+    }
+
     pub async fn native_history(
         &self,
         context_id: Uuid,
@@ -244,11 +262,15 @@ impl AuthorizedConversationApplication {
         &self,
         context_id: Uuid,
         message_ids: Vec<Uuid>,
+        include_user_message_skills: bool,
     ) -> Result<Vec<(Uuid, Vec<MessageContentBlockProjection>)>, ChatError> {
         self.authorize(context_id, ChatAction::ReadSessions)?;
-        self.application
-            .load_message_content_blocks(message_ids)
-            .await
+        let blocks = self
+            .application
+            .load_message_content_blocks(message_ids, include_user_message_skills)
+            .await?;
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        Ok(blocks)
     }
 
     pub async fn load_artifacts_for_turns(
@@ -374,12 +396,15 @@ impl AuthorizedConversationApplication {
         context_id: Uuid,
         session_id: Uuid,
         before_ordinal: Option<u64>,
-        limit: Option<usize>,
+        options: HistoryReadOptions,
     ) -> Result<Feat134HistorySnapshot, ChatError> {
         self.authorize(context_id, ChatAction::ReadSessions)?;
-        self.application
-            .load_feat134_history_snapshot(session_id, before_ordinal, limit)
-            .await
+        let snapshot = self
+            .application
+            .load_feat134_history_snapshot(session_id, before_ordinal, options)
+            .await?;
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        Ok(snapshot)
     }
 
     pub async fn load_feat136_history_snapshot(
@@ -387,12 +412,15 @@ impl AuthorizedConversationApplication {
         context_id: Uuid,
         session_id: Uuid,
         before_ordinal: Option<u64>,
-        limit: Option<usize>,
+        options: HistoryReadOptions,
     ) -> Result<Feat134HistorySnapshot, ChatError> {
         self.authorize(context_id, ChatAction::ReadSessions)?;
-        self.application
-            .load_feat136_history_snapshot(session_id, before_ordinal, limit)
-            .await
+        let snapshot = self
+            .application
+            .load_feat136_history_snapshot(session_id, before_ordinal, options)
+            .await?;
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        Ok(snapshot)
     }
 
     pub async fn load_feat137_history_snapshot(
@@ -400,12 +428,15 @@ impl AuthorizedConversationApplication {
         context_id: Uuid,
         session_id: Uuid,
         before_ordinal: Option<u64>,
-        limit: Option<usize>,
+        options: HistoryReadOptions,
     ) -> Result<Feat134HistorySnapshot, ChatError> {
         self.authorize(context_id, ChatAction::ReadSessions)?;
-        self.application
-            .load_feat137_history_snapshot(session_id, before_ordinal, limit)
-            .await
+        let snapshot = self
+            .application
+            .load_feat137_history_snapshot(session_id, before_ordinal, options)
+            .await?;
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        Ok(snapshot)
     }
 
     pub async fn pending_approvals_v6(
@@ -1341,8 +1372,11 @@ impl ConversationApplication {
     pub async fn load_message_content_blocks(
         &self,
         message_ids: Vec<Uuid>,
+        include_user_message_skills: bool,
     ) -> Result<Vec<(Uuid, Vec<MessageContentBlockProjection>)>, ChatError> {
-        self.database.load_message_content_blocks(message_ids).await
+        self.database
+            .load_message_content_blocks(message_ids, include_user_message_skills)
+            .await
     }
 
     pub async fn load_artifacts_for_turns(
@@ -1538,10 +1572,10 @@ impl ConversationApplication {
         &self,
         session_id: Uuid,
         before_ordinal: Option<u64>,
-        limit: Option<usize>,
+        options: HistoryReadOptions,
     ) -> Result<Feat134HistorySnapshot, ChatError> {
         self.database
-            .load_feat134_history_snapshot(session_id, before_ordinal, limit)
+            .load_feat134_history_snapshot(session_id, before_ordinal, options)
             .await
     }
 
@@ -1549,10 +1583,10 @@ impl ConversationApplication {
         &self,
         session_id: Uuid,
         before_ordinal: Option<u64>,
-        limit: Option<usize>,
+        options: HistoryReadOptions,
     ) -> Result<Feat134HistorySnapshot, ChatError> {
         self.database
-            .load_feat136_history_snapshot(session_id, before_ordinal, limit)
+            .load_feat136_history_snapshot(session_id, before_ordinal, options)
             .await
     }
 
@@ -1560,10 +1594,10 @@ impl ConversationApplication {
         &self,
         session_id: Uuid,
         before_ordinal: Option<u64>,
-        limit: Option<usize>,
+        options: HistoryReadOptions,
     ) -> Result<Feat134HistorySnapshot, ChatError> {
         self.database
-            .load_feat137_history_snapshot(session_id, before_ordinal, limit)
+            .load_feat137_history_snapshot(session_id, before_ordinal, options)
             .await
     }
 
@@ -3855,7 +3889,11 @@ mod tests {
         let outcome = application.run_background_once().await.unwrap();
         assert_eq!(outcome, CoordinatorOutcome::Idle);
         let snapshot = database
-            .load_feat134_history_snapshot(pending.session_id, None, Some(20))
+            .load_feat134_history_snapshot(
+                pending.session_id,
+                None,
+                HistoryReadOptions::new(Some(20), false),
+            )
             .await
             .unwrap();
         assert_eq!(

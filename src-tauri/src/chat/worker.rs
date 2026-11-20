@@ -10,7 +10,7 @@ use super::database::Feat126ResumeCandidate;
 use super::database::{
     ActiveTurnContext, AttachmentSummary, ChatRepository, ChatScope, ClaimedDeletion,
     ClaimedOutbox, CleanupSurfaceState, CreateSessionDispatch, DeletionStatus, DraftContentBlock,
-    DraftTarget, Feat134HistorySnapshot, HistoryPage, InterruptTurnDispatch,
+    DraftTarget, Feat134HistorySnapshot, HistoryPage, HistoryReadOptions, InterruptTurnDispatch,
     MessageContentBlockProjection, OutboxState, PendingConversation, ProjectSummary,
     PublicTaskBindingState, PublicTaskControlPlaneStatus, ReasoningItem, RecoverySnapshot,
     SessionPage, SessionPageCursor, SessionSummary, StartTurnDispatch, StartTurnDispatchV2,
@@ -579,9 +579,12 @@ impl DatabaseWorker {
     pub async fn load_message_content_blocks(
         &self,
         message_ids: Vec<uuid::Uuid>,
+        include_user_message_skills: bool,
     ) -> Result<Vec<(uuid::Uuid, Vec<MessageContentBlockProjection>)>, ChatError> {
-        self.call(move |repository| repository.load_message_content_blocks(message_ids))
-            .await
+        self.call(move |repository| {
+            repository.load_message_content_blocks(message_ids, include_user_message_skills)
+        })
+        .await
     }
 
     pub async fn begin_artifact_transfer(
@@ -1142,10 +1145,10 @@ impl DatabaseWorker {
         &self,
         session_id: uuid::Uuid,
         before_ordinal: Option<u64>,
-        limit: Option<usize>,
+        options: HistoryReadOptions,
     ) -> Result<Feat134HistorySnapshot, ChatError> {
         self.call(move |repository| {
-            repository.load_feat134_history_snapshot(session_id, before_ordinal, limit)
+            repository.load_feat134_history_snapshot(session_id, before_ordinal, options)
         })
         .await
     }
@@ -1154,10 +1157,10 @@ impl DatabaseWorker {
         &self,
         session_id: uuid::Uuid,
         before_ordinal: Option<u64>,
-        limit: Option<usize>,
+        options: HistoryReadOptions,
     ) -> Result<Feat134HistorySnapshot, ChatError> {
         self.call(move |repository| {
-            repository.load_feat136_history_snapshot(session_id, before_ordinal, limit)
+            repository.load_feat136_history_snapshot(session_id, before_ordinal, options)
         })
         .await
     }
@@ -1166,10 +1169,10 @@ impl DatabaseWorker {
         &self,
         session_id: uuid::Uuid,
         before_ordinal: Option<u64>,
-        limit: Option<usize>,
+        options: HistoryReadOptions,
     ) -> Result<Feat134HistorySnapshot, ChatError> {
         self.call(move |repository| {
-            repository.load_feat137_history_snapshot(session_id, before_ordinal, limit)
+            repository.load_feat137_history_snapshot(session_id, before_ordinal, options)
         })
         .await
     }

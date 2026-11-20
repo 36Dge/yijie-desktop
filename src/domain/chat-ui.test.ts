@@ -109,7 +109,8 @@ describe("FEAT-126 chat UI rules", () => {
       completedAt: null,
       expiresAt: null,
     };
-    expect(cleanupNotice(base)?.title).toContain("正在");
+    expect(cleanupNotice(base)).toBeNull();
+    expect(cleanupNotice(base, true)).toMatchObject({ title: "删除结果尚未确认", actionLabel: "检查删除状态" });
     expect(cleanupNotice({ ...base, hostState: "incomplete" })?.title).toContain("尚未完成");
     expect(cleanupNotice({ ...base, hostState: "complete", runtimeState: "complete" })?.title).toContain("已永久删除");
     const local = { ...base, hostState: "incomplete" as const, runtimeState: "incomplete" as const,

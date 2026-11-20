@@ -254,7 +254,7 @@ export function localHistoryDeletionFinished(status: ChatCleanupStatus): boolean
     && status.desktopState === "complete" && status.completedAt !== null;
 }
 
-export function cleanupNotice(status: ChatCleanupStatus | null): ChatUiNotice | null {
+export function cleanupNotice(status: ChatCleanupStatus | null, needsStatusCheck = false): ChatUiNotice | null {
   if (status === null) return null;
   if (localHistoryDeletionFinished(status)) {
     return {
@@ -273,7 +273,7 @@ export function cleanupNotice(status: ChatCleanupStatus | null): ChatUiNotice | 
       tone: "success",
     };
   }
-  if (states.some((state) => state === "incomplete")) {
+  if (states.includes("incomplete") || status.outcomeCode === "retry_limit_exceeded") {
     return {
       title: "任务删除尚未完成",
       detail: status.outcomeCode === "retry_limit_exceeded"
@@ -283,9 +283,10 @@ export function cleanupNotice(status: ChatCleanupStatus | null): ChatUiNotice | 
       tone: "error",
     };
   }
+  if (status.outcomeCode === "pending" && status.lastErrorCode === null && !needsStatusCheck) return null;
   return {
-    title: "正在永久删除任务",
-    detail: "请保持应用运行，完成前不会显示删除成功。",
+    title: "删除结果尚未确认",
+    detail: "可以检查这次删除的结果，无需再次删除。",
     actionLabel: "检查删除状态",
     tone: "warning",
   };

@@ -4,7 +4,7 @@ import { enableAutoUnmount, mount } from "@vue/test-utils";
 import axe from "axe-core";
 import { readFileSync } from "node:fs";
 import { afterEach,describe,expect,it,vi } from "vitest";
-import { h } from "vue";
+import { h, nextTick } from "vue";
 import type { ConversationApproval } from "../../domain/conversation-approval";
 import {
 selectConversationTimeline,
@@ -403,7 +403,7 @@ describe("ChatTurnGroup", () => {
     expect(turn.items.map(item => item.reasoning?.status)).toEqual(["unavailable", "unknown"]);
   });
 
-  it("renders phase-driven commentary, plan, reasoning, unclassified and final policies", () => {
+  it("renders phase-driven commentary, plan, reasoning, unclassified and final policies", async () => {
     const turn = projectedTurn({
       status: "in_progress",
       plan: {
@@ -440,6 +440,7 @@ describe("ChatTurnGroup", () => {
       },
     });
 
+    await nextTick();
     const plan = wrapper.get(".chat-turn-plan");
     const items = wrapper.get(".chat-turn-group__items");
     expect(items.element.contains(plan.element)).toBe(true);
@@ -471,7 +472,7 @@ describe("ChatTurnGroup", () => {
     const final = wrapper.get(".chat-turn-group__item--final_answer");
     expect(final.find(".chat-timeline-item-shell__disclosure").exists()).toBe(false);
     expect(final.get(".chat-safe-content strong").text()).toBe("最终正文");
-    expect(wrapper.find(".action-final").exists()).toBe(true);
+    expect(wrapper.find(".action-final").exists()).toBe(false);
   });
 
   it.each([undefined, null, "unknown"] as const)("renders phase %s as a normal answer without completing the turn", async (agentMessagePhase) => {
@@ -492,7 +493,7 @@ describe("ChatTurnGroup", () => {
     expect(row.find(".chat-timeline-item-shell__disclosure").exists()).toBe(false);
     expect(row.get(".chat-safe-content h2").text()).toBe("标题");
     expect(row.get(".chat-safe-content strong").text()).toBe("普通回答");
-    expect(row.get(".chat-timeline-item-shell__answer-actions").text()).toBe("复制");
+    expect(row.find(".chat-timeline-item-shell__answer-actions").exists()).toBe(false);
     expect(turn.items[0]).toMatchObject({
       assistantPhase: agentMessagePhase === undefined ? "unknown" : agentMessagePhase,
       presentation: "assistant_unclassified",
@@ -503,6 +504,7 @@ describe("ChatTurnGroup", () => {
 
     const completed = projectedTurn({ status: "completed", items: [untagged] });
     await wrapper.setProps({ turn: completed });
+    expect(row.get(".chat-timeline-item-shell__answer-actions").text()).toBe("复制");
     expect(wrapper.classes()).toContain("chat-turn-group--complete");
     expect(completed.items[0]?.assistantPhase).toBe(turn.items[0]?.assistantPhase);
     expect(wrapper.text()).not.toMatch(/未分类|未标注阶段|未将其视为最终回答/);

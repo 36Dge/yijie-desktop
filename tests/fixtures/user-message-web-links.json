@@ -1,0 +1,22 @@
+[
+  {
+    "text": "https://example.org/catalog/O'Reilly?edition=2#contents",
+    "urls": ["https://example.org/catalog/O'Reilly?edition=2#contents"]
+  },
+  {
+    "text": "https://www.example.org/products/mini-camera/dp/B123/?_encoding=UTF8&ref_=home&th=1 给出这个商品的优化建议。",
+    "urls": ["https://www.example.org/products/mini-camera/dp/B123/?_encoding=UTF8&ref_=home&th=1"]
+  },
+  {
+    "text": "比较（HTTPS://example.org/旅行_(杭州)?q=春季#路线），再看 http://example.net/catalog.\n**保留原文**",
+    "urls": ["HTTPS://example.org/旅行_(杭州)?q=春季#路线", "http://example.net/catalog"]
+  },
+  {
+    "text": "说明：[原样](https://www.example.org/a%20b?x=1&y=2)。",
+    "urls": ["https://www.example.org/a%20b?x=1&y=2"]
+  },
+  {
+    "text": "本机笔记 http://localhost/notes 和 http://192.168.1.2/notes，普通文字不变。",
+    "urls": []
+  }
+]

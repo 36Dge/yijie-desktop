@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, ref, useId, watch } from "vue";
 import { NCard, NDropdown, NInput, NModal, type DropdownOption } from "naive-ui";
 import { isNavigationFailure, NavigationFailureType, useRouter } from "vue-router";
 import type { ChatSession } from "../../domain/chat-ipc";
@@ -25,6 +25,17 @@ const router = useRouter();
 const expandedProjectIds = ref<ReadonlySet<string>>(new Set());
 const renameSession = ref<ChatSession | null>(null);
 const deleteSession = ref<ChatSession | null>(null);
+const deleteDialogTitleId = useId();
+const deleteDialogCopyId = useId();
+const deleteTitleLimit = 20;
+const deleteTitlePreview = computed(() => {
+  const title = deleteSession.value?.title ?? "";
+  if (title.length <= deleteTitleLimit) return title;
+  const characters = typeof Intl.Segmenter === "function"
+    ? Array.from(new Intl.Segmenter().segment(title), part => part.segment)
+    : Array.from(title);
+  return characters.length > deleteTitleLimit ? characters.slice(0, deleteTitleLimit).join("") + "…" : title;
+});
 const removeProjectTarget = ref<ChatHistoryProjectGroup | null>(null);
 const projectMenuId = ref<string | null>(null);
 const activeSessionMenuId = ref<string | null>(null);
@@ -466,9 +477,10 @@ async function confirmRemoveProject(): Promise<void> {
       :mask-closable="false"
       @update:show="!$event && (deleteSession = null, restoreDialogTrigger())"
     >
-      <n-card class="chat-tree__dialog" title="永久删除任务？" role="alertdialog" aria-modal="true" :bordered="false">
-        <p class="chat-tree__dialog-copy">
-          将删除“{{ deleteSession?.title }}”的本地对话，并启动 Host 与 Runtime 清理。此操作不能撤销。
+      <n-card class="chat-tree__dialog chat-tree__dialog--delete" role="alertdialog" aria-modal="true" :aria-labelledby="deleteDialogTitleId" :aria-describedby="deleteDialogCopyId" :bordered="false">
+        <template #header><span :id="deleteDialogTitleId" class="chat-tree__delete-title">永久删除任务？</span></template>
+        <p :id="deleteDialogCopyId" class="chat-tree__dialog-copy">
+          将删除“{{ deleteTitlePreview }}”的本地对话。此操作不能撤销。
         </p>
         <div class="chat-tree__dialog-actions">
           <button class="chat-tree__dialog-button yj-control yj-control--regular" type="button" @click="deleteSession = null; restoreDialogTrigger()">取消</button>
@@ -620,6 +632,8 @@ async function confirmRemoveProject(): Promise<void> {
 .chat-tree__load-more:hover { background: var(--yj-color-bg-subtle); }
 
 .chat-tree__dialog { width: min(440px, calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-12))); }
+.chat-tree__dialog--delete { max-width: var(--yj-layout-chat-delete-confirm-width); overflow-wrap: anywhere; }
+.chat-tree__delete-title { font-size: var(--yj-font-size-section-title); font-weight: var(--yj-font-weight-semibold); }
 .chat-tree__dialog-copy { margin: 0 0 var(--yj-space-4); color: var(--yj-color-text-body); line-height: var(--yj-line-height-body); }
 .chat-tree__dialog-error { margin: var(--yj-space-2) 0 0; color: var(--yj-color-semantic-error-ink); font-size: var(--yj-font-size-caption); }
 .chat-tree__dialog-actions { display: flex; justify-content: flex-end; gap: var(--yj-space-2); margin-top: var(--yj-space-5); }

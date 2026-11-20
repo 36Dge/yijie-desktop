@@ -4,6 +4,7 @@ import { NAlert, NButton, NCard, NInput, NModal, NSkeleton } from "naive-ui";
 import { filterConnectors, type ConnectorAction, type ConnectorPageView } from "../../domain/connector-ui";
 import YjPage from "../yijie/YjPage.vue";
 import YjPageHeader from "../yijie/YjPageHeader.vue";
+import YjRefreshButton from "../yijie/YjRefreshButton.vue";
 import YjSection from "../yijie/YjSection.vue";
 import YjTabs from "../yijie/YjTabs.vue";
 import YjEmpty from "../yijie/YjEmpty.vue";
@@ -50,16 +51,24 @@ watch(() => props.model.phase, phase => { if (phase === "permission-denied") { d
 <template>
   <YjPage width="full" class="connector-market">
     <YjPageHeader title="连接器" description="连接外部应用与服务，在对话中使用已启用的连接器。">
-      <template #actions><NButton v-if="canReturn" secondary @click="$emit('back')">返回对话</NButton><NButton secondary :loading="model.refreshing" :disabled="model.phase === 'loading' || model.refreshing" @click="$emit('refresh')"><template #icon><YjIcon name="refresh" size="sm" /></template>刷新</NButton></template>
+      <template #actions>
+        <NButton v-if="canReturn" secondary @click="$emit('back')">返回对话</NButton>
+        <YjRefreshButton :loading="model.refreshing" :disabled="model.phase === 'loading'" @refresh="$emit('refresh')" />
+      </template>
     </YjPageHeader>
     <div v-if="model.phase === 'loading'" class="connector-market__loading" role="status" aria-live="polite" aria-busy="true"><p>正在读取连接器…</p><div class="connector-market__grid" aria-hidden="true"><NCard v-for="index in 6" :key="index" :bordered="true"><NSkeleton text :repeat="2" /></NCard></div></div>
-    <YjEmpty v-else-if="model.phase !== 'ready'" :title="unavailableTitle" :description="model.error ?? '请确认本机服务已就绪，然后重新读取。'" :icon="model.phase === 'permission-denied' ? 'shield' : 'warning'" role="alert"><template #actions><NButton @click="$emit('refresh')">重新读取</NButton></template></YjEmpty>
+    <YjEmpty v-else-if="model.phase !== 'ready'" :title="unavailableTitle" :description="model.error ?? '请确认本机服务已就绪，再点击右上角的刷新按钮。'" :icon="model.phase === 'permission-denied' ? 'shield' : 'warning'" role="alert" />
     <template v-else>
       <NAlert v-if="model.error" type="warning" :bordered="false" role="alert">{{ model.error }} 当前显示上次读取的状态，请刷新后再操作。</NAlert>
       <NAlert v-if="!model.canManage" type="info" :bordered="false">安装、启停和卸载需要管理权限；账户授权按对应权限单独开放。</NAlert>
       <div class="connector-market__toolbar"><YjTabs v-model="tab" variant="line" :items="tabs" aria-label="连接器视图" :panel-id="panelId" /><NInput v-model:value="query" class="connector-market__search" clearable placeholder="搜索连接器" :input-props="{ 'aria-label': '搜索连接器' }"><template #prefix><YjIcon name="search" size="sm" tone="muted" /></template></NInput></div>
       <section :id="panelId" role="tabpanel" :aria-labelledby="`${panelId}-tab-${tab}`">
-        <YjEmpty v-if="!filtered.length" :title="query.trim() ? '没有找到匹配的连接器' : tab === 'installed' ? '还没有安装连接器' : '当前没有可展示的连接器'" :description="query.trim() ? '试试其他名称或清空搜索。' : tab === 'installed' ? '前往市场安装应用，再完成配置或授权。' : '请刷新状态，或更新客户端后重试。'" :icon="query.trim() ? 'search' : 'connector'"><template #actions><NButton v-if="query.trim()" @click="query = ''">清空搜索</NButton><NButton v-else-if="tab === 'installed'" type="primary" @click="tab = 'market'">前往市场</NButton><NButton v-else @click="$emit('refresh')">刷新</NButton></template></YjEmpty>
+        <YjEmpty v-if="!filtered.length" :title="query.trim() ? '没有找到匹配的连接器' : tab === 'installed' ? '还没有安装连接器' : '当前没有可展示的连接器'" :description="query.trim() ? '试试其他名称或清空搜索。' : tab === 'installed' ? '前往市场安装应用，再完成配置或授权。' : '请刷新状态，或更新客户端后重试。'" :icon="query.trim() ? 'search' : 'connector'">
+          <template v-if="query.trim() || tab === 'installed'" #actions>
+            <NButton v-if="query.trim()" @click="query = ''">清空搜索</NButton>
+            <NButton v-else type="primary" @click="tab = 'market'">前往市场</NButton>
+          </template>
+        </YjEmpty>
         <ConnectorInstalledList v-else-if="tab === 'installed'" :entries="filtered" :can-manage="model.canManage" @open="openDetails" @enabled-change="enabledChange" @uninstall="requestUninstall" />
         <div v-else class="connector-market__categories"><YjSection v-for="category in categories" :key="category.id" :title="category.label" :count="category.entries.length" :count-label="`${category.entries.length} 个连接器`"><ul class="connector-market__grid"><li v-for="entry in category.entries" :key="entry.id"><ConnectorCard :connector="entry" @open="openDetails" /></li></ul></YjSection></div>
       </section>

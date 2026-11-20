@@ -1,8 +1,6 @@
 import { modelDefinitions as legacyModels } from "./chat-models.generated";
 import { modelDefinitions as currentModels } from "./chat-models-v2.generated";
 import type { NativeTurnTiming } from "../api/generated/chat-turn-timing.gen";
-import type { ConversationTimelineItemViewModel, ConversationTimelineTurnViewModel } from "./conversation-timeline";
-import { observedProgressMessages } from "./conversation-process";
 
 export const answerFeedbackReasons = Object.freeze([
   "误解了我的问题", "上下文理解错误", "回答模糊/不具体", "代码有错误", "回答不专业", "代码格式问题",
@@ -10,10 +8,6 @@ export const answerFeedbackReasons = Object.freeze([
 export type AnswerFeedbackReason = (typeof answerFeedbackReasons)[number];
 export type AnswerVote = "like" | "dislike" | null;
 
-export function isCompletedAnswer(item: ConversationTimelineItemViewModel, turn: ConversationTimelineTurnViewModel): boolean {
-  return turn.domainStatus === "completed" && item.domainStatus === "completed" && item.kind === "assistant_message" &&
-    ["final_answer", "assistant_unclassified"].includes(item.presentation) && !observedProgressMessages(turn.items).has(item.identity);
-}
 export function answerModelBadge(profileId: string | null | undefined): {label: string; icon: "modelKimi" | "modelMiniMax" | "assistant"} {
   const definition = [...currentModels, ...legacyModels].find(model => model.profile_id === profileId);
   if (!definition) return {label: profileId === undefined ? "模型信息…" : "模型未知", icon: "assistant"};

@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { NButton } from "naive-ui";
 import { skillFailureMessage, type ManagedSkillProjection } from "../../domain/skill-marketplace";
 import { skillCardArtwork } from "../../icons/skill-artwork";
-import { skillSelectionIssue } from "../../domain/chat-skills";
+import { matchingChatSkills, skillSelectionIssue } from "../../domain/chat-skills";
 import ChatResourceCheck from "./ChatResourceCheck.vue";
 import ChatResourcePanel from "./ChatResourcePanel.vue";
 
@@ -20,10 +20,7 @@ const props = defineProps<{
 const emit = defineEmits<{ close: [reason?: "selection"]; manage: []; refresh: []; select: [id: string] }>();
 const query = ref("");
 const enabled = computed(() => props.entries.filter(entry => entry.installationStatus === "installed" && entry.enabled));
-const filtered = computed(() => {
-  const search = query.value.trim().toLocaleLowerCase();
-  return enabled.value.filter(entry => `${entry.displayName} ${entry.description} ${entry.runtimeName}`.toLocaleLowerCase().includes(search));
-});
+const filtered = computed(() => matchingChatSkills(enabled.value, query.value));
 function status(entry: ManagedSkillProjection): string {
   if (props.operations[entry.id]) return "正在同步…";
   return props.operationErrors[entry.id] ?? skillFailureMessage(entry.failureCode) ??

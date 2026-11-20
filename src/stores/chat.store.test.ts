@@ -1196,6 +1196,11 @@ describe("chat view-model store", () => {
     const store = createStore(client);
     await store.bind(TENANT);
     const refs = Object.freeze([Object.freeze({ id: "ordinary-sample", version: "1.0.0" })]);
+    const projected = vi.fn();
+    const stop = watch(() => store.history, history => {
+      const message = history?.turns.flatMap(turn => turn.messages).find(entry => entry.content === "$same-name\n\n普通问题");
+      if (message?.contentBlocks) projected(message.contentBlocks);
+    }, { flush: "sync" });
     const result = await store.createSessionWithResult(null, "$same-name\n\n普通问题", undefined, undefined, undefined, refs);
     expect(result.status).toBe("local_durable_accepted");
     expect(legacy).not.toHaveBeenCalled();
@@ -1203,6 +1208,8 @@ describe("chat view-model store", () => {
     const blocks = create.mock.calls[0]![2];
     expect(blocks).toEqual([{ type: "text", text: "$same-name\n\n普通问题", skills: refs }]);
     expect(blocks[0]?.type === "text" && blocks[0].skills).not.toBe(refs);
+    stop();
+    expect(projected).toHaveBeenCalledWith(blocks);
     await store.dispose();
   });
 
@@ -2197,6 +2204,30 @@ describe("chat view-model store", () => {
     expect(store.cleanupStatus).toBeNull();
     expect(store.canSend).toBe(false);
     expect(store.canAttach).toBe(false);
+  });
+
+  it("checks a restored pending deletion silently and offers a manual check only after polling stops", async () => {
+    const pending = { operationId: "019c1a00-0000-7000-8000-000000000011", desktopState: "complete",
+      hostState: "pending", runtimeState: "pending", outcomeCode: "pending", lastErrorCode: null,
+      requestedAt: 1, completedAt: null, expiresAt: null } as const;
+    const getCleanupStatus = vi.fn<ChatClient["getCleanupStatus"]>().mockResolvedValue(pending);
+    const deleteSession = vi.fn<ChatClient["deleteSession"]>();
+    const store = createStore(fakeClient({
+      resyncSession: async (_context, sessionId) => ({ ...projection(sessionId), cleanup: pending }),
+      getCleanupStatus, deleteSession,
+    }).client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(getCleanupStatus).toHaveBeenCalledWith(CONTEXT, pending.operationId);
+    expect(store.cleanupNeedsStatusCheck).toBe(false);
+    await vi.advanceTimersByTimeAsync(119_000);
+    expect(store.cleanupNeedsStatusCheck).toBe(true);
+    expect(store.selectedSessionId).toBe(SESSION_A);
+    getCleanupStatus.mockResolvedValue({ ...pending, hostState: "complete", runtimeState: "complete", outcomeCode: "cleanup_complete", completedAt: 2 });
+    await expect(store.refreshSelectedCleanup()).resolves.toMatchObject({ kind: "navigate", deletedSessionId: SESSION_A });
+    expect(store.cleanupNeedsStatusCheck).toBe(false);
+    expect(deleteSession).not.toHaveBeenCalled();
   });
 
   it("restores persisted cleanup state through a new store resync after restart", async () => {

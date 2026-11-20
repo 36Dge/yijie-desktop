@@ -11,6 +11,7 @@ use std::{
 };
 use tokio::sync::{OnceCell, Semaphore};
 use url::Url;
+mod user_links;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -33,6 +34,8 @@ enum Action {
     Open,
     #[serde(rename = "open_message_link")]
     OpenMessageLink,
+    #[serde(rename = "open_user_message_link")]
+    OpenUserMessageLink,
 }
 #[derive(Serialize)]
 struct ResultData {
@@ -100,18 +103,44 @@ pub async fn chat_web_source_v1(
     }
     let url = public_url(&target.url).ok_or_else(invalid)?;
     let (_, authorized, manager) = offline_applications(&chat_runtime, request.request_id).await?;
-    let history = authorized
-        .native_history(request.context_id, target.session_id, vec![target.turn_id])
-        .await
-        .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
-    let supplied = history.views.iter().any(|view| {
-        view.items.iter().any(|entry| {
-            entry.item.id == target.item_id
-                && item_contains_target(&entry.item, request.payload.action, &target.url)
+    let user_link = matches!(request.payload.action, Action::OpenUserMessageLink);
+    let supplied = if user_link {
+        user_links::valid_destination(&target.url, &url)
+            && authorized
+                .user_message_contains_url(
+                    request.context_id,
+                    target.session_id,
+                    target.turn_id,
+                    target.item_id.clone(),
+                    target.url.clone(),
+                )
+                .await
+                .map_err(|error| map_chat_error(error, Some(request.request_id)))?
+    } else {
+        let history = authorized
+            .native_history(request.context_id, target.session_id, vec![target.turn_id])
+            .await
+            .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+        history.views.iter().any(|view| {
+            view.items.iter().any(|entry| {
+                entry.item.id == target.item_id
+                    && item_contains_target(&entry.item, request.payload.action, &target.url)
+            })
         })
-    });
+    };
     if !supplied {
         return Err(invalid());
+    }
+    if user_link
+        && tokio::time::timeout(Duration::from_secs(4), public_addresses(&url))
+            .await
+            .ok()
+            .flatten()
+            .is_none()
+    {
+        return Err(ChatIpcError::temporarily_unavailable(Some(
+            request.request_id,
+        )));
     }
     authorize(
         &manager,
@@ -120,7 +149,7 @@ pub async fn chat_web_source_v1(
         request.request_id,
     )?;
     let data = match request.payload.action {
-        Action::Open | Action::OpenMessageLink => {
+        Action::Open | Action::OpenMessageLink | Action::OpenUserMessageLink => {
             // Same hardened system-browser library used by login and connectors.
             tokio::task::spawn_blocking(move || webbrowser::open(url.as_str()))
                 .await
@@ -154,6 +183,9 @@ pub async fn chat_web_source_v1(
 }
 
 fn item_contains_target(item: &NativeItem, action: Action, url: &str) -> bool {
+    if matches!(action, Action::OpenUserMessageLink) {
+        return false;
+    }
     if matches!(action, Action::OpenMessageLink) {
         return message_contains_link(
             &item.kind,
@@ -317,25 +349,30 @@ async fn routed_fake_ip(ip: IpAddr) -> bool {
     }
 }
 
+async fn public_addresses(url: &Url) -> Option<Vec<SocketAddr>> {
+    let host = url.host_str()?.trim_matches(['[', ']']);
+    let addresses: Vec<SocketAddr> = tokio::net::lookup_host((host, url.port_or_known_default()?))
+        .await
+        .ok()?
+        .collect();
+    if addresses.is_empty() {
+        return None;
+    }
+    for address in &addresses {
+        if !(public_ip(address.ip())
+            || host.parse::<IpAddr>().is_err() && routed_fake_ip(address.ip()).await)
+        {
+            return None;
+        }
+    }
+    Some(addresses)
+}
+
 async fn fetch(mut url: Url, limit: usize, prefix: bool) -> Option<(Url, Vec<u8>)> {
     for _ in 0..4 {
         public_url(url.as_str())?;
         let host = url.host_str()?.trim_matches(['[', ']']);
-        let addresses: Vec<SocketAddr> =
-            tokio::net::lookup_host((host, url.port_or_known_default()?))
-                .await
-                .ok()?
-                .collect();
-        if addresses.is_empty() {
-            return None;
-        }
-        for address in &addresses {
-            if !(public_ip(address.ip())
-                || host.parse::<IpAddr>().is_err() && routed_fake_ip(address.ip()).await)
-            {
-                return None;
-            }
-        }
+        let addresses = public_addresses(&url).await?;
         let client = reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
@@ -551,7 +588,12 @@ mod tests {
             "../../../schemas/chat-web-source-v1.schema.json"
         ))
         .unwrap();
-        for action in ["open", "icon", "open_message_link"] {
+        for action in [
+            "open",
+            "icon",
+            "open_message_link",
+            "open_user_message_link",
+        ] {
             assert!(
                 schema["definitions"]["WebSourcePayload"]["properties"]["action"]["enum"]
                     .as_array()
@@ -564,6 +606,10 @@ mod tests {
             assert_eq!(
                 matches!(decoded.payload.action, Action::OpenMessageLink),
                 action == "open_message_link"
+            );
+            assert_eq!(
+                matches!(decoded.payload.action, Action::OpenUserMessageLink),
+                action == "open_user_message_link"
             );
         }
     }

@@ -4,6 +4,11 @@ import { computed } from "vue";
 import { messageFileActionKey } from "../../composables/useChatMessageLink";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ChatSafeContent from "./ChatSafeContent.vue";
+import ChatTurnGroup from "./ChatTurnGroup.vue";
+import { historyPageToConversationSnapshot } from "../../api/chat-conversation-adapter";
+import type { NativeConversationView } from "../../api/generated/native-conversation-private.gen";
+import { composeConversationView } from "../../domain/conversation-view";
+import { selectConversationTimeline } from "../../domain/conversation-timeline";
 import { webSourceActionsKey } from "../../composables/useWebSources";
 
 enableAutoUnmount(afterEach);
@@ -17,6 +22,66 @@ function render(text: string, openMessageLink = vi.fn(async () => {})) {
   })};
 }
 describe("conversation text hyperlinks", () => {
+  it("keeps a submitted URL bound to the same original across local, observed and rebuilt bubbles", async () => {
+    const original = `${url} 请给出优化建议。`;
+    const history = historyPageToConversationSnapshot(target.sessionId, {
+      turns: [{turnId: target.turnId, status: "completed", terminalAt: 2, reasoningStatus: "unavailable",
+        reasoningReasonCode: null, reasoning: [], messages: [{messageId: "saved", role: "user", content: original, status: "committed", ordinal: 0, createdAt: 1}]}],
+      nextCursor: null,
+    });
+    const native: NativeConversationView = {sessionId: target.sessionId, turnId: target.turnId, runtimeThreadId: "native-thread",
+      runtimeTurnId: "native-turn", source: "native_observed", revision: "1", terminalObserved: true, status: "completed", availability: "available",
+      items: [{ordinal: 0, lastMethod: "item/completed", item: {id: "runtime-user", type: "userMessage", availability: "available", text: `${original}\n补充资料：https://example.net/reference`}}]};
+    const turn = (views: NativeConversationView[], snapshot = history) =>
+      selectConversationTimeline(composeConversationView(snapshot, views), target.sessionId)!.turns[0]!;
+    const openUserMessageLink = vi.fn(async () => {});
+    const wrapper = mount(ChatTurnGroup, {props: {turn: turn([]), position: 1},
+      global: {provide: {[webSourceActionsKey as symbol]: {openUserMessageLink}}}});
+    for (const views of [[], [{...native, items: []}], [native], [{...native, source: "native_rebuilt" as const}]]) {
+      await wrapper.setProps({turn: turn(views)});
+      const bubble = wrapper.get(".chat-turn-group__item--user_message .chat-safe-content__paragraph");
+      expect(bubble.element.textContent).toBe(original);
+      expect(bubble.findAll('[role="link"]')).toHaveLength(1);
+      await bubble.get('[role="link"]').trigger("click"); await flushPromises();
+      expect(openUserMessageLink).toHaveBeenLastCalledWith({...target, itemId: `${target.turnId}:user:0`, url});
+    }
+    await wrapper.setProps({turn: turn([native], {...history, items: []})});
+    expect(wrapper.find('[role="link"]').exists()).toBe(false);
+    expect(openUserMessageLink).toHaveBeenCalledTimes(4);
+  });
+
+  it("opens an exact user URL only on activation, without rendering a navigable external href", async () => {
+    const userTarget = {...target, itemId: `${target.turnId}:user:0`};
+    const address = "https://example.org/product?sku=42&ref=menu#details";
+    const source = `比较（${address}）。\n**不要改写这段说明**`;
+    const actions = { openUserMessageLink: vi.fn(async () => {}), openMessageLink: vi.fn(), icon: vi.fn(), open: vi.fn() };
+    const wrapper = mount(ChatSafeContent, {attachTo: document.body,
+      props: {blocks: blocks(source), mode: "plain", typography: "user", linkTarget: userTarget},
+      global: {provide: {[webSourceActionsKey as symbol]: actions}},
+    });
+    const link = wrapper.get('a[role="link"]');
+    expect(wrapper.get("p").element.textContent).toBe(source);
+    expect(link.text()).toBe(address);
+    expect(link.attributes("href")).toBeUndefined();
+    expect(link.attributes("tabindex")).toBe("0");
+    await link.trigger("mouseenter");
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    await link.trigger("mouseleave"); await link.trigger("focus");
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    expect(link.attributes("aria-describedby")).toBeUndefined();
+    expect(link.attributes("title")).toBeUndefined();
+    expect(actions.openUserMessageLink).not.toHaveBeenCalled();
+    await link.trigger("click"); await flushPromises();
+    expect(actions.openUserMessageLink).toHaveBeenCalledExactlyOnceWith({...userTarget, url: address});
+    await link.trigger("keydown", {key: "Enter"}); await flushPromises();
+    expect(actions.openUserMessageLink).toHaveBeenCalledTimes(2);
+    expect(actions.open).not.toHaveBeenCalled(); expect(actions.icon).not.toHaveBeenCalled();
+    expect(actions.openMessageLink).not.toHaveBeenCalled();
+    await wrapper.setProps({linkTarget: undefined});
+    expect(wrapper.find('[role="link"]').exists()).toBe(false);
+    expect(wrapper.get("p").element.textContent).toBe(source);
+  });
+
   it("shows only the label, reveals the exact URL on hover/focus, and opens through the native scope", async () => {
     const {wrapper, openMessageLink} = render(`详情见[相关说明](${url})。`);
     const link = wrapper.get("a");
@@ -33,6 +98,17 @@ describe("conversation text hyperlinks", () => {
     expect(link.attributes("aria-describedby")).toBeUndefined();
     await link.trigger("click"); await flushPromises();
     expect(openMessageLink).toHaveBeenCalledExactlyOnceWith({...target, url});
+  });
+  it("does not repeat a Markdown link address when its label already displays the whole URL", async () => {
+    const {wrapper} = render(`[${url}](${url})`);
+    const link = wrapper.get("a");
+    await link.trigger("mouseenter");
+    expect(link.attributes("href")).toBe(url);
+    expect(link.attributes("aria-describedby")).toBeUndefined();
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    await wrapper.setProps({blocks: blocks(`[相关说明](${url})`)});
+    await wrapper.get("a").trigger("focus"); await flushPromises();
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(url);
   });
   it("inherits the original message scope in headings, nested lists, quotes and tables", async () => {
     const {wrapper, openMessageLink} = render(`## [标题](${url})\n\n- [路线来源](${url})\n  - [补充](${url})\n\n> [引用](${url})\n\n| [地点](${url}) | 特色 |\n| --- | --- |\n| [资料](${url}) | 普通内容 |`);
