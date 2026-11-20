@@ -40,6 +40,8 @@ Homes 不变。SQL 43 只增加元数据表，不改写或清理历史，不自�
 
 ### 已发送消息的技能回显
 
+2026-11-20，用户要求模型能辨认多步任务中的技能位置。选择器或斜杠菜单插入的技能随本轮正文提交，例如 `先用【技能1 $amazon-listing-expert】分析，再用【技能2 $copywriting】写标题。`。同一组技能调换位置会得到不同的正文和操作内容摘要。原生技能身份仍按既有 ID 和版本核对，运行时按选定身份加载说明。手写点名继续使用原文。此项为 `contract-impact = semantic`，沿用既有 IPC、Host 和 Runtime 的文本输入协议。旧消息和已接受的重放读取原记录。气泡回显及本机位置记录见[对话输入区](./design/docs/design/05-patterns/02-chat-workspace.md)。
+
 `contract-impact = additive`：Desktop 私有只读扩展见 `src-tauri/schemas/chat-history-user-skills-v1.schema.json`。新界面在历史分页和重新同步的 Tauri 调用中显式传 `includeUserMessageSkills: true`（与 `request` 平级）。只有请求该投影时，已授权用户文本块才可附带发送时保存的 `skills: [{id, version}]`。按消息、文本块和选择顺序读取，不查询模型调用，不改正文、摘要、数据库格式或任务状态。历史字节预算包含这些字段。
 
 未传选项的旧界面仍收到原来的封闭结构；旧 Native 只读取原有 `request`，新界面接受没有 `skills` 的结果。SQL 43 前的库、未选技能和助手消息也不返回该字段。不根据商品网址或当前草稿猜测技能；已保存的引用找不到同 ID、同版本的目录名称时只显示保存的 ID。权限仍是 `read_sessions`，不新增 command、capability 或跨仓协议。Contracts 新 pin 不适用：技能身份复用已有 `contracts/market-selection-v2.schema.json` 定义。

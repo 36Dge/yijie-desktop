@@ -102,6 +102,7 @@
   --yj-color-skill-pill-border: transparent;
   --yj-color-skill-pill-hover: var(--yj-color-control-pressed);
   --yj-color-chat-skill-hover-bg: color-mix(in srgb, var(--yj-color-brand-primary) 12%, var(--yj-color-bg-card));
+  --yj-color-chat-skill-mention: #6b980b;
   --yj-color-chat-expert-chip-border: color-mix(in srgb, var(--yj-color-border-default) 35%, var(--yj-color-bg-card));
 
   --yj-color-border-subtle: #eceef0;

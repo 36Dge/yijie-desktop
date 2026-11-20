@@ -132,7 +132,9 @@ import { browserChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
 
 import { CHAT_AUTHORITY_RETRY_KEY } from "../../authorization/chat-authority-recovery";
 import { locateChatTurn } from "../../domain/locate-chat-turn";
-import { compileSkillInput, compileSelectedSkillRefs, namedSkillIssue, nativeSkillInputEnabled, selectedSkillIssue, skillSelectionIssue, type ChatSkillChip, type ChatSkillSuggestionCatalog } from "../../domain/chat-skills";
+import { prepareSkillText, compileSelectedSkillRefs, namedSkillIssue, nativeSkillInputEnabled, selectedSkillIssue, skillSelectionIssue, type ChatSkillChip, type ChatSkillSuggestionCatalog } from "../../domain/chat-skills";
+import { insertDraftSkill, type SkillPosition, type SkillSelectionRange } from "../../domain/chat-skill-placement";
+import { rememberSubmittedSkillText } from "../../composables/chatSkillPositions";
 
 const route = useRoute();
 const router = useRouter();
@@ -648,22 +650,30 @@ const skillNotice = computed(() => {
 });
 watch([composerDraftTargetKey, () => chatStore.context?.contextId, prompt, skillSelection], () => { skillFeedback.value = ""; });
 watch(skillNotice, message => { if (message && isSessionRoute.value) void nextTick(() => scrollToBottom(true)); });
-function addSkill(id: string, textAfterSelection?: string): void {
+function addSkill(id: string, range: SkillSelectionRange, fromSlash: boolean): void {
   const catalog = skillSuggestions.value;
-  if (!catalog || catalog.disabled || (textAfterSelection !== undefined && (catalog.error || catalog.loading))) return;
+  if (!catalog || catalog.disabled || (fromSlash && (catalog.error || catalog.loading))) return;
   const entry = catalog.entries.find(skill => skill.id === id);
   if (!entry) return;
   const { version, runtimeName, displayName, category } = entry;
-  sharedDrafts.setSkills(composerDraftTargetKey.value, [...skillSelection.value, { id, version, runtimeName, displayName, category }]);
-  if (textAfterSelection !== undefined) prompt.value = textAfterSelection;
+  const draft = insertDraftSkill(prompt.value, skillSelection.value, { id, version, runtimeName, displayName, category }, range);
+  prompt.value = draft.text;
+  sharedDrafts.setSkills(composerDraftTargetKey.value, draft.skills);
 }
-function toggleSkill(id: string): void {
+function removeSkill(id: string): void {
   if (skillPickerDisabled.value) return;
-  if (skillSelection.value.some(skill => skill.id === id)) {
-    sharedDrafts.setSkills(composerDraftTargetKey.value, skillSelection.value.filter(skill => skill.id !== id));
-  } else {
-    addSkill(id);
-  }
+  sharedDrafts.setSkills(composerDraftTargetKey.value, skillSelection.value.filter(skill => skill.id !== id));
+}
+function editSkillDraft(text: string, positions: readonly SkillPosition[]): void {
+  const selected = skillSelection.value;
+  prompt.value = text;
+  if (positions.length === selected.length && positions.every((p, i) => p.id === selected[i]!.id && p.offset === selected[i]!.offset)) return;
+  const byId = new Map(selected.map(skill => [skill.id, skill]));
+  sharedDrafts.setSkills(composerDraftTargetKey.value, positions.flatMap(({ id, offset }) => {
+    const skill = byId.get(id);
+    byId.delete(id);
+    return skill ? [{ ...skill, offset }] : [];
+  }));
 }
 const connectorChips = computed<readonly ConnectorChipView[]>(() => connectorSelection.value.map(selected => {
   const entry = connectors.entries.find(item => item.id === selected.serviceId);
@@ -1105,15 +1115,14 @@ async function submit(recoverExpert = false): Promise<void> {
   transientNotice.value = null;
   skillFeedback.value = "";
   let focusRestoreTarget = draftTargetAtStart;
-  let input = draftTextAtStart.trim();
   const frozenExpert = recoverExpert ? expertSubmission.value : undefined;
   const turnExpert = frozenExpert ? { expectedBindingRevision: frozenExpert.expectedBindingRevision, expert: frozenExpert.expert } : expertIntent.value;
   const marketSelection = frozenExpert?.submission.selection ?? (marketConnectorsEnabled && (connectorSelection.value.length > 0 || marketChat.managed.value)
     ? connectorSelection.value.map(item => ({ ...item.reference })) : undefined);
   try {
-    if (!recoverExpert && turnSkills.length && (import.meta.env.VITE_YIJIE_FEAT174_NATIVE_SKILLS !== "true" || !nativeSkillInputEnabled())) {
-      input = compileSkillInput(input, turnSkills);
-    }
+    const legacyMentions = import.meta.env.VITE_YIJIE_FEAT174_NATIVE_SKILLS !== "true" || !nativeSkillInputEnabled();
+    const submission = prepareSkillText(draftTextAtStart, recoverExpert ? [] : turnSkills, legacyMentions);
+    const input = submission.text;
     const selectedRefs = nativeSkillInputEnabled() && !recoverExpert ? compileSelectedSkillRefs(turnSkills) : undefined;
     if (isSessionRoute.value) {
       const result = await (selectedRefs?.length
@@ -1127,6 +1136,7 @@ async function submit(recoverExpert = false): Promise<void> {
         actionErrorCode.value = chatStore.lastErrorCode ?? "chat_host_not_ready";
         return;
       }
+      if (!recoverExpert) rememberSubmittedSkillText(result.sessionId, result.turnId, submission);
       if (
         chatComposerDraftKeyFromTarget(result.draftTarget) !== draftTargetAtStart ||
         composerDraftTargetKey.value !== draftTargetAtStart
@@ -1149,6 +1159,7 @@ async function submit(recoverExpert = false): Promise<void> {
       actionErrorCode.value = chatStore.lastErrorCode ?? "chat_host_not_ready";
       return;
     }
+    if (!recoverExpert) rememberSubmittedSkillText(result.sessionId, result.turnId, submission);
     if (
       chatComposerDraftKeyFromTarget(result.draftTarget) !== draftTargetAtStart ||
       composerDraftTargetKey.value !== draftTargetAtStart
@@ -1420,8 +1431,9 @@ onBeforeUnmount(() => {
         :skills="skillChips"
         :skill-suggestions="skillSuggestions"
         @read-skill-suggestions="readSkillSuggestions"
-        @select-suggested-skill="addSkill"
-        @remove-skill="toggleSkill"
+        @insert-skill="addSkill"
+        @edit-skill-draft="editSkillDraft"
+        @remove-skill="removeSkill"
         :can-send="composerSendReadiness === 'ready'"
         :waiting-for-model="composerSendReadiness === 'pending'"
         :can-attach="attachmentInteractionAllowed"
@@ -1465,8 +1477,8 @@ onBeforeUnmount(() => {
         <template v-if="!isDraftMode && marketConnectorsEnabled" #connector-control="{ close }">
           <ChatConnectorControl @close="close" :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :can-manage="connectors.canManage" :loading="connectors.refreshing" :error="connectors.error" :operation-errors="connectors.operationErrors" @retry="retryConnectorOperation" @refresh="connectors.refresh" @configure="manageConnectors" @selection-change="connectorSelectionChange" @manage="manageConnectors()" />
         </template>
-        <template v-if="!isDraftMode && skillMarketplaceUiEnabled" #skill-control="{ close }">
-          <ChatSkillControl :entries="skills.skills" :selected-ids="skillSelection.map(skill => skill.id)" :disabled="skillPickerDisabled" :loading="skills.phase === 'loading'" :refreshing="skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @select="toggleSkill" @manage="manageSkills" @close="close" />
+        <template v-if="!isDraftMode && skillMarketplaceUiEnabled" #skill-control="{ close, select }">
+          <ChatSkillControl :entries="skills.skills" :selected-ids="skillSelection.map(skill => skill.id)" :disabled="skillPickerDisabled" :loading="skills.phase === 'loading'" :refreshing="skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @select="select" @manage="manageSkills" @close="close" />
         </template>
         <template v-if="chatModelsEnabled" #model-control>
           <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" @select="models.select" />
@@ -1687,8 +1699,9 @@ onBeforeUnmount(() => {
         :skills="skillChips"
         :skill-suggestions="skillSuggestions"
         @read-skill-suggestions="readSkillSuggestions"
-        @select-suggested-skill="addSkill"
-        @remove-skill="toggleSkill"
+        @insert-skill="addSkill"
+        @edit-skill-draft="editSkillDraft"
+        @remove-skill="removeSkill"
         :can-send="composerSendReadiness === 'ready'"
         :waiting-for-model="composerSendReadiness === 'pending'"
         :can-attach="attachmentInteractionAllowed"
@@ -1720,8 +1733,8 @@ onBeforeUnmount(() => {
         <template v-if="!isDraftMode && marketConnectorsEnabled" #connector-control="{ close }">
           <ChatConnectorControl @close="close" :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :can-manage="connectors.canManage" :loading="connectors.refreshing" :error="connectors.error" :operation-errors="connectors.operationErrors" @retry="retryConnectorOperation" @refresh="connectors.refresh" @configure="manageConnectors" @selection-change="connectorSelectionChange" @manage="manageConnectors()" />
         </template>
-        <template v-if="!isDraftMode && skillMarketplaceUiEnabled" #skill-control="{ close }">
-          <ChatSkillControl :entries="skills.skills" :selected-ids="skillSelection.map(skill => skill.id)" :disabled="skillPickerDisabled" :loading="skills.phase === 'loading'" :refreshing="skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @select="toggleSkill" @manage="manageSkills" @close="close" />
+        <template v-if="!isDraftMode && skillMarketplaceUiEnabled" #skill-control="{ close, select }">
+          <ChatSkillControl :entries="skills.skills" :selected-ids="skillSelection.map(skill => skill.id)" :disabled="skillPickerDisabled" :loading="skills.phase === 'loading'" :refreshing="skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @select="select" @manage="manageSkills" @close="close" />
         </template>
         <template v-if="chatModelsEnabled" #model-control>
           <ChatContextWindow :sample="contextWindow.sample.value" :last-model="contextWindow.lastModel.value" />

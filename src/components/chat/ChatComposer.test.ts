@@ -11,6 +11,8 @@ import type {
 } from "../../domain/chat-ipc";
 import ChatComposer from "./ChatComposer.vue";
 import ChatSkillControl from "./ChatSkillControl.vue";
+import { insertDraftSkill, type SkillSelectionRange } from "../../domain/chat-skill-placement";
+import { readSkillEditor } from "./skill-editor-dom";
 import { readinessNotice } from "../../domain/chat-ui";
 import { installedSkill } from "../../test/skill-fixture";
 import { skillCardArtwork } from "../../icons/skill-artwork";
@@ -165,18 +167,21 @@ describe("ChatComposer", () => {
     await input.setValue("/文案");
     await input.trigger("compositionstart");
     await input.trigger("keydown", { key: "Enter" });
-    expect(wrapper.emitted("select-suggested-skill")).toBeUndefined();
+    expect(wrapper.emitted("insert-skill")).toBeUndefined();
     expect(wrapper.emitted("submit")).toBeUndefined();
     await input.trigger("compositionend");
     await input.trigger("keydown", { key: "Enter" });
-    expect(wrapper.emitted("select-suggested-skill")).toEqual([[installedSkill.id, ""]]);
+    expect(wrapper.emitted("insert-skill")).toEqual([[installedSkill.id, { selectionStart: 0, selectionEnd: 3 }, true]]);
     expect(wrapper.emitted("read-skill-suggestions")).toHaveLength(1);
   });
 
   it("removes only the slash filter and restores the caret when a suggestion is clicked inside a draft", async () => {
     const wrapper = mountComposer({
       modelValue: "",
-      onSelectSuggestedSkill: (_id: string, text: string) => wrapper.setProps({ modelValue: text }),
+      onInsertSkill: (_id: string, range: SkillSelectionRange) => {
+        const draft = insertDraftSkill(wrapper.props("modelValue"), [], installedSkill, range);
+        return wrapper.setProps({ modelValue: draft.text, skills: draft.skills.map(skill => ({ ...skill, unavailableReason: null })) });
+      },
     });
     const input = wrapper.get("textarea");
     const text = "请整理/文案 明细";
@@ -188,9 +193,12 @@ describe("ChatComposer", () => {
     await option.trigger("mousedown");
     await option.trigger("click");
     await flushPromises();
-    expect(input.element.value).toBe("请整理 明细");
-    expect([input.element.selectionStart, input.element.selectionEnd]).toEqual([3, 3]);
-    expect(document.activeElement).toBe(input.element);
+    const editor = wrapper.get<HTMLElement>('[contenteditable="true"]').element;
+    const { text: body, positions, range } = readSkillEditor(editor);
+    expect(body).toBe("请整理 明细");
+    expect(positions).toEqual([{ id: installedSkill.id, offset: 3 }]);
+    expect(range).toMatchObject({ selectionStart: 4, selectionEnd: 4 });
+    expect(document.activeElement).toBe(editor);
     expect(document.querySelector('[role="listbox"]')).toBeNull();
   });
 
@@ -355,6 +363,16 @@ describe("ChatComposer", () => {
     expect(wrapper.emitted("remove-connector")).toBeUndefined();
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
   });
+  it("keeps the inline skill's keyboard removal separate from submitting the draft", async () => {
+    const wrapper = mountComposer({ skills: [{ ...installedSkill, offset: 2, unavailableReason: null }] });
+    await flushPromises();
+    const button = wrapper.get<HTMLButtonElement>('[aria-label="移除技能 跨境营销文案"]');
+    button.element.focus();
+    await button.trigger("keydown", { key: "Enter" });
+    expect(wrapper.emitted("submit")).toBeUndefined();
+    await button.trigger("click");
+    expect(wrapper.emitted("remove-skill")).toEqual([[installedSkill.id]]);
+  });
   it("protects skill removal during composition, text selection, and locked or busy input", async () => {
     const wrapper = mountComposer({ skills: [{ ...installedSkill, unavailableReason: null }] });
     const input = wrapper.get("textarea"), element = input.element as HTMLTextAreaElement;
@@ -475,7 +493,7 @@ describe("ChatComposer", () => {
     expect(source).toContain(
       "--chat-composer-action-row-height: calc(var(--yj-space-10) + var(--yj-space-3));",
     );
-    expect(source).toMatch(/\.chat-composer__textarea\s*\{[^}]*padding: var\(--yj-space-4\);/s);
+    expect(source).toMatch(/:deep\(\.chat-composer__textarea\)\s*\{[^}]*padding: var\(--yj-space-4\);/s);
     expect(source).toContain(
       "max-height: calc(min(calc(var(--yj-ui-viewport-height, 100vh) * 0.36), 280px) - var(--chat-composer-action-row-height));",
     );

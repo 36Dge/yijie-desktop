@@ -371,7 +371,9 @@ it.skipIf(!process.env.YIJIE_PROMPT_BOUNDARY_SETUP)("selected skill continuous N
   const choice = document.querySelector<HTMLElement>('[aria-label="已启用的技能"] [role="checkbox"]');
   expect(choice).not.toBeNull(); await new DOMWrapper(choice!).trigger("click"); await flushPromises();
   expect(useChatComposerDraftStore(pinia).skillSelection("new").map(s => s.id)).toEqual([skill.id]);
-  await wrapper.get("textarea").setValue("请简短说明六乘七。");
+  const editor = wrapper.get('[contenteditable="true"]');
+  editor.element.append(document.createTextNode("请简短说明六乘七。"));
+  await editor.trigger("input");
   await wrapper.get('[aria-label="发送任务"]').trigger("click");
   await flushPromises();
   expect(submit).toHaveBeenCalledOnce();
@@ -1756,13 +1758,15 @@ describe("FEAT-126 ChatPage", () => {
     await flushPromises();
     expect(submit).not.toHaveBeenCalled();
     expect(drafts.skillSelection(target).map(skill => skill.id)).toEqual([installedSkill.id]);
-    expect(input.element.value).toBe("");
-    expect(input.element).toBe(document.activeElement);
+    const editor = wrapper.get('[contenteditable="true"]');
+    expect(drafts.texts[target] ?? "").toBe("");
+    expect(editor.element).toBe(document.activeElement);
     expect(document.querySelector('[role="listbox"]')).toBeNull();
     expect(refresh).toHaveBeenCalledExactlyOnceWith(false);
     refresh.mockClear();
-    await input.setValue("根据合成资料撰写一段文案");
-    await input.trigger("keydown", { key: "Enter" });
+    editor.element.append(document.createTextNode("根据合成资料撰写一段文案"));
+    await editor.trigger("input");
+    await editor.trigger("keydown", { key: "Enter" });
     await flushPromises();
     expect(refresh).toHaveBeenCalledOnce();
     expect(submit).toHaveBeenCalledOnce();
@@ -1770,6 +1774,108 @@ describe("FEAT-126 ChatPage", () => {
     expect(submit.mock.calls[0]?.[reply ? 4 : 5]).toEqual(native ? [{ id: installedSkill.id, version: installedSkill.version }] : undefined);
     expect(drafts.skillSelection(target)).toEqual([]);
     wrapper.unmount();
+  });
+
+  it("inserts a picker skill at the saved caret and records its position only after acceptance", async () => {
+    const storage = { getItem: () => null, setItem: vi.fn() };
+    vi.stubGlobal("localStorage", storage);
+    skillFlag.enabled = true;
+    vi.stubEnv("VITE_YIJIE_NATIVE_SKILL_INPUT_ENABLED", "true");
+    vi.stubEnv("VITE_YIJIE_FEAT174_NATIVE_SKILLS", "true");
+    if (chatModelsEnabled) {
+      const catalog = vi.spyOn(chatModelClient, "catalog");
+      if (kimiK31Candidate) {
+        const { modelDefinitions: profiles } = await import("../../domain/chat-models-v2.generated");
+        catalog.mockResolvedValue({ schema_version: 2, default_profile: "kimi-k3-1-pro-max-v1", models: profiles.map(profile => ({ profile, available: true, reason: "ready" })) });
+      } else {
+        catalog.mockResolvedValue({ schema_version: 1, default_profile: "kimi-k3-max-v1", models: modelDefinitions.map(profile => ({ profile, available: true, reason: "ready" })) });
+      }
+      vi.spyOn(chatModelClient, "state").mockResolvedValue({ profileId: "minimax-m3-high-v1", revision: 1, state: "ready" });
+    }
+    vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "2026-10-20T00:00:00Z", skills: [installedSkill] });
+    const { wrapper, store, pinia } = await mountPage(`/chat/${SESSION_ID}`, true);
+    const skills = useSkillStore(pinia);
+    skills.skills = [installedSkill]; skills.phase = "ready";
+    vi.spyOn(skills, "open").mockResolvedValue();
+    const submit = vi.spyOn(store, "submitTurnWithResult").mockResolvedValueOnce({ status: "not_accepted" })
+      .mockResolvedValue(acceptedSubmission(SESSION_ID, chatSessionDraftTarget(SESSION_ID)));
+    const key = `yijie.desktop.ui.skill-positions.v2:${SESSION_ID}:${TURN_ID}`;
+    try {
+      const input = wrapper.get("textarea");
+      await input.setValue("  商品📦请优化。");
+      input.element.focus();
+      input.element.setSelectionRange(6, 6);
+      await wrapper.get(".chat-composer__add").trigger("click"); await flushPromises();
+      const picker = new DOMWrapper(document.querySelector(".composer-add-menu")!);
+      await picker.get('[data-resource-menu="skills"]').trigger("click"); await flushPromises();
+      await picker.get('input').setValue(installedSkill.displayName);
+      await picker.get('[role="checkbox"]').trigger("click"); await flushPromises();
+      const editor = wrapper.get<HTMLElement>('[contenteditable="true"]');
+      expect(editor.element.textContent).toBe("  商品📦" + installedSkill.displayName + "请优化。");
+      expect(editor.element).toBe(document.activeElement);
+      await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();
+      expect(storage.setItem).not.toHaveBeenCalled();
+      expect(editor.element.textContent).toContain(installedSkill.displayName);
+      await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();
+      const body = "商品📦【技能1 $copywriting】请优化。";
+      expect(submit.mock.calls[1]?.[0]).toBe(body);
+      expect(submit.mock.calls[1]?.[4]).toEqual([{ id: installedSkill.id, version: installedSkill.version }]);
+      expect(storage.setItem).toHaveBeenCalledWith(key, JSON.stringify({ length: body.length, offsets: [4] }));
+    } finally { wrapper.unmount(); }
+  });
+
+  it.skipIf(!chatModelsEnabled || !kimiK31Candidate).for([false, true])("sends two positioned skills in the model request (reply=%s)", async (reply, { task }) => {
+    skillFlag.enabled = true;
+    vi.stubEnv("VITE_YIJIE_NATIVE_SKILL_INPUT_ENABLED", "true");
+    vi.stubEnv("VITE_YIJIE_FEAT174_NATIVE_SKILLS", "true");
+    const listing = { ...installedSkill, id: "yijie.traffic-advertising.amazon-listing-expert", version: "0.0.94", runtimeName: "amazon-listing-expert", displayName: "亚马逊 Listing 专家" };
+    const catalog = [listing, installedSkill];
+    const [firstSkill, secondSkill] = reply ? [installedSkill, listing] as const : [listing, installedSkill] as const;
+    vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "2026-11-20T00:00:00Z", skills: catalog });
+    const { modelDefinitions: current } = await import("../../domain/chat-models-v2.generated");
+    vi.spyOn(chatModelClient, "catalog").mockResolvedValue({ schema_version: 2, default_profile: "kimi-k3-1-pro-max-v1",
+      models: current.map(profile => ({profile, available: true, reason: "ready"})) });
+    vi.spyOn(chatModelClient, "state").mockResolvedValue({ profileId: "kimi-k3-1-pro-max-v1", revision: 1, state: "ready" });
+    const { wrapper, pinia } = await mountPage(reply ? `/chat/${SESSION_ID}` : "/chat", reply);
+    const skills = useSkillStore(pinia);
+    skills.skills = catalog; skills.phase = "ready";
+    vi.spyOn(skills, "open").mockResolvedValue();
+    const requests: { contentBlocks: unknown[]; operationId: string }[] = [];
+    promptBoundary.invoke = async (command, args) => {
+      if (command !== "chat_model_submit_v1") throw new Error("Unrelated native read");
+      const { request } = args as { request: { requestId: string; payload: typeof requests[number] } };
+      requests.push(request.payload);
+      return { schemaVersion: 1, requestId: request.requestId, data: { sessionId: SESSION_ID, turnId: TURN_ID, operationId: request.payload.operationId } };
+    };
+    try {
+      // Pick the second step first. Its position, not click order, must win.
+      const input = wrapper.get("textarea");
+      const beforeSlash = "先用技能对比商品卖点，\n再用技能/" + secondSkill.displayName;
+      input.element.focus();
+      input.element.value = beforeSlash + "写标题。";
+      input.element.setSelectionRange(beforeSlash.length, beforeSlash.length);
+      await input.trigger("input");
+      await input.trigger("keydown", { key: "Enter" });
+      await flushPromises();
+      const editor = wrapper.get<HTMLElement>('[contenteditable="true"]').element;
+      const offset = "先用技能".length;
+      document.getSelection()!.setBaseAndExtent(editor.firstChild!, offset, editor.firstChild!, offset);
+      document.dispatchEvent(new Event("selectionchange"));
+      await wrapper.get(".chat-composer__add").trigger("click"); await flushPromises();
+      const menu = new DOMWrapper(document.querySelector(".composer-add-menu")!);
+      await menu.get('[data-resource-menu="skills"]').trigger("click"); await flushPromises();
+      await menu.get("input").setValue(firstSkill.displayName);
+      await menu.get('[role="checkbox"]').trigger("click"); await flushPromises();
+      expect(editor.textContent).toBe(`先用技能${firstSkill.displayName}对比商品卖点，\n再用技能${secondSkill.displayName}写标题。`);
+      await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();
+      expect(requests).toHaveLength(1);
+      expect(requests[0]!.contentBlocks).toEqual([{ type: "text",
+        text: reply ? "先用技能【技能1 $copywriting】对比商品卖点，\n再用技能【技能2 $amazon-listing-expert】写标题。"
+          : "先用技能【技能1 $amazon-listing-expert】对比商品卖点，\n再用技能【技能2 $copywriting】写标题。",
+        skills: [firstSkill, secondSkill].map(({ id, version }) => ({ id, version })),
+      }]);
+      Object.assign(task.meta, { submittedContentBlocks: requests[0]!.contentBlocks });
+    } finally { wrapper.unmount(); }
   });
 
   it.each([false, true])("sends a named skill ending in 专家 as one native skill, without changing the expert (reply=%s)", async reply => {

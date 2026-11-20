@@ -1,4 +1,5 @@
 import { createConversationComposer } from "../domain/conversation-view";
+import { forgetSessionSkillPositions } from "../composables/chatSkillPositions";
 import { measureChatRender } from "../domain/chat-render-performance";
 import { useChatExpertsStore, type ExpertTurnIntent } from "./chat-experts.store";
 import { ExpertClientError } from "../api/expert-native-client";
@@ -4331,6 +4332,7 @@ export function createChatStoreDefinition(
       status: ChatCleanupStatus,
     ): Promise<DeleteDisposition | null> {
       forgetReadingSnapshot(deletedSessionId);
+      forgetSessionSkillPositions(deletedSessionId);
       if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== deletedSessionId) {
         return null;
       }

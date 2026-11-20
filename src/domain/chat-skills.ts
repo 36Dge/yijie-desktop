@@ -2,6 +2,7 @@ import type { ConversationTimelineContentBlock } from "./conversation-timeline";
 import type { ManagedSkillProjection } from "./skill-marketplace";
 import type { SelectedSkillRef } from "./market-selection-v2.generated";
 import { validateTextInput } from "../api/generated/market-selection-v2-validator.gen.js";
+import { skillOffset } from "./chat-skill-placement";
 
 // Set only by the fixed entry after both native/Host source pins are admitted.
 export function nativeSkillInputEnabled(): boolean {
@@ -14,6 +15,8 @@ export interface SelectedChatSkill {
   readonly runtimeName: string;
   readonly displayName: string;
   readonly category: ManagedSkillProjection["category"];
+  /** UTF-16 offset in the draft's plain text. Older selections precede the text. */
+  readonly offset?: number;
 }
 
 export interface ChatSkillChip extends SelectedChatSkill {
@@ -71,14 +74,54 @@ export function namedSkillIssue(displayName: string, issue: string): string {
   return `技能“${displayName}”${issue.replace(/^技能/u, "")}。`;
 }
 
+const legacySkillName = /^[a-z0-9][a-z0-9-]{0,127}(?::[a-z0-9][a-z0-9-]{0,127})?$/;
+
 /** The pinned Runtime resolves these explicit mentions and loads their SKILL.md.
  * Keep them in the submitted text so normal persistence and retry digests retain
  * the exact per-turn intent, including model, connector and expert submissions.
  */
 export function compileSkillInput(text: string, selection: readonly SelectedChatSkill[]): string {
   const names = [...new Set(selection.map(skill => skill.runtimeName))];
-  if (names.some(name => !/^[a-z0-9][a-z0-9-]{0,127}(?::[a-z0-9][a-z0-9-]{0,127})?$/.test(name))) throw new Error("Invalid skill runtime name");
+  if (names.some(name => !legacySkillName.test(name))) throw new Error("Invalid skill runtime name");
   return names.length ? `${names.map(name => `$${name}`).join(" ")}\n\n${text}` : text;
+}
+
+export interface SubmittedSkillText {
+  readonly text: string;
+  /** Start of each generated marker in the submitted text, in selection order. */
+  readonly markerStarts: readonly number[];
+}
+
+function skillMarkerName(skill: SelectedChatSkill): string {
+  if (/^[a-zA-Z0-9_:-]{1,512}$/.test(skill.runtimeName)) return `$${skill.runtimeName}`;
+  // Native structured inputs can also identify a skill without a plain $name.
+  return JSON.stringify(skill.runtimeName || skill.displayName).replace(/\$/g, "\\u0024");
+}
+
+export function prepareSkillText(draft: string, selection: readonly SelectedChatSkill[], legacyMentions: boolean): SubmittedSkillText {
+  const markerStarts = selection.map(() => -1);
+  const placed = selection.flatMap((skill, index) =>
+    skill.offset !== undefined || legacyMentions ? [{ skill, index, offset: skillOffset(skill, draft) }] : []
+  ).sort((a, b) => a.offset - b.offset);
+  // The compatibility renderer already understands a leading group. Keep that
+  // spelling when every selection belongs before the very first character.
+  if (!placed.length || (legacyMentions && placed.every(entry => entry.offset === 0))) {
+    const body = selection.some(skill => skill.offset !== undefined) ? draft : draft.trim();
+    const text = legacyMentions ? compileSkillInput(body, selection).trim() : draft.trim();
+    return { text, markerStarts };
+  }
+  let text = "", cursor = 0;
+  for (const { skill, index, offset } of placed) {
+    const name = skillMarkerName(skill);
+    if (legacyMentions && !legacySkillName.test(skill.runtimeName)) throw new Error("Invalid skill runtime name");
+    text += draft.slice(cursor, offset);
+    markerStarts[index] = text.length;
+    text += `【技能${index + 1} ${name}】`;
+    cursor = offset;
+  }
+  text += draft.slice(cursor);
+  const leading = text.length - text.trimStart().length;
+  return { text: text.trim(), markerStarts: markerStarts.map(start => start < 0 ? -1 : start - leading) };
 }
 
 export function compileSelectedSkillRefs(selection: readonly SelectedChatSkill[]): readonly SelectedSkillRef[] {
@@ -118,9 +161,10 @@ function legacySkillMessage(
   };
 }
 
-export type SentChatSkill = Pick<SelectedChatSkill, "id" | "displayName">;
+export type SentChatSkill = Pick<SelectedChatSkill, "id" | "displayName"> & Partial<Pick<SelectedChatSkill, "category">>;
+export type PositionedChatSkill = SentChatSkill & { readonly offset: number };
 
-export function presentSkillMessage(
+function unpositionedSkillMessage(
   blocks: readonly ConversationTimelineContentBlock[],
   catalog: readonly SelectedChatSkill[],
 ): { blocks: readonly ConversationTimelineContentBlock[]; skills: readonly SentChatSkill[] } {
@@ -132,10 +176,53 @@ export function presentSkillMessage(
     if (labels.has(ref.id)) continue;
     const skill = catalog.find(entry => entry.id === ref.id && entry.version === ref.version);
     if (skill) resolved.push(skill);
-    labels.set(ref.id, { id: ref.id, displayName: skill?.displayName ?? ref.id });
+    labels.set(ref.id, { id: ref.id, displayName: skill?.displayName ?? ref.id, ...(skill && { category: skill.category }) });
   }
   const legacy = legacySkillMessage(blocks, resolved);
   const samePrefix = refs.length === legacy.skills.length && refs.every((ref, index) =>
     ref.id === legacy.skills[index]?.id && ref.version === legacy.skills[index]?.version);
   return { blocks: samePrefix ? legacy.blocks : blocks, skills: [...labels.values()] };
+}
+
+export function presentSkillMessage(
+  blocks: readonly ConversationTimelineContentBlock[], catalog: readonly SelectedChatSkill[], markerStarts?: readonly number[],
+): { blocks: readonly ConversationTimelineContentBlock[]; skills: readonly SentChatSkill[]; offsets?: readonly number[] } {
+  const first = blocks.find(block => block.type === "text");
+  if (!first || first.type !== "text" || !first.text.includes("【技能") || (!first.skills?.length && !markerStarts)) {
+    return unpositionedSkillMessage(blocks, catalog);
+  }
+  const refs = first.skills ?? [];
+  const savedRefs = blocks.flatMap(block => block.type === "text" ? block.skills ?? [] : []);
+  const labels: SentChatSkill[] = savedRefs.map(ref => catalog.find(skill => skill.id === ref.id && skill.version === ref.version)
+    ?? { id: ref.id, displayName: ref.id });
+  const offsets = labels.map(() => 0);
+  const matches = [...first.text.matchAll(/【技能([1-9]\d{0,2}) (\$[a-zA-Z0-9_:-]{1,512}|"(?:[^"\\]|\\.)*")】/gu)];
+  const counts = new Map<number, number>();
+  for (const match of matches) {
+    const index = Number(match[1]) - 1;
+    counts.set(index, (counts.get(index) ?? 0) + 1);
+  }
+  let cursor = 0, text = "";
+  for (const match of matches) {
+    const index = Number(match[1]) - 1, start = match.index!;
+    // The receipt distinguishes a picked chip from an identical user-typed
+    // example. Without it, only an unambiguous saved selection is eligible.
+    if (markerStarts ? markerStarts[index] !== start : counts.get(index) !== 1) continue;
+    const selected = refs[index];
+    if (refs.length && !selected) continue;
+    if (selected) {
+      const known = catalog.find(skill => skill.id === selected.id && skill.version === selected.version);
+      if (known && skillMarkerName(known) !== match[2] && !markerStarts) continue;
+    } else {
+      const candidates = catalog.filter(skill => skillMarkerName(skill) === match[2]);
+      if (candidates.length !== 1) continue;
+      labels.push(candidates[0]!);
+    }
+    text += first.text.slice(cursor, start);
+    offsets[selected ? index : labels.length - 1] = text.length;
+    cursor = start + match[0].length;
+  }
+  if (!cursor) return unpositionedSkillMessage(blocks, catalog);
+  text += first.text.slice(cursor);
+  return { blocks: blocks.map(block => block === first ? { ...first, text } : block), skills: labels, offsets };
 }

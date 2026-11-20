@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import type { YjIconName } from "../../icons/registry";
 import YjIcon from "../yijie/YjIcon.vue";
 
 defineProps<{
   name: string;
-  icon: YjIconName;
   removeLabel: string;
   unavailableReason?: string | null;
   disabled?: boolean;
@@ -22,11 +20,11 @@ defineEmits<{ remove: [] }>();
     @click="!disabled && $emit('remove')"
   >
     <span class="chat-composer-mention__icon" aria-hidden="true">
-      <YjIcon :name="icon" size="sm" />
+      <span class="chat-composer-mention__glyph"><slot name="icon" /></span>
       <YjIcon name="dismiss" size="sm" />
     </span>
     <span class="chat-composer-mention__copy">
-      <span>{{ name }}</span>
+      <span class="chat-composer-mention__name">{{ name }}</span>
       <span v-if="unavailableReason" class="chat-composer-mention__reason">{{ unavailableReason }}</span>
     </span>
   </button>
@@ -37,7 +35,8 @@ defineEmits<{ remove: [] }>();
 .chat-composer-mention__copy { display: flex; min-width: 0; flex: 1; flex-direction: column; }
 .chat-composer-mention__copy > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-composer-mention__reason { font-size: var(--yj-font-size-caption); color: var(--yj-color-semantic-warning-ink); }
-.chat-composer-mention__icon { display: inline-grid; flex: none; align-items: center; height: var(--yj-line-height-body); }
+.chat-composer-mention__icon { display: inline-grid; flex: none; place-items: center; height: var(--yj-line-height-body); }
+.chat-composer-mention__glyph { display: inline-flex; }
 .chat-composer-mention__icon > * { grid-area: 1 / 1; }
 .chat-composer-mention__icon > :last-child { visibility: hidden; }
 .chat-composer-mention:is(:hover, :focus-visible):not(:disabled) .chat-composer-mention__icon > :first-child { visibility: hidden; }

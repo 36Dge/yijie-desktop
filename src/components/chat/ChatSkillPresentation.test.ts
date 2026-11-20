@@ -9,8 +9,9 @@ import { historyPageV6ToConversationSnapshot } from "../../api/chat-approval-ada
 import { createChatClient, type ChatClientTransport } from "../../api/chat-client";
 import type { NativeConversationView } from "../../api/generated/native-conversation-private.gen";
 import { webSourceActionsKey } from "../../composables/useWebSources";
-import { compileSkillInput } from "../../domain/chat-skills";
+import { compileSelectedSkillRefs, compileSkillInput, prepareSkillText } from "../../domain/chat-skills";
 import { installedSkill } from "../../test/skill-fixture";
+import { skillCardArtwork, skillCategoryArtwork } from "../../icons/skill-artwork";
 import ChatTimeline from "./ChatTimeline.vue";
 import savedBlocks from "../../../tests/fixtures/user-message-skill-history.json";
 
@@ -48,7 +49,7 @@ describe("skill pills in sent messages", () => {
     });
     const client = createChatClient({invoke, listen: async () => () => {}});
     const catalog = [{...installedSkill, id: "listing-skill", version: "1.0.0", displayName: "Amazon-listing-analysis"},
-      {...installedSkill, id: "copy-review", version: "2.0.0", displayName: "文案复核"},
+      {...installedSkill, id: "copy-review", version: "2.0.0", category: "market-research" as const, displayName: "文案复核"},
       {...installedSkill, id: "title-review", version: "2.0.0", displayName: "不同版本"}];
     for (const page of [(await client.resyncSessionV6(contextId, sessionId, subscriptionId)).history, await client.loadHistoryV6(contextId, sessionId)]) {
       expect(page.turns[0]!.messages[0]!.contentBlocks).toEqual(savedBlocks);
@@ -57,6 +58,9 @@ describe("skill pills in sent messages", () => {
         global: {provide: {[webSourceActionsKey as symbol]: {openUserMessageLink: async () => {}}}}});
       const user = wrapper.get(".chat-timeline-item-shell--user");
       expect(user.findAll(".chat-skill-pill").map(label => label.text())).toEqual(["Amazon-listing-analysis", "文案复核", "title-review"]);
+      expect(user.findAll("img.chat-skill-mention-icon").map(icon => icon.attributes("src"))).toEqual([
+        skillCardArtwork(catalog[0]!), skillCardArtwork(catalog[1]!), skillCategoryArtwork("personal"),
+      ]);
       expect(user.get('[role="link"]').text()).toBe(savedBlocks[0]!.text.split(" ")[0]);
       expect(page.turns[0]!.messages[0]!.content).toBe(body);
       wrapper.unmount();
@@ -65,7 +69,7 @@ describe("skill pills in sent messages", () => {
   });
 
   it.each([true, false])("shows the accepted selection only on the sending bubble (product URL: %s)", async withUrl => {
-    const listing = { ...installedSkill, id: "listing-skill", displayName: "Amazon-listing-analysis" };
+    const listing = { ...installedSkill, id: "yijie.traffic-advertising.amazon-listing-expert", category: "traffic-advertising" as const, displayName: "亚马逊 Listing 专家" };
     const url = "https://example.org/product?sku=42&th=1";
     const body = withUrl ? `${url} 给出这个商品的优化建议。` : "给出这个商品的优化建议。";
     const snapshot = historyPageToConversationSnapshot("thread", {
@@ -88,12 +92,81 @@ describe("skill pills in sent messages", () => {
       const paragraph = bubbles[1]!.get(".chat-safe-content__paragraph");
       expect(paragraph.element.firstElementChild?.getAttribute("aria-label")).toBe("本轮技能");
       expect(paragraph.get(".chat-skill-pill").text()).toBe(listing.displayName);
-      expect(paragraph.get(".chat-skill-pill svg").attributes("aria-hidden")).toBe("true");
+      const artwork = paragraph.get("img.chat-skill-mention-icon");
+      expect(artwork.attributes("aria-hidden")).toBe("true");
+      expect(artwork.attributes("src")).toBe(skillCardArtwork(listing));
       if (withUrl) expect(paragraph.get('[role="link"]').text()).toBe(url);
       else expect(paragraph.find('[role="link"]').exists()).toBe(false);
       expect(paragraph.element.textContent).toBe(listing.displayName + body);
     }
     wrapper.unmount();
+  });
+
+  it("restores the saved inline positions on a fresh history render and preserves whole URL destinations", () => {
+    const thread = "placement-thread", turnId = "placement-turn";
+    const url = "https://example.org/product/sku42";
+    const text = "商品📦" + url + "\n请优化";
+    const key = `yijie.desktop.ui.skill-positions.v1:${thread}:${turnId}`;
+    vi.stubGlobal("localStorage", { getItem: (name: string) => name === key ? JSON.stringify({ length: text.length, offsets: [4, 4 + url.length + 1] }) : null });
+    const selected = [installedSkill, invoice].map(({ id, version }) => ({ id, version }));
+    const snapshot = historyPageToConversationSnapshot(thread, { nextCursor: null, turns: [{ turnId, status: "completed",
+      terminalAt: 2, reasoningStatus: "unavailable", reasoningReasonCode: null, reasoning: [], messages: [{ messageId: "msg",
+        role: "user", content: text, status: "committed", createdAt: 1, ordinal: 0, contentBlocks: [{ type: "text", text, skills: selected }] }] }] });
+    const timeline = selectConversationTimeline(viewFromLegacySnapshot(snapshot), thread)!;
+    const wrapper = mount(ChatTimeline, { props: { timeline, skillCatalog: [installedSkill, invoice] },
+      global: { provide: { [webSourceActionsKey as symbol]: { openUserMessageLink: async () => {} } } } });
+    try {
+      const bubble = wrapper.get(".chat-safe-content__paragraph");
+      expect(bubble.element.textContent).toBe("商品📦" + installedSkill.displayName + url + "\n" + invoice.displayName + "请优化");
+      expect(bubble.get('[role="link"]').text()).toBe(url);
+      expect(copyableTimelineItemText(timeline.turns[0]!.items[0]!)).toBe(text);
+    } finally { wrapper.unmount(); vi.unstubAllGlobals(); }
+  });
+
+  it("keeps the selected skill visible when an attachment has no accompanying prose", () => {
+    const picked = [{ ...installedSkill, offset: 0 }];
+    const { text } = prepareSkillText("", picked, false);
+    const thread = "attachment-only";
+    const snapshot = historyPageToConversationSnapshot(thread, { nextCursor: null, turns: [{
+      turnId: "turn", status: "completed", terminalAt: 2, reasoningStatus: "unavailable", reasoningReasonCode: null, reasoning: [],
+      messages: [{ messageId: "msg", role: "user", content: text, status: "committed", createdAt: 1, ordinal: 0,
+        contentBlocks: [
+          { type: "text", text, skills: compileSelectedSkillRefs(picked) },
+          { type: "file", attachmentId: "sample", name: "notes.txt", mediaType: "text/plain", sizeBytes: 32, status: "bound", expiresAt: 2_000_000_000 },
+        ],
+      }],
+    }] });
+    const timeline = selectConversationTimeline(viewFromLegacySnapshot(snapshot), thread)!;
+    const wrapper = mount(ChatTimeline, { props: { timeline, skillCatalog: picked } });
+    try {
+      expect(wrapper.get('[aria-label="文档附件"]').text()).toContain("notes.txt");
+      expect(wrapper.findAll(".chat-skill-pill").map(pill => pill.text())).toEqual([installedSkill.displayName]);
+      expect(copyableTimelineItemText(timeline.turns[0]!.items[0]!)).toBe(text);
+    } finally { wrapper.unmount(); }
+  });
+
+  it("renders each model-facing reference once at its step on history reload, retaining the submitted text for copy", async () => {
+    const thread = "model-skill-steps", turnId = "two-skills";
+    const url = "https://example.org/product/sku42";
+    const body = "先审核" + url + "，\n再写标题。";
+    const picked = [{ ...invoice, offset: 1 }, { ...installedSkill, offset: body.indexOf("写") }];
+    const { text } = prepareSkillText(body, picked, false);
+    const snapshot = historyPageToConversationSnapshot(thread, { nextCursor: null, turns: [{ turnId, status: "completed",
+      terminalAt: 2, reasoningStatus: "unavailable", reasoningReasonCode: null, reasoning: [], messages: [{ messageId: "msg",
+        role: "user", content: text, status: "committed", createdAt: 1, ordinal: 0,
+        contentBlocks: [{ type: "text", text, skills: compileSelectedSkillRefs(picked) }] }] }] });
+    const timeline = selectConversationTimeline(viewFromLegacySnapshot(snapshot), thread)!;
+    const wrapper = mount(ChatTimeline, { props: { timeline, skillCatalog: picked },
+      global: { provide: { [webSourceActionsKey as symbol]: { openUserMessageLink: async () => {} } } } });
+    try {
+      const bubble = wrapper.get(".chat-safe-content__paragraph");
+      expect(bubble.element.textContent).toBe("先" + invoice.displayName + "审核" + url + "，\n再" + installedSkill.displayName + "写标题。");
+      expect(bubble.get('[role="link"]').text()).toBe(url);
+      expect(bubble.findAll(".chat-skill-pill")).toHaveLength(2);
+      expect(copyableTimelineItemText(timeline.turns[0]!.items[0]!)).toBe(text);
+      await wrapper.setProps({ skillCatalog: [] });
+      expect(bubble.element.textContent).toBe("先" + invoice.id + "审核" + url + "，\n再" + installedSkill.id + "写标题。");
+    } finally { wrapper.unmount(); }
   });
 
   it("rebuilds historical user mentions inline with body text without changing Runtime/copy data or assistant text", async () => {

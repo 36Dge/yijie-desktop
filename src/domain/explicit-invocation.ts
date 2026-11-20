@@ -1,4 +1,5 @@
 import type { SelectedChatSkill } from "./chat-skills";
+import { skillOffset, skillTextParts } from "./chat-skill-placement";
 import type { ManagedSkillProjection } from "./skill-marketplace";
 
 // Direct addresses use catalog identities. Task relevance belongs to the Runtime.
@@ -53,6 +54,10 @@ function matchSkillName(target: string, catalog: readonly ManagedSkillProjection
 }
 
 export function explicitSkillInvocation(text: string, catalog: readonly ManagedSkillProjection[], picked: readonly SelectedChatSkill[]) {
+  // Include the picked address when validating phrases such as “先用技能…”.
+  const placed = picked.filter(skill => skill.offset !== undefined);
+  if (placed.length) text = skillTextParts(text, placed, placed.map(skill => skillOffset(skill, text)))
+    .map(part => "skill" in part ? `【${part.skill.runtimeName || part.skill.displayName}】` : part.text).join("");
   const mentions: ManagedSkillProjection[] = [];
   const nativeMentions: ManagedSkillProjection[] = [];
   let directed = false;

@@ -8,6 +8,7 @@ import { turnTimingLabel } from "../../../src/domain/chat-turn-timing";
 import type { NativeConversationView } from "../../../src/api/generated/native-conversation-private.gen";
 import { webSourceActionsKey } from "../../../src/composables/useWebSources";
 import ChatTurnGroup from "../../../src/components/chat/ChatTurnGroup.vue";
+import ChatComposer from "../../../src/components/chat/ChatComposer.vue";
 import "../../../src/styles/variables.css";
 import "../../../src/styles/main.css";
 import "../chat-preloading/preview.css";
@@ -19,7 +20,8 @@ createApp(defineComponent({setup() {
   const params = new URLSearchParams(location.search);
   const previewSkill = params.has("user-skill");
   const previewUserLink = previewSkill || params.has("user-links");
-  const listing = { id: "listing-skill", version: "1.0.0", runtimeName: "listing-analysis", category: "content-marketing" as const, displayName: "Amazon-listing-analysis" };
+  const listing = { id: "yijie.traffic-advertising.amazon-listing-expert", version: "1.0.0", runtimeName: "amazon-listing-expert", category: "traffic-advertising" as const, displayName: "亚马逊 Listing 专家" };
+  const draftSkillSelected = ref(true);
   const question = previewUserLink
     ? "https://www.example.org/catalog/mini-camera/dp/B01234/?_encoding=UTF8&product=pan-tilt-camera&campaign=seasonal-offers&ref_=store_home_recommendations&color=white&th=1#details 给出这个商品的优化建议。"
     : "介绍一条城市步行路线，并附上参考链接。";
@@ -59,7 +61,11 @@ createApp(defineComponent({setup() {
     h("section",{class:"preview-window",style:{width:"min(1180px, 100%)",height:"760px"}},[
       h("header",{class:"preview-title"},"普通本地样例 · 生产组件与原生进度投影"),
       h("div",{class:"preview-conversation"},[h(ChatTurnGroup,{turn:turn.value,position:1,timingLabel:timing.value,skillCatalog:previewSkill?[listing]:[]})]),
-      h("div",{class:"preview-composer"},"输入区域"),
+      h("div",{class:"preview-composer"},previewSkill ? [h(ChatComposer, {
+        mode:"reply", modelValue:"", projects:[], selectedProjectId:null, readiness:{title:"本地预览",detail:"不会发送消息",actionLabel:null,tone:"success"},
+        canSend:true, canAttach:false, submissionState:"idle", streaming:false, recoveryAvailable:false,
+        skills:draftSkillSelected.value?[{...listing,unavailableReason:null}]:[], "onRemove-skill":()=>{draftSkillSelected.value=false;},
+      })] : "输入区域"),
     ]),
     h("p",{"aria-label":"打开记录"},opened.value ? `已请求打开：${opened.value}` : "尚未点击链接"),
   ]));

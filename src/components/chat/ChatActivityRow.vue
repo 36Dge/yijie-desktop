@@ -14,6 +14,7 @@ import ChatCommandItem, {
   type ChatApprovalTransientState,
 } from "./ChatCommandItem.vue";
 import { presentSkillMessage, type SelectedChatSkill } from "../../domain/chat-skills";
+import { readSkillPositions, readSubmittedSkillMarkers } from "../../composables/chatSkillPositions";
 import ChatSkillPill from "./ChatSkillPill.vue";
 import ChatSafeContent from "./ChatSafeContent.vue";
 import ChatDeepThinking from "./ChatDeepThinking.vue";
@@ -47,7 +48,27 @@ const linkTarget = computed(() => {
   const itemId = item.kind === "assistant_message" ? item.itemId : item.kind === "user_message" ? item.userLinkSourceId : undefined;
   return itemId ? { sessionId: item.threadId, turnId: item.turnId, itemId } : undefined;
 });
-const skillMessage = computed(() => props.item.presentation === "user_message" ? presentSkillMessage(props.item.contentBlocks, props.skillCatalog) : null);
+const skillMessage = computed(() => {
+  const item = props.item;
+  if (item.presentation !== "user_message") return null;
+  const first = item.contentBlocks.find(block => block.type === "text");
+  if (first?.type === "text" && first.text.includes("【技能") && item.identity === firstUserMessage.value) {
+    const markers = readSubmittedSkillMarkers(item.threadId, item.turnId, first.text.length);
+    const legacy = !markers && first.skills && readSkillPositions(item.threadId, item.turnId, first.text.length, first.skills.length);
+    return presentSkillMessage(item.contentBlocks, props.skillCatalog, markers ?? (legacy ? [] : undefined));
+  }
+  return presentSkillMessage(item.contentBlocks, props.skillCatalog);
+});
+const positionedSkills = computed(() => {
+  const message = skillMessage.value;
+  if (!message?.skills.length) return;
+  const body = message.blocks.find(block => block.type === "text");
+  // Without a prose paragraph, show the skills through the existing message prefix.
+  if (!body || body.type !== "text" || body.text.length === 0) return;
+  const offsets = message.offsets ?? (props.item.identity === firstUserMessage.value
+    ? readSkillPositions(props.item.threadId, props.item.turnId, body.text.length, message.skills.length) : undefined);
+  return offsets && message.skills.map((skill, i) => ({ ...skill, offset: offsets[i]! })).sort((a, b) => a.offset - b.offset);
+});
 const emit = defineEmits<{
   "disclosure-change": [change: ChatTimelineDisclosureChange];
   "approval-decision": [change: ChatApprovalDecisionChange];
@@ -308,6 +329,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange) { emit("app
               v-else-if="item.presentation !== 'unknown' && item.presentation !== 'command' && item.presentation !== 'tool' && item.contentBlocks.length > 0"
               ref="messageContent"
               :blocks="skillMessage?.blocks ?? item.contentBlocks"
+              :positioned-skills="positionedSkills"
               :file-links="item.kind === 'assistant_message'"
               :link-target="linkTarget"
               :mode="item.presentation === 'user_message' ? 'plain' : item.contentMode"
@@ -315,9 +337,9 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange) { emit("app
               :streaming="item.kind === 'assistant_message' && item.busy === true && visible"
               :animate="visible && !['failed', 'interrupted'].includes(turn.domainStatus)"
             >
-              <template v-if="(item.identity === firstUserMessage && connectorNames.length) || skillMessage?.skills.length" #text-prefix>
+              <template v-if="(item.identity === firstUserMessage && connectorNames.length) || (skillMessage?.skills.length && !positionedSkills)" #text-prefix>
                 <span v-if="item.identity === firstUserMessage && connectorNames.length" aria-label="本轮连接器"><span v-for="(name, index) in connectorNames" :key="index" class="chat-turn-group__connector-mention">/ {{ name }}</span></span>
-                <span v-if="skillMessage?.skills.length" aria-label="本轮技能"><ChatSkillPill v-for="skill in skillMessage.skills" :key="skill.id" :entry="skill" class="chat-turn-group__skill-mention" /></span>
+                <span v-if="skillMessage?.skills.length && !positionedSkills" aria-label="本轮技能"><ChatSkillPill v-for="skill in skillMessage.skills" :key="skill.id" :entry="skill" class="chat-turn-group__skill-mention" /></span>
               </template>
               <template
                 v-if="slots['artifact-reference']"

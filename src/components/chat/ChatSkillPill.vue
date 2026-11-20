@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import type { SentChatSkill } from "../../domain/chat-skills";
-import YjIcon from "../yijie/YjIcon.vue";
+import ChatSkillMentionIcon from "./ChatSkillMentionIcon.vue";
 
 defineProps<{ entry: SentChatSkill }>();
 </script>
 
 <template>
   <span class="chat-skill-pill">
-    <YjIcon name="skillMention" size="sm" />
+    <ChatSkillMentionIcon :entry="entry" />
     <span class="chat-skill-pill__name">{{ entry.displayName }}</span>
   </span>
 </template>
@@ -18,9 +18,12 @@ defineProps<{ entry: SentChatSkill }>();
   max-width: calc(100% - var(--yj-space-2));
   align-items: baseline;
   gap: var(--yj-space-1);
-  color: var(--yj-color-semantic-success-ink);
+}
+.chat-skill-pill > .chat-skill-mention-icon { align-self: center; }
+.chat-skill-pill__name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--yj-color-chat-skill-mention);
   font-weight: var(--yj-font-weight-medium);
 }
-.chat-skill-pill :deep(.yj-icon) { align-self: center; color: inherit; }
-.chat-skill-pill__name { min-width: 0; overflow-wrap: anywhere; }
 </style>

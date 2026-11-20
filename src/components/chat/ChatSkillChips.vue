@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ChatSkillChip } from "../../domain/chat-skills";
 import ChatComposerMention from "./ChatComposerMention.vue";
+import ChatSkillMentionIcon from "./ChatSkillMentionIcon.vue";
 
 defineProps<{ entries: readonly ChatSkillChip[]; disabled?: boolean }>();
 defineEmits<{ remove: [id: string] }>();
@@ -11,12 +12,13 @@ defineEmits<{ remove: [id: string] }>();
     <li v-for="entry in entries" :key="entry.id" class="chat-skill-chip">
       <ChatComposerMention
         :name="entry.displayName"
-        icon="skillOperations"
         :remove-label="`移除技能 ${entry.displayName}`"
         :unavailable-reason="entry.unavailableReason"
         :disabled="disabled"
         @remove="$emit('remove', entry.id)"
-      />
+      >
+        <template #icon><ChatSkillMentionIcon :entry="entry" /></template>
+      </ChatComposerMention>
     </li>
   </ul>
 </template>
@@ -27,5 +29,7 @@ defineEmits<{ remove: [id: string] }>();
 .chat-skill-chip :deep(.chat-composer-mention) { position: relative; isolation: isolate; }
 .chat-skill-chip :deep(.chat-composer-mention::before) { content: ""; position: absolute; inset: calc(-1 * var(--yj-border-width)) calc(-1 * var(--yj-space-1)); z-index: -1; border-radius: var(--yj-radius-full); pointer-events: none; }
 .chat-skill-chip :deep(.chat-composer-mention:is(:hover, :focus-visible):not(:disabled)) { color: var(--yj-color-connector-mention); }
+.chat-skill-chip :deep(.chat-composer-mention:not(:disabled) .chat-composer-mention__name) { color: var(--yj-color-chat-skill-mention); }
+.chat-skill-chip :deep(.chat-composer-mention__name) { font-weight: var(--yj-font-weight-medium); }
 .chat-skill-chip :deep(.chat-composer-mention:is(:hover, :focus-visible):not(:disabled)::before) { background: var(--yj-color-chat-skill-hover-bg); }
 </style>

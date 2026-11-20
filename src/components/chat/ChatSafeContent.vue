@@ -8,10 +8,12 @@ import YjIcon from "../yijie/YjIcon.vue";
 import ChatStreamText from "./ChatStreamText.vue";
 import ChatTextLink from "./ChatTextLink.vue";
 import ChatUserText from "./ChatUserText.vue";
+import type { PositionedChatSkill } from "../../domain/chat-skills";
 import { messageFileWorkspaceKey, messageFileLocationKey, messageLinkTargetKey, type MessageLinkTarget } from "../../composables/useChatMessageLink";
 
 const props = withDefaults(defineProps<{
   blocks?: readonly ConversationTimelineContentBlock[];
+  positionedSkills?: readonly PositionedChatSkill[];
   mode?: "rich" | "plain";
   typography?: "answer" | "user" | "compact";
   streaming?: boolean;
@@ -86,7 +88,8 @@ function visibleRows<T extends readonly { startOffset: number }[]>(rows: readonl
           <em v-else-if="inline.kind === 'emphasis'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></em>
           <del v-else-if="inline.kind === 'strikethrough'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></del>
           <ChatTextLink v-else-if="inline.kind === 'inert_link' || inline.kind === 'file_link'" :file="inline.file" :text="inline.text" :destination="inline.destination" :streaming="streaming" :offset="inline.startOffset" />
-          <ChatUserText v-else-if="typography === 'user' && mode === 'plain' && linkTarget && inline.text.includes('://')" :text="inline.text" :offset="inline.startOffset" />
+          <ChatUserText v-else-if="typography === 'user' && mode === 'plain' && ((positionedSkills?.length && node.key === firstParagraphKey) || (linkTarget && inline.text.includes('://')))"
+            :text="inline.text" :offset="inline.startOffset" :links="!!linkTarget" :skills="node.key === firstParagraphKey ? positionedSkills : undefined" />
           <span v-else><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></span>
         </template>
       </p>

@@ -17,6 +17,8 @@ import {
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatConnectorChips from "./ChatConnectorChips.vue";
 import ChatSkillChips from "./ChatSkillChips.vue";
+import ChatInlineSkillEditor from "./ChatInlineSkillEditor.vue";
+import { positionsAfterTextEdit, skillOffset, type SkillPosition, type SkillSelectionRange } from "../../domain/chat-skill-placement";
 import ChatSkillSlashMenu from "./ChatSkillSlashMenu.vue";
 import { chatSkillSlashQuery, type ChatSkillChip, type ChatSkillSuggestionCatalog } from "../../domain/chat-skills";
 import ChatReadinessNotice from "./ChatReadinessNotice.vue";
@@ -78,7 +80,8 @@ const emit = defineEmits<{
   "dismiss-attachment-import": [operationId: string];
   "unsupported-input": [message: string];
   "remove-skill": [id: string];
-  "select-suggested-skill": [id: string, text: string];
+  "insert-skill": [id: string, range: SkillSelectionRange, fromSlash: boolean];
+  "edit-skill-draft": [text: string, positions: readonly SkillPosition[]];
   "read-skill-suggestions": [];
 }>();
 
@@ -88,7 +91,7 @@ defineSlots<{
   "expert-control"(): unknown;
   "expert-picker"(props: { close: () => void }): unknown;
   "connector-control"(props: { close: () => void }): unknown;
-  "skill-control"(props: { close: (reason?: "selection") => Promise<void> }): unknown;
+  "skill-control"(props: { close: (reason?: "selection") => Promise<void>; select: (id: string) => void }): unknown;
   "workspace-control"(): unknown;
   "permission-control"(): unknown;
   "model-control"(): unknown;
@@ -103,12 +106,14 @@ watch(() => [props.presentationScope, props.submissionState, props.canSend], () 
 const composing = ref(false);
 const composerElement = ref<HTMLElement | null>(null);
 const textareaElement = ref<HTMLTextAreaElement | null>(null);
+const inlineEditor = ref<InstanceType<typeof ChatInlineSkillEditor> | null>(null);
 const connectorPrefixElement = ref<HTMLElement | null>(null);
 const connectorPrefixWidth = ref(0);
 const inputScrollTop = ref(0);
 const inputViewportWidth = ref(0);
 const compactLayout = computed(() => props.compact && props.mode === "reply" && !props.textOnly);
-const hasSkillPrefix = computed(() => !compactLayout.value && !props.textOnly && props.skills.length > 0);
+const inlineSkills = computed(() => !compactLayout.value && !props.textOnly && props.skills.some(skill => skill.offset !== undefined));
+const hasSkillPrefix = computed(() => !inlineSkills.value && !compactLayout.value && !props.textOnly && props.skills.length > 0);
 const placeholder = computed(() => {
   if (hasSkillPrefix.value) return "";
   if (props.textOnly) return "描述计划内容、时间、时区和运行方式…";
@@ -122,9 +127,16 @@ const slashHintPrefix = computed(() => {
   const token = slashQuery.value;
   if (!token || token.query || composing.value) return null;
   // Only draw into empty space after the slash on this line.
+  if (inlineSkills.value) return null;
   const nextCharacter = props.modelValue[token.end];
   if (nextCharacter !== undefined && nextCharacter !== "\n") return null;
   return props.modelValue.slice(0, token.end);
+});
+const inlineHint = computed(() => {
+  const token = slashQuery.value;
+  if (!inlineSkills.value || !token || token.query || composing.value) return false;
+  const next = inputState()?.value[token.end];
+  return next === undefined || next === "\n";
 });
 const canSuggestSkills = computed(() => Boolean(props.skillSuggestions && !props.skillSuggestions.disabled) &&
   !props.textOnly && !compactLayout.value && !props.textLocked && !props.streaming && props.submissionState === "idle");
@@ -195,35 +207,64 @@ function attachmentErrorMessage(code: string | null): string | null {
 function updateInput(event: Event): void {
   const textarea = event.target as HTMLTextAreaElement;
   syncTextareaHeight(textarea);
-  emit("update:modelValue", textarea.value);
+  if (compactLayout.value && props.skills.some(skill => skill.offset !== undefined)) {
+    emit("edit-skill-draft", textarea.value, positionsAfterTextEdit(props.modelValue, textarea.value, props.skills));
+  } else emit("update:modelValue", textarea.value);
   updateSlashQuery(textarea);
 }
 
-function updateSlashQuery(textarea: HTMLTextAreaElement): void {
-  const caret = textarea.selectionStart;
+function inputState() {
+  const doc = inlineEditor.value?.inputState();
+  if (doc) return { value: doc.value, selectionStart: doc.range?.selectionStart, selectionEnd: doc.range?.selectionEnd };
+  return textareaElement.value;
+}
+function updateSlashQuery(input = inputState()): void {
+  const caret = input?.selectionStart;
   const opening = !slashQuery.value;
-  slashQuery.value = canSuggestSkills.value && props.skillSuggestions && caret === textarea.selectionEnd
-    ? chatSkillSlashQuery(textarea.value.slice(0, caret), props.skillSuggestions.entries)
+  slashQuery.value = canSuggestSkills.value && props.skillSuggestions && input && caret !== undefined && caret === input.selectionEnd
+    ? chatSkillSlashQuery(input.value.slice(0, caret), props.skillSuggestions.entries)
     : null;
   if (opening && slashQuery.value) emit("read-skill-suggestions");
 }
 
 function syncOpenSlashQuery(): void {
-  const token = slashQuery.value, textarea = textareaElement.value;
-  if (token && textarea && (textarea.selectionStart !== token.end || textarea.selectionEnd !== token.end ||
-    textarea.value.slice(token.start, token.end) !== "/" + token.query)) slashQuery.value = null;
+  const token = slashQuery.value, input = inputState();
+  if (token && input && (input.selectionStart !== token.end || input.selectionEnd !== token.end ||
+    input.value.slice(token.start, token.end) !== "/" + token.query)) slashQuery.value = null;
 }
 
+let pickerCaret: ChatComposerFocusSnapshot | null = null;
+function collapsed(position: number): ChatComposerFocusSnapshot {
+  return { selectionStart: position, selectionEnd: position, selectionDirection: "none" };
+}
+function insertSkill(id: string, range: SkillSelectionRange, fromSlash: boolean) {
+  const prefixLength = hasSkillPrefix.value ? props.skills.length : 0;
+  const selectionStart = range.selectionStart + prefixLength;
+  emit("insert-skill", id, { selectionStart, selectionEnd: range.selectionEnd + prefixLength }, fromSlash);
+  return collapsed(selectionStart + 1);
+}
 async function selectSuggestedSkill(id: string): Promise<void> {
   syncOpenSlashQuery();
-  const textarea = textareaElement.value, token = slashQuery.value;
-  if (!canSuggestSkills.value || !textarea || !token || composing.value) return;
-  const text = textarea.value.slice(0, token.start) + textarea.value.slice(token.end);
+  const token = slashQuery.value;
+  if (!canSuggestSkills.value || !token || composing.value) return;
   slashQuery.value = null;
-  emit("select-suggested-skill", id, text);
+  const caret = insertSkill(id, { selectionStart: token.start, selectionEnd: token.end }, true);
   await nextTick();
-  if (textareaElement.value === textarea && textarea.value === text) {
-    restoreInputFocus({ selectionStart: token.start, selectionEnd: token.start, selectionDirection: "none" });
+  if (props.skills.some(skill => skill.id === id)) restoreInputFocus(caret);
+}
+function selectPickerSkill(id: string) {
+  const range = captureInputFocus() ?? collapsed(props.modelValue.length + props.skills.length);
+  if (props.skills.some(skill => skill.id === id)) {
+    pickerCaret = rangeAfterRemoval(id, range);
+    emit("remove-skill", id);
+  } else pickerCaret = insertSkill(id, range, false);
+}
+async function editSkillDraft(text: string, positions: readonly SkillPosition[]) {
+  const range = inlineEditor.value?.capture();
+  emit("edit-skill-draft", text, positions);
+  if (!positions.length && range) {
+    await nextTick();
+    restoreInputFocus(range);
   }
 }
 
@@ -252,6 +293,7 @@ function syncTextareaHeight(textarea = textareaElement.value): void {
 }
 
 function syncInputLayout(): void {
+  if (inlineEditor.value) { inlineEditor.value.positionHint(); return; }
   const textarea = textareaElement.value, prefix = connectorPrefixElement.value;
   let width = 0;
   if (textarea && prefix) {
@@ -274,6 +316,7 @@ function syncInputLayout(): void {
 }
 
 function captureInputFocus(): ChatComposerFocusSnapshot | null {
+  if (inlineEditor.value) return inlineEditor.value.capture();
   const textarea = textareaElement.value;
   if (textarea === null) return null;
   return Object.freeze({
@@ -286,7 +329,7 @@ function captureInputFocus(): ChatComposerFocusSnapshot | null {
 function restoreInputFocus(snapshot: ChatComposerFocusSnapshot): boolean {
   const textarea = textareaElement.value;
   const composer = composerElement.value;
-  if (textarea === null || composer === null || submissionBusy.value) return false;
+  if (composer === null || submissionBusy.value) return false;
   const activeElement = document.activeElement;
   if (
     activeElement !== null &&
@@ -295,6 +338,8 @@ function restoreInputFocus(snapshot: ChatComposerFocusSnapshot): boolean {
     activeElement !== textarea &&
     !composer.contains(activeElement)
   ) return false;
+  if (inlineEditor.value) return inlineEditor.value.restore(snapshot);
+  if (!textarea) return false;
   const valueLength = textarea.value.length;
   const selectionStart = Math.min(snapshot.selectionStart, valueLength);
   const selectionEnd = Math.min(Math.max(snapshot.selectionEnd, selectionStart), valueLength);
@@ -305,6 +350,7 @@ function restoreInputFocus(snapshot: ChatComposerFocusSnapshot): boolean {
 
 // Explicit navigation from a user selection may move focus from the route heading.
 function focusInput(): boolean {
+  if (inlineEditor.value && !submissionBusy.value) return inlineEditor.value.restore(collapsed(props.modelValue.length + props.skills.length));
   const textarea = textareaElement.value;
   if (!textarea || submissionBusy.value) return false;
   textarea.focus({ preventScroll: true });
@@ -319,8 +365,10 @@ async function closeSkillPicker(close: () => Promise<void>, reason?: "selection"
   await close();
   if (reason === "selection") {
     syncInputLayout();
-    focusInput();
+    if (pickerCaret) restoreInputFocus(pickerCaret);
+    else focusInput();
   }
+  pickerCaret = null;
 }
 
 watch(
@@ -365,12 +413,20 @@ function submit(): void {
   if (!sendDisabled.value && !composing.value) emit("submit");
 }
 
+function rangeAfterRemoval(id: string, range: ChatComposerFocusSnapshot) {
+  const index = props.skills.findIndex(skill => skill.id === id);
+  if (!inlineEditor.value || index < 0) return range;
+  const position = skillOffset(props.skills[index]!, props.modelValue) + index;
+  return { ...range, selectionStart: range.selectionStart - Number(range.selectionStart > position),
+    selectionEnd: range.selectionEnd - Number(range.selectionEnd > position) };
+}
 async function removeSkill(id: string): Promise<void> {
   if (selectionRemovalDisabled.value) return;
   const snapshot = captureInputFocus();
+  const nextRange = snapshot && rangeAfterRemoval(id, snapshot);
   emit("remove-skill", id);
   await nextTick();
-  if (snapshot) restoreInputFocus(snapshot);
+  if (nextRange) restoreInputFocus(nextRange);
 }
 
 function requestActiveTurnInterrupt(): void {
@@ -382,6 +438,14 @@ function handleKeydown(event: KeyboardEvent): void {
   const textarea = textareaElement.value;
   syncOpenSlashQuery();
   if (slashQuery.value && slashMenu.value?.handleKeydown(event)) return;
+  if (inlineEditor.value && (event.key === "Backspace" || event.key === "Delete")) {
+    const range = inlineEditor.value.capture();
+    if (range && range.selectionStart === range.selectionEnd) {
+      const at = range.selectionStart - Number(event.key === "Backspace");
+      const skill = props.skills.find((entry, index) => skillOffset(entry, props.modelValue) + index === at);
+      if (skill) { event.preventDefault(); void removeSkill(skill.id); return; }
+    }
+  }
   if (event.key === "Backspace" && !props.textOnly && !compactLayout.value &&
     !selectionRemovalDisabled.value && textarea?.selectionStart === 0 && textarea.selectionEnd === 0) {
     const skill = props.skills[props.skills.length - 1];
@@ -483,7 +547,19 @@ function handlePaste(event: ClipboardEvent): void {
           <div v-if="hasSkillPrefix" ref="connectorPrefixElement" class="chat-composer__connector-prefix" :style="connectorPrefixWidth && inputScrollTop > 0 ? { visibility: 'hidden' } : undefined">
             <ChatSkillChips :entries="skills" :disabled="selectionRemovalDisabled" @remove="removeSkill" />
           </div>
-          <textarea
+          <ChatInlineSkillEditor v-if="inlineSkills" :key="presentationScope" ref="inlineEditor" id="chat-task-input"
+            class="chat-composer__textarea" :text="modelValue" :skills="skills"
+            :readonly="submissionBusy || textLocked === true" :removal-disabled="selectionRemovalDisabled"
+            :hint-id="inlineHint ? `${slashListId}-hint` : undefined"
+            :aria-autocomplete="canSuggestSkills ? 'list' : undefined" :aria-controls="slashQuery ? slashListId : undefined"
+            :aria-activedescendant="slashQuery ? slashMenu?.activeOptionId : undefined"
+            :aria-describedby="visibleValidationMessage ? 'chat-composer-validation' : inlineHint ? `${slashListId}-hint` : undefined"
+            :aria-invalid="visibleValidationMessage ? 'true' : undefined"
+            @edit="editSkillDraft" @query="updateSlashQuery()" @remove="removeSkill"
+            @click="syncOpenSlashQuery" @keyup="syncOpenSlashQuery" @blur="slashQuery = null"
+            @keydown="handleKeydown" @paste.capture="handlePaste"
+            @compositionstart="composing = true" @compositionend="composing = false" />
+          <textarea v-else
           ref="textareaElement"
           id="chat-task-input"
           class="chat-composer__textarea"
@@ -529,7 +605,7 @@ function handlePaste(event: ClipboardEvent): void {
               :experts-available="expertsAvailable"
               @pick-attachments="emit('pick-attachments')"
             >
-              <template #skills="{ close }"><slot name="skill-control" :close="(reason?: 'selection') => closeSkillPicker(close, reason)" /></template>
+              <template #skills="{ close }"><slot name="skill-control" :select="selectPickerSkill" :close="(reason?: 'selection') => closeSkillPicker(close, reason)" /></template>
               <template #connectors="{ close }"><slot name="connector-control" :close="close" /></template>
               <template #experts="{ close }"><slot name="expert-picker" :close="close" /></template>
             </ChatAddControl>
@@ -901,12 +977,12 @@ function handlePaste(event: ClipboardEvent): void {
 }
 
 .chat-composer__slash-hint-line,
-.chat-composer__textarea {
+.chat-composer__input :deep(.chat-composer__textarea) {
   padding: var(--yj-space-4);
   font: inherit;
   line-height: var(--yj-line-height-body);
 }
-.chat-composer__textarea {
+.chat-composer__input :deep(.chat-composer__textarea) {
   display: block;
   width: 100%;
   min-height: calc(130px - var(--chat-composer-action-row-height));
@@ -923,10 +999,10 @@ function handlePaste(event: ClipboardEvent): void {
   caret-color: var(--yj-color-text-primary);
 }
 
-.chat-composer--reply .chat-composer__textarea {
+.chat-composer--reply :deep(.chat-composer__textarea) {
   min-height: calc(116px - var(--chat-composer-action-row-height));
 }
-.chat-composer--new .chat-composer__attachments + .chat-composer__input .chat-composer__textarea {
+.chat-composer--new .chat-composer__attachments + .chat-composer__input :deep(.chat-composer__textarea) {
   min-height: calc(122px - var(--chat-composer-action-row-height));
 }
 .chat-composer__input { position: relative; min-width: 0; border-radius: inherit; }
@@ -952,6 +1028,7 @@ function handlePaste(event: ClipboardEvent): void {
 }
 .chat-composer__input--skills .chat-composer__connector-prefix::-webkit-scrollbar { display: none; }
 .chat-composer__textarea::placeholder { color: var(--yj-color-text-tertiary); opacity: 1; }
+.chat-composer__input :deep(.chat-composer__textarea[contenteditable]) { overflow-y: auto; }
 .chat-composer__slash-hint {
   position: absolute;
   inset: 0;

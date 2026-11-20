@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { installedSkill } from "../test/skill-fixture";
-import { compileSkillInput, compileSelectedSkillRefs, presentSkillMessage, selectedSkillIssue, skillSelectionIssue } from "./chat-skills";
+import { compileSkillInput, compileSelectedSkillRefs, prepareSkillText, presentSkillMessage, selectedSkillIssue, skillSelectionIssue } from "./chat-skills";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -25,6 +25,28 @@ describe("per-turn explicit skill selection", () => {
       .toBe("$copywriting $invoice-generator\n\n整理这份合成资料。");
     expect(compileSkillInput("普通原文", [])).toBe("普通原文");
   });
+  it.each([false, true])("serializes each picked skill at its own UTF-16 insertion point (legacy=%s)", legacy => {
+    const text = "  📦先对比商品，\n再写标题。  ";
+    const compare = { ...installedSkill, id: "compare", runtimeName: "market:compare" };
+    const selection = [
+      { ...compare, offset: text.indexOf("对比") },
+      { ...installedSkill, offset: text.indexOf("写标题") },
+    ];
+    const sent = prepareSkillText(text, selection, legacy);
+    expect(sent.text).toBe("📦先【技能1 $market:compare】对比商品，\n再【技能2 $copywriting】写标题。");
+    expect(sent.markerStarts).toEqual([sent.text.indexOf("【技能1"), sent.text.indexOf("【技能2")]);
+    expect(prepareSkillText(text, [{ ...selection[0]!, offset: 0 }, { ...selection[1]!, offset: text.length }], legacy).text)
+      .toBe("【技能1 $market:compare】" + text + "【技能2 $copywriting】");
+    expect(prepareSkillText(text, selection, legacy)).toEqual(sent);
+  });
+  it("retains adjacent chip order and keeps inferred native selections in the original prose", () => {
+    const second = { ...installedSkill, id: "other", runtimeName: "editor" };
+    expect(prepareSkillText("甲乙", [{ ...second, offset: 1 }, { ...installedSkill, offset: 1 }], false).text)
+      .toBe("甲【技能1 $editor】【技能2 $copywriting】乙");
+    const text = "调用跨境营销文案写标题。";
+    expect(prepareSkillText(text, [installedSkill], false).text).toBe(text);
+    expect(prepareSkillText(text, [installedSkill], true).text).toBe("$copywriting\n\n" + text);
+  });
   it("requires the selected installed identity to remain enabled and Runtime-visible", () => {
     expect(selectedSkillIssue(installedSkill, [installedSkill])).toBeNull();
     expect(selectedSkillIssue(installedSkill, [])).toContain("已卸载");
@@ -38,6 +60,25 @@ describe("per-turn explicit skill selection", () => {
 
 describe("sent skill message presentation", () => {
   const textBlock = (text: string) => Object.freeze({ identity: "text", blockIndex: 0, type: "text" as const, text });
+  it("restores two markers from the saved message and keeps a typed copy of a marker literal", () => {
+    const first = { ...installedSkill, offset: 1 };
+    const second = { ...installedSkill, id: "analysis", runtimeName: "market:compare", offset: 3 };
+    const selection = [first, second];
+    const text = "先写，再查。";
+    const sent = prepareSkillText(text, selection, false);
+    const block = { ...textBlock(sent.text), skills: compileSelectedSkillRefs(selection) };
+    expect(presentSkillMessage([block], [])).toMatchObject({
+      blocks: [{ text }], skills: [{ displayName: first.id }, { displayName: second.id }], offsets: [1, 3],
+    });
+    const literal = "示例【技能1 $copywriting】，先写，再查。";
+    const picked = [{ ...first, offset: literal.indexOf("写") }, { ...second, offset: literal.indexOf("查") }];
+    const example = prepareSkillText(literal, picked, false);
+    const result = presentSkillMessage([{ ...block, text: example.text }], selection, example.markerStarts);
+    expect(result.blocks[0]).toMatchObject({ text: literal });
+    expect(result.offsets).toEqual(picked.map(skill => skill.offset));
+    expect(presentSkillMessage([textBlock(sent.text)], selection).skills).toEqual([]);
+    expect(presentSkillMessage([textBlock(sent.text)], selection, sent.markerStarts).offsets).toEqual([1, 3]);
+  });
   it("uses ordered selected identities, retaining the saved ID if that version is no longer in the catalog", () => {
     const selected = { id: installedSkill.id, version: installedSkill.version };
     const removed = { id: "older-listing-skill", version: "1.0.0" };
