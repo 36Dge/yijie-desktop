@@ -476,7 +476,7 @@ mod source_reader_tests {
     use super::*;
 
     #[test]
-    fn native_trace_v6_reads_only_current_format() {
+    fn native_trace_reads_supported_storage_formats_independently_of_live_ipc() {
         let mut value = serde_json::json!({
             "sessionId":"session","turnId":"turn","runtimeThreadId":"runtime","runtimeTurnId":"runtime-turn",
             "source":"native_observed","revision":"1","availability":"available","status":"completed",
@@ -503,7 +503,10 @@ mod source_reader_tests {
             "https://example.org/statistics/2025"
         );
         assert!(decode_native_view(&new_json, 3).is_err());
-        assert!(decode_native_view(&new_json, 7).is_err());
+        // Storage 7 was introduced with stable publication. Live IPC v8 adds
+        // ephemeral previews, with no new on-disk format.
+        assert_eq!(decode_native_view(&new_json, 7).unwrap(), new);
+        assert!(decode_native_view(&new_json, 8).is_err());
         assert!(!old_json.contains("sources"));
     }
 }

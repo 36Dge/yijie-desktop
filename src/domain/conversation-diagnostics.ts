@@ -52,6 +52,6 @@ export function isToolOutcomeNotice(code: string | undefined): boolean {
   return code !== undefined && toolNotices.has(code);
 }
 
-export function showConversationNotice(kind: "warning" | "error", code?: string): boolean {
-  return !isToolOutcomeNotice(code) && (kind !== "warning" || code !== "runtime_notice");
+export function showConversationNotice(scope: "thread" | "turn", kind: "warning" | "error", code?: string): boolean {
+  return !isToolOutcomeNotice(code) && (kind === "error" || (scope === "turn" && code !== "runtime_notice"));
 }

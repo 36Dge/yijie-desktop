@@ -12,12 +12,13 @@ import { activityItemIcon, activityNativeItem, deepSearchEvidence, deepSearchRec
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
 import ChatTimelineItemShell, { type ChatTimelineDisclosureChange } from "./ChatTimelineItemShell.vue";
 
-const props = defineProps<{ item: ConversationTimelineItemViewModel; execution: ConversationNativeToolExecution; processPresentation?: boolean; searchCalls?: readonly ConversationTimelineItemViewModel[] }>();
+const props = defineProps<{ item: ConversationTimelineItemViewModel; execution: ConversationNativeToolExecution; processPresentation?: boolean; searchCalls?: readonly ConversationTimelineItemViewModel[]; imageViewNumber?: number }>();
 const emit = defineEmits<{ "disclosure-change": [change: ChatTimelineDisclosureChange] }>();
 const evidence = computed(() => deepSearchEvidence(props.item, props.searchCalls));
 const { open, openError } = useWebSources(() => evidence.value);
 const native = computed(() => activityNativeItem(evidence.value) ?? props.execution.native.item);
-const nativeOperation = computed(() => ["fileChange", "subAgentActivity"].includes(native.value.type));
+const fileChange = computed(() => native.value.type === "fileChange");
+const imageView = computed(() => native.value.type === "imageView");
 const mcp = computed(() => native.value.mcp);
 const builtinWeb = computed(() => mcp.value?.server === "yijie_web" && ["kimi_web_search", "kimi_web_search_pro", "kimi_web_fetch"].includes(mcp.value.tool ?? ""));
 const deepSearch = computed(() => builtinWeb.value && mcp.value?.tool === "kimi_web_search_pro");
@@ -65,6 +66,15 @@ const title = computed(() => [activityItemTitle(props.item), query.value || fetc
 const elapsed = computed(() => native.value.durationMs == null ? null : formatToolDuration(native.value.durationMs));
 const identity = computed(() => mcp.value?.server && mcp.value.tool ? `${mcp.value.server} / ${mcp.value.tool}` : "工具身份信息不完整");
 const status = computed(() => {
+  if (imageView.value) {
+    switch (props.execution.status) {
+      case "completed": return "已读取图片";
+      case "failed": return "图片读取失败";
+      case "declined": return "未获准读取图片";
+      case "in_progress": return props.item.busy ? "正在读取图片" : "图片读取结果待确认";
+      default: return "图片读取结果待确认";
+    }
+  }
   if (native.value.type === "subAgentActivity") return props.item.busy ? "处理中" : "已记录";
   switch (props.execution.status) {
     case "completed": return "已完成";
@@ -130,7 +140,7 @@ const diagnosticLabels = {
     :class="{ 'deep-search-row': deepSearch, 'web-fetch-row': webFetch }"
     :process-presentation="processPresentation"
     :item="item" :label="title" :status-label="headerStatus" :icon="activityItemIcon(item, mcp)"
-    collapsible :show-availability="!deepSearch && !webFetch" :default-expanded="!deepSearch && !webFetch && !processPresentation && item.busy"
+    collapsible :show-availability="!deepSearch && !webFetch && !fileChange && !imageView" :default-expanded="!deepSearch && !webFetch && !processPresentation && item.busy"
     @disclosure-change="emit('disclosure-change', $event)"
   >
     <div class="native-tool" :aria-busy="item.busy">
@@ -153,7 +163,9 @@ const diagnosticLabels = {
         <p v-if="fetchDescription">{{ fetchDescription }}</p>
         <p v-if="elapsed" class="native-tool__source">用时 {{ elapsed }}</p>
       </template>
-      <template v-else-if="nativeOperation">
+      <p v-else-if="fileChange" class="native-tool__file-change">{{ native.text || "文件变更明细不可用。" }}</p>
+      <p v-else-if="imageView" class="native-tool__image-view">{{ status }}<span v-if="imageViewNumber"> · 本轮第 {{ imageViewNumber }} 次查看</span><span v-if="elapsed"> · 用时 {{ elapsed }}</span></p>
+      <template v-else-if="native.type === 'subAgentActivity'">
         <p v-if="native.text">{{ native.text }}</p>
         <pre v-if="native.outputText">{{ native.outputText }}</pre>
         <p v-if="native.availability !== 'available'" role="note">部分记录未完整展示。</p>
@@ -188,7 +200,7 @@ const diagnosticLabels = {
 .native-tool { display:grid; gap:var(--yj-space-3); color:var(--yj-color-text-primary); }
 .native-tool h3 { font-size:var(--yj-font-size-caption); margin:0 0 var(--yj-space-2); }
 .native-tool p { margin:0; }
-.native-tool__query { overflow-wrap: anywhere; white-space: pre-wrap; }
+.native-tool__query, .native-tool__file-change { overflow-wrap: anywhere; white-space: pre-wrap; }
 .deep-search-row .native-tool, .web-fetch-row .native-tool {
   color: var(--yj-color-text-secondary);
   font-size: var(--yj-font-size-caption);
@@ -197,6 +209,6 @@ const diagnosticLabels = {
 }
 .native-tool__page-title { color: var(--yj-color-text-primary); overflow-wrap: anywhere; }
 .native-tool pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:28rem; overflow:auto; margin:0; font:inherit; }
-.native-tool__source { color:var(--yj-color-text-secondary); font-size:var(--yj-font-size-caption); }
+.native-tool__source, .native-tool__image-view { color:var(--yj-color-text-secondary); font-size:var(--yj-font-size-caption); }
 .native-tool__calls code { overflow-wrap: anywhere; color: var(--yj-color-text-muted); }
 </style>

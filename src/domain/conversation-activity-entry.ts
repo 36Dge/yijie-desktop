@@ -6,6 +6,7 @@ export type ConversationActivityEntry = Readonly<{
   identity: string;
   item: Item;
   actionIndex?: number;
+  imageViewNumber?: number;
   searchCalls?: readonly Item[];
   category: "command" | "read" | "listFiles" | "search" | "tool" | "web_search" | "unknown";
   title: string;
@@ -26,6 +27,8 @@ export function activityItemIcon(item: Item, mcp = activityNativeItem(item)?.mcp
     case "command": return item.execution?.kind === "command" ? "terminal" : "workspace";
     case "web_search": return "globe";
     case "tool":
+      if (activityNativeItem(item)?.type === "fileChange") return "fileEdit";
+      if (activityNativeItem(item)?.type === "imageView") return "viewImage";
       if (mcp?.server === "yijie_web") {
         if (mcp.tool === "kimi_web_search_pro") return "scanSearch";
         if (mcp.tool === "kimi_web_fetch") return "readPage";
@@ -90,6 +93,7 @@ export function activityToolSourceLabel(item: Item): string | undefined {
 }
 export function activityToolTitle(item: Item): string {
   const native = activityNativeItem(item);
+  if (native?.type === "imageView") return "查看图片";
   const title = native?.toolDisplay?.title || native?.toolLabel;
   const mcp = native?.mcp;
   const genericIdentity = !title || title === mcp?.tool || title === `${mcp?.server} / ${mcp?.tool}` || title === `${mcp?.server}/${mcp?.tool}` || title === "调用工具";

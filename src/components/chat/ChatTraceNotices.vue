@@ -5,7 +5,7 @@ import { conversationDiagnosticMessage, showConversationNotice } from "../../dom
 
 const props = defineProps<{ notices: readonly NativeTraceNotice[] }>();
 const visibleNotices = computed(() => props.notices.filter((notice, index, all) => {
-  if (notice.method !== "warning" || !showConversationNotice(notice.method, notice.code)) return false;
+  if (notice.method !== "warning" || !showConversationNotice(notice.scope, notice.method, notice.code)) return false;
   const previous = all[index - 1];
   // Collapse only consecutive equivalent display notices, never saved facts.
   return !previous || previous.scope !== notice.scope || previous.method !== notice.method || previous.code !== notice.code || (previous.willRetry ?? null) !== (notice.willRetry ?? null) || previous.itemId !== notice.itemId;
@@ -15,7 +15,7 @@ const visibleNotices = computed(() => props.notices.filter((notice, index, all) 
 <template>
   <aside v-if="visibleNotices.length" class="chat-trace-notices" aria-label="运行通知">
     <details v-for="notice in visibleNotices" :key="notice.eventId">
-      <summary>{{ notice.scope === "thread" ? "对话提示" : "本轮提示" }}</summary>
+      <summary>本轮提示</summary>
       <p role="note">{{ conversationDiagnosticMessage(notice.code) }}</p>
     </details>
   </aside>

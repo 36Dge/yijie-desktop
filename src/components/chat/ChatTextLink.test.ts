@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
 import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import { computed } from "vue";
-import { messageFileActionKey } from "../../composables/useChatMessageLink";
+import { messageFileActionKey, messageFileServicesKey, type MessageFileLocation, type MessageFileServices } from "../../composables/useChatMessageLink";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ChatSafeContent from "./ChatSafeContent.vue";
+import ChatArtifactDocumentCard from "./ChatArtifactDocumentCard.vue";
+import YjIcon from "../yijie/YjIcon.vue";
 import ChatTurnGroup from "./ChatTurnGroup.vue";
 import { historyPageToConversationSnapshot } from "../../api/chat-conversation-adapter";
 import type { NativeConversationView } from "../../api/generated/native-conversation-private.gen";
@@ -149,11 +151,11 @@ describe("conversation output file links", () => {
   const path = "/Users/example/Desktop/杭州旅游介绍 (初稿).md";
   const uri = "file://" + encodeURI(path);
   const source = `已生成并保存到你的电脑桌面：\n\n**[杭州旅游介绍.md](${uri})**\n\n路径：\`${path}\``;
-  function renderFile(text: string, streaming = false) {
+  function renderFile(text: string, streaming = false, typography: "compact" | "answer" = "compact", services?: MessageFileServices) {
     const open = vi.fn();
     const wrapper = mount(ChatSafeContent, { attachTo: document.body,
-      props: {blocks: blocks(text), linkTarget: target, fileLinks: true, streaming, animate: false},
-      global: {provide: {[messageFileActionKey as symbol]: computed(() => open)}},
+      props: {blocks: blocks(text), linkTarget: target, fileLinks: true, streaming, animate: false, typography},
+      global: {provide: {[messageFileActionKey as symbol]: computed(() => open), [messageFileServicesKey as symbol]: computed(() => services)}},
     });
     return { wrapper, open };
   }
@@ -185,18 +187,91 @@ describe("conversation output file links", () => {
     ]);
     expect(wrapper.get("pre").text()).toBe("/work/例子.html");
   });
-  it("keeps selected file text without opening and preserves click and keyboard activation", async () => {
-    const { wrapper, open } = renderFile(source);
-    const link = wrapper.get('[role="link"]');
+  it("keeps the file path out of the document card on hover and keyboard focus", async () => {
+    const path = "/work/杭州3天行程.html";
+    let sizeBytes = 1024;
+    const {wrapper} = renderFile("[行程](./杭州3天行程.html)", false, "answer", {
+      locate: async () => ({path, fileInfo: {sizeBytes, saveSupported: true}}),
+      save: vi.fn(),
+    });
+    await flushPromises();
+    const card = wrapper.get(".chat-artifact-document-card");
+    const preview = card.get('button[aria-label="预览 杭州3天行程.html"]');
+    const size = card.get(".chat-artifact-document-card__size");
+    expect(size.text()).toBe("1.0 KB");
+    sizeBytes = 2048;
+    await card.trigger("mouseenter");
+    await preview.trigger("mouseenter");
+    await flushPromises();
+    expect(preview.attributes("aria-describedby")).toBe(size.attributes("id"));
+    expect(preview.attributes("title")).toBeUndefined();
+    expect(document.body.textContent).not.toContain(path);
+    expect(size.text()).toBe("2.0 KB");
+
+    await preview.trigger("mouseleave");
+    (preview.element as HTMLButtonElement).focus();
+    await flushPromises();
+    expect(preview.attributes("aria-describedby")).toBe(size.attributes("id"));
+    expect(document.body.textContent).not.toContain(path);
+  });
+  it("uses document cards for grouped and listed outputs while prose, images, video and code keep their own presentation", async () => {
+    const answer = [
+      "**[下载行程](./out/行程.html)**  \n[打印版](./out/行程.pdf)",
+      "- [表格](./out/预算.xlsx)\n- [另一份行程](./archive/行程.html)",
+      "[地图](./out/地图.png)\n[演示](./out/演示.mp4)",
+      "参考 [备注](./notes.md)。",
+      "```txt\n/work/example.docx\n```",
+    ].join("\n\n");
+    const sizes = new Map([["out/行程.html", 29895], ["out/行程.pdf", 512], ["out/预算.xlsx", 1024], ["archive/行程.html", 37817]]);
+    const locate = vi.fn<MessageFileServices["locate"]>(async (_scope, file) => ({
+      path: "/work/" + file.path, fileInfo: {sizeBytes: sizes.get(file.path)!, saveSupported: true},
+    }));
+    const save = vi.fn<MessageFileServices["save"]>(async () => {});
+    const { wrapper, open } = renderFile(answer, false, "answer", {locate, save});
+    await flushPromises();
+    const cards = wrapper.findAllComponents(ChatArtifactDocumentCard);
+    expect(cards.map(card => card.props("name"))).toEqual(["行程.html", "行程.pdf", "预算.xlsx", "行程.html"]);
+    expect(cards.map(card => card.getComponent(YjIcon).props("name"))).toEqual(["documentCode", "documentPdf", "documentSpreadsheet", "documentCode"]);
+    expect(cards.map(card => card.get(".chat-artifact-document-card__size").text())).toEqual(["29.2 KB", "512 B", "1.0 KB", "36.9 KB"]);
+    expect(locate.mock.calls.map(([, file]) => file.path)).toEqual([...sizes.keys()]);
+    await cards[3]!.get('button[aria-label="另存为"]').trigger("click");
+    expect(save).toHaveBeenCalledExactlyOnceWith(target, expect.objectContaining({path: "archive/行程.html"}));
+    expect(wrapper.findAll(".chat-file-link").map(link => link.text())).toEqual(["《地图.png》", "《演示.mp4》", "《notes.md》"]);
+    expect(wrapper.get("pre").text()).toBe("/work/example.docx");
+    expect(open).not.toHaveBeenCalled();
+    for (const card of cards) await card.get("button").trigger("click");
+    expect(open.mock.calls.map(([scope, file]) => [scope, file.path])).toEqual([
+      [target, "out/行程.html"], [target, "out/行程.pdf"], [target, "out/预算.xlsx"], [target, "archive/行程.html"],
+    ]);
+    expect(wrapper.props("blocks")).toEqual(blocks(answer));
+  });
+  it("discards old file sizes and disables direct save when the current Native response has only a path", async () => {
+    let finish!: (value: MessageFileLocation) => void;
+    const locate = vi.fn<MessageFileServices["locate"]>()
+      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
+      .mockResolvedValueOnce({path: "/work/b/报告.html"});
+    const {wrapper, open} = renderFile("[报告](./a/报告.html)", false, "answer", {locate, save: vi.fn()});
+    await wrapper.setProps({blocks: blocks("[报告](./b/报告.html)")});
+    finish({path: "/work/a/报告.html", fileInfo: {sizeBytes: 2048, saveSupported: true}});
+    await flushPromises();
+    expect(wrapper.get(".chat-artifact-document-card__size").text()).toBe("大小未知");
+    expect(wrapper.get('button[aria-label="另存为"]').attributes("disabled")).toBeDefined();
+    await wrapper.get('button[aria-label="预览 报告.html"]').trigger("click");
+    expect(open).toHaveBeenCalledExactlyOnceWith(target, expect.objectContaining({path: "b/报告.html"}));
+  });
+  it.each(["compact", "answer"] as const)("keeps selected file text without opening and preserves click and keyboard activation (%s)", async typography => {
+    const { wrapper, open } = renderFile(source, false, typography);
+    const card = typography === "answer";
+    const link = wrapper.get(card ? ".chat-artifact-document-card__open" : '[role="link"]');
     const selection = document.getSelection()!;
     const range = document.createRange();
-    range.selectNodeContents(link.get("span").element);
+    range.selectNodeContents(link.get(card ? ".chat-artifact-document-card__name" : "span").element);
     selection.removeAllRanges();
     selection.addRange(range);
     try {
       await link.trigger("pointerdown", { button: 0, clientX: 10, clientY: 10 });
       await link.trigger("click", { detail: 1, clientX: 100, clientY: 10 });
-      expect(selection.toString()).toBe("《杭州旅游介绍 (初稿).md》");
+      expect(selection.toString()).toBe(card ? "杭州旅游介绍 (初稿).md" : "《杭州旅游介绍 (初稿).md》");
       expect(open).not.toHaveBeenCalled();
       await link.trigger("pointerdown", { button: 0, clientX: 100, clientY: 10 });
       await link.trigger("click", { detail: 1, clientX: 100, clientY: 10 });
@@ -210,12 +285,12 @@ describe("conversation output file links", () => {
       selection.removeAllRanges();
     }
   });
-  it("activates a streamed bold output only after the destination closes", async () => {
-    const { wrapper } = renderFile("**[指南](file:///Users/example/Desk", true);
+  it.each(["compact", "answer"] as const)("activates a streamed bold output only after the destination closes (%s)", async typography => {
+    const { wrapper } = renderFile("**[指南](file:///Users/example/Desk", true, typography);
     expect(wrapper.text()).toBe("指南");
-    expect(wrapper.find('[role="link"]').exists()).toBe(false);
+    expect(wrapper.find("button").exists()).toBe(false);
     await wrapper.setProps({blocks: blocks(source)});
-    expect(wrapper.findAll('[role="link"]')).toHaveLength(1);
+    expect(wrapper.findAll(typography === "answer" ? ".chat-artifact-document-card" : '[role="link"]')).toHaveLength(1);
     expect(wrapper.text()).not.toContain("/Users/");
   });
 });

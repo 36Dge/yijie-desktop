@@ -68,6 +68,7 @@ describe("ChatArtifactList report integration", () => {
 
 describe("ChatArtifactList document cards", () => {
   const formats = [
+    ["html", "text/html"],
     ["md", "text/markdown"],
     ["docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
     ["pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],

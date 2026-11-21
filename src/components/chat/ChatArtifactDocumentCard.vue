@@ -1,19 +1,22 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, useId } from "vue";
 import { chatDocumentIcon, fileNameParts } from "../../domain/chat-file-presentation";
 import YjIcon from "../yijie/YjIcon.vue";
 import YjTooltip from "../yijie/YjTooltip.vue";
 
 const props = defineProps<{
   name: string;
-  mediaType: string | null;
+  mediaType?: string | null;
   sizeBytes: number | null;
+  selectable?: boolean;
+  disabled?: boolean;
   canSave: boolean;
   saving: boolean;
 }>();
-defineEmits<{ open: []; save: [] }>();
-const icon = computed(() => chatDocumentIcon(props.mediaType ?? ""));
+defineEmits<{ open: [event: MouseEvent]; save: [] }>();
+const icon = computed(() => chatDocumentIcon(props.mediaType ?? "", props.name));
 const nameParts = computed(() => fileNameParts(props.name));
+const sizeId = useId();
 const sizeLabel = computed(() => {
   const bytes = props.sizeBytes;
   if (bytes === null) return "大小未知";
@@ -25,13 +28,15 @@ const sizeLabel = computed(() => {
 
 <template>
   <div class="chat-artifact-document-card" :aria-busy="saving">
-    <button class="chat-artifact-document-card__open" type="button" :aria-label="`预览 ${name}`" aria-controls="conversation-file-preview" @click="$emit('open')">
+    <button class="chat-artifact-document-card__open" :class="{ 'yj-selectable-text': selectable }" type="button"
+      :aria-label="`预览 ${name}`" :aria-describedby="sizeId" :aria-controls="disabled ? undefined : 'conversation-file-preview'" :aria-disabled="disabled || undefined"
+      @click="!disabled && $emit('open', $event)">
       <span class="chat-artifact-document-card__icon" aria-hidden="true">
         <YjIcon :name="icon" size="xl" />
       </span>
       <span class="chat-artifact-document-card__copy">
         <strong class="chat-artifact-document-card__name"><span>{{ nameParts.stem }}</span><span>{{ nameParts.extension }}</span></strong>
-        <span class="chat-artifact-document-card__size">{{ sizeLabel }}</span>
+        <span :id="sizeId" class="chat-artifact-document-card__size">{{ sizeLabel }}</span>
       </span>
     </button>
     <YjTooltip text="另存为">
@@ -44,9 +49,10 @@ const sizeLabel = computed(() => {
 
 <style scoped>
 .chat-artifact-document-card { position: relative; min-width: 0; height: var(--yj-space-16); border-radius: var(--yj-radius-xl); background: var(--yj-color-chat-artifact-bg); }
-.chat-artifact-document-card:hover { background: var(--yj-color-chat-artifact-hover); }
+.chat-artifact-document-card:hover:has(.chat-artifact-document-card__open:not([aria-disabled])) { background: var(--yj-color-chat-artifact-hover); }
 .chat-artifact-document-card__open { display: flex; width: 100%; height: 100%; min-width: 0; align-items: center; gap: var(--yj-space-2); padding: var(--yj-space-2) calc(var(--yj-space-12) + var(--yj-space-3)) var(--yj-space-2) var(--yj-space-3); border: 0; border-radius: inherit; background: transparent; color: var(--yj-color-chat-artifact-title); text-align: left; font: inherit; cursor: pointer; }
 .chat-artifact-document-card__icon { display: flex; flex: none; align-items: center; justify-content: center; width: var(--yj-size-chat-artifact-icon); height: var(--yj-size-chat-artifact-icon); }
+.chat-artifact-document-card__open[aria-disabled="true"] { color: var(--yj-color-text-disabled); cursor: default; }
 .chat-artifact-document-card__icon :deep(.yj-icon) { width: 100%; height: 100%; }
 .chat-artifact-document-card__copy { display: flex; flex: 1; min-width: 0; flex-direction: column; }
 .chat-artifact-document-card__name { display: flex; min-width: 0; font-size: var(--yj-font-size-chat-artifact-title); font-weight: var(--yj-font-weight-semibold); line-height: var(--yj-line-height-chat-artifact-title); }

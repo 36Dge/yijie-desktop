@@ -14,8 +14,11 @@ export function activityItemTitle(item: Item): string {
 
 export function summarizeActivity(group: ConversationActivityGroup, live: boolean) {
   const calls = group.items.filter(item => ["command", "tool", "web_search"].includes(item.presentation));
-  const toolSources = [...new Set(calls.flatMap(item => {
-    const label = item.presentation === "tool" ? activityToolSourceLabel(item) : null;
+  const tools = calls.filter(item => item.presentation === "tool");
+  const otherTools = tools.filter(item => activityNativeItem(item)?.type !== "imageView");
+  const imageViews = tools.length - otherTools.length;
+  const toolSources = [...new Set(otherTools.flatMap(item => {
+    const label = activityToolSourceLabel(item);
     return label ? [label] : [];
   }))];
   const sources = new Set(calls.flatMap(item => item.webSearch?.sources?.map(source => source.url) ?? []));
@@ -32,7 +35,8 @@ export function summarizeActivity(group: ConversationActivityGroup, live: boolea
   const categories = new Set(group.entries.map(entry => entry.category));
   const parts: string[] = [];
   if (toolSources.length) parts.push(`已使用 ${toolSources.join("、")}`);
-  if (calls.some(item => item.presentation === "tool" && !activityToolSourceLabel(item))) parts.push("调用了工具");
+  if (otherTools.some(item => !activityToolSourceLabel(item))) parts.push("调用了工具");
+  if (imageViews) parts.push(imageViews === 1 ? "查看了图片" : `查看图片 ${imageViews} 次`);
   if (categories.has("read") || categories.has("listFiles") || categories.has("search")) parts.push("查看了项目内容");
   if (categories.has("command")) parts.push("运行了命令");
   const webActions = new Set(calls.filter(item => item.presentation === "web_search").map(item => item.webSearch?.action));

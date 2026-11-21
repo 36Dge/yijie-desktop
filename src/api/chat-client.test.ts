@@ -73,8 +73,11 @@ describe("chat client", () => {
 
   it("accepts only a complete native view in its declared session", async () => {
     let deliver: (value: unknown) => void = () => undefined;
+    let preview: (value: unknown) => void = () => undefined;
     const client = createChatClient({invoke: async () => ({}), listen: async (channel, handler) => {
-      expect(channel).toBe("chat:native-view:v7"); deliver=handler; return () => undefined;
+      expect(["chat:native-view:v7", "chat:native-view:v8"]).toContain(channel);
+      if (channel.endsWith("v7")) deliver=handler; else preview=handler;
+      return () => undefined;
     }});
     const receive=vi.fn(); const invalid=vi.fn();
     await client.onNativeView(receive, invalid);
@@ -83,6 +86,14 @@ describe("chat client", () => {
     deliver(event); expect(receive).toHaveBeenCalledWith(event);
     deliver({...event,view:{...event.view,sessionId:"different-session"}});
     expect(receive).toHaveBeenCalledTimes(1); expect(invalid).toHaveBeenCalledOnce();
+    const live = {...event, schemaVersion: 8, view: {...event.view, status:"inProgress", terminalObserved:false},
+      previews:[{itemId:"answer",text:"部分正文"}]};
+    preview(live);
+    expect(receive).toHaveBeenLastCalledWith(live);
+    deliver({...live,schemaVersion:7});
+    preview({...live,view:{...live.view,terminalObserved:true}});
+    expect(receive).toHaveBeenCalledTimes(2);
+    expect(invalid).toHaveBeenCalledTimes(3);
   });
 
   it("negotiates v6 approval subscription through the existing closed command", async () => {

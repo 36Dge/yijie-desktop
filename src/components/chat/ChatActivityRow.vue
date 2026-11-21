@@ -255,7 +255,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange) { emit("app
             @approval-decision="forwardApprovalDecision"
           />
 
-          <ChatNativeToolItem :search-calls="activityEntry?.searchCalls ?? searchCalls"
+          <ChatNativeToolItem :search-calls="activityEntry?.searchCalls ?? searchCalls" :image-view-number="activityEntry?.imageViewNumber"
             v-else-if="item.presentation === 'tool' && item.execution?.kind === 'tool' && 'native' in item.execution"
             :item="item"
             :process-presentation="processPresentation"

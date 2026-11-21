@@ -3,6 +3,39 @@ import type { SkillPosition } from "../../domain/chat-skill-placement";
 
 type Point = { node: Node; offset: number };
 
+function startsParagraph(node: Node | null): boolean {
+  return node instanceof HTMLElement && (node.tagName === "DIV" || node.tagName === "P");
+}
+
+function needsCaretSeparator(next: Node | null): boolean {
+  if (next instanceof Text) return !next.length || /^[\r\n]/.test(next.data);
+  return !next || next instanceof HTMLBRElement || (next instanceof HTMLElement && next.hasAttribute("data-skill-id"));
+}
+
+export function syncSkillCarets(root: HTMLElement, tokens: ReadonlyMap<string, HTMLElement>) {
+  // Native editing may move a separator away from its skill. Once text can
+  // carry the caret itself, drop the extra cursor stop.
+  for (const separator of root.querySelectorAll(".inline-skill-separator")) {
+    const previous = separator.previousSibling;
+    if (!(previous instanceof HTMLElement && previous.dataset.skillId) || !needsCaretSeparator(separator.nextSibling)) {
+      separator.remove();
+    }
+  }
+  for (const token of tokens.values()) {
+    if (!needsCaretSeparator(token.nextSibling)) continue;
+    // A zero-size image gives WebKit a caret box at a line end or between
+    // adjacent skills without inserting text into the draft or clipboard.
+    const separator = root.ownerDocument.createElement("img");
+    separator.className = "inline-skill-separator";
+    separator.alt = "";
+    separator.width = 0;
+    separator.height = 0;
+    separator.draggable = false;
+    separator.contentEditable = "false";
+    token.after(separator);
+  }
+}
+
 // Read only the editable text. A non-editable skill, including all of its
 // artwork and accessible labels, occupies one caret stop in the editor.
 export function readSkillEditor(root: HTMLElement) {
@@ -32,15 +65,18 @@ export function readSkillEditor(root: HTMLElement) {
         positions.push({ id, offset: text.length });
         tokens.set(id, node);
         value += " ";
-        runs.push({ start, end: value.length, before, after });
+        const next = node.nextSibling;
+        const afterSkill = next instanceof Text ? { node: next, offset: 0 } : after;
+        runs.push({ start, end: value.length, before, after: afterSkill });
       } else if (node instanceof HTMLBRElement) {
-        // Browsers leave a final placeholder BR for the caret on an empty line.
-        if (node.nextSibling) {
+        // A trailing placeholder BR, including one before the next paragraph,
+        // has no line break of its own.
+        if (node.nextSibling && !startsParagraph(node.nextSibling)) {
           text += "\n"; value += "\n";
           runs.push({ start, end: value.length, before, after });
         }
       } else if (node instanceof HTMLElement) {
-        if (index && (node.tagName === "DIV" || node.tagName === "P")) {
+        if (index && startsParagraph(node)) {
           text += "\n"; value += "\n";
           runs.push({ start, end: value.length, before, after: { node, offset: 0 } });
         }

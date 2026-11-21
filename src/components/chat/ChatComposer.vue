@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
+import { useChatComposerCaret } from "../../composables/useChatComposerCaret";
 import type {
   ChatComposerFocusSnapshot,
   ChatComposerSubmissionState,
@@ -161,6 +162,10 @@ const attachmentConstraintMessage = computed(() => {
   return imageBytes > 10 * 1024 * 1024 ? "每条消息中的图片总大小不能超过 10 MB。" : null;
 });
 const submissionBusy = computed(() => props.submissionState !== "idle");
+const inputContainer = ref<HTMLElement | null>(null);
+const caretMirror = ref<HTMLElement | null>(null);
+const { position: caretPosition, refresh: refreshCaret, hide: hideCaret } =
+  useChatComposerCaret(inputContainer, caretMirror, () => !composing.value && !submissionBusy.value && !props.textLocked);
 const selectionRemovalDisabled = computed(() =>
   submissionBusy.value || props.streaming || props.textLocked || !props.canSend,
 );
@@ -293,6 +298,7 @@ function syncTextareaHeight(textarea = textareaElement.value): void {
 }
 
 function syncInputLayout(): void {
+  refreshCaret();
   if (inlineEditor.value) { inlineEditor.value.positionHint(); return; }
   const textarea = textareaElement.value, prefix = connectorPrefixElement.value;
   let width = 0;
@@ -543,7 +549,10 @@ function handlePaste(event: ClipboardEvent): void {
             />
           </li>
         </ul>
-        <div class="chat-composer__input" :class="{ 'chat-composer__input--inline-prefix': connectorPrefixWidth > 0, 'chat-composer__input--skills': hasSkillPrefix }" :style="{ '--connector-prefix-width': `${connectorPrefixWidth}px` }">
+        <div ref="inputContainer" class="chat-composer__input"
+          :class="{ 'chat-composer__input--inline-prefix': connectorPrefixWidth > 0, 'chat-composer__input--skills': hasSkillPrefix, 'chat-composer__input--thin-caret': caretPosition }"
+          :style="{ '--connector-prefix-width': `${connectorPrefixWidth}px` }"
+          @focusin="refreshCaret" @focusout="hideCaret" @input="refreshCaret" @scroll.capture="refreshCaret" @select.capture="refreshCaret">
           <div v-if="hasSkillPrefix" ref="connectorPrefixElement" class="chat-composer__connector-prefix" :style="connectorPrefixWidth && inputScrollTop > 0 ? { visibility: 'hidden' } : undefined">
             <ChatSkillChips :entries="skills" :disabled="selectionRemovalDisabled" @remove="removeSkill" />
           </div>
@@ -585,6 +594,11 @@ function handlePaste(event: ClipboardEvent): void {
           @compositionstart="composing = true"
           @compositionend="composing = false"
         />
+          <div class="chat-composer__caret-layer" aria-hidden="true" inert>
+            <div v-if="!inlineSkills" ref="caretMirror" class="chat-composer__caret-mirror" />
+            <span v-if="caretPosition" :key="caretPosition.left + ',' + caretPosition.top"
+              class="chat-composer__caret" :style="caretPosition" />
+          </div>
           <div v-if="slashHintPrefix" class="chat-composer__slash-hint" aria-hidden="true">
             <div class="chat-composer__slash-hint-line" :style="{ width: inputViewportWidth ? `${inputViewportWidth}px` : undefined, transform: `translateY(${-inputScrollTop}px)` }">
               <span>{{ slashHintPrefix }}</span><span :id="`${slashListId}-hint`" class="chat-composer__slash-hint-label">输入以筛选</span>
@@ -1006,6 +1020,18 @@ function handlePaste(event: ClipboardEvent): void {
   min-height: calc(122px - var(--chat-composer-action-row-height));
 }
 .chat-composer__input { position: relative; min-width: 0; border-radius: inherit; }
+.chat-composer__input--thin-caret :deep(.chat-composer__textarea) { caret-color: transparent; }
+.chat-composer__caret-layer { position: absolute; inset: 0; overflow: hidden; pointer-events: none; user-select: none; }
+.chat-composer__caret-mirror { position: absolute; box-sizing: border-box; visibility: hidden; }
+.chat-composer__caret { position: absolute; width: var(--yj-border-width); height: 1em; transform: translateY(-50%); background: var(--yj-color-text-primary); animation: composer-caret-blink 1s step-end infinite; }
+@keyframes composer-caret-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .chat-composer__caret { animation: none; }
+}
+@media (forced-colors: active) {
+  .chat-composer__caret { display: none; }
+  .chat-composer__input--thin-caret :deep(.chat-composer__textarea) { caret-color: auto; }
+}
 .chat-composer__connector-prefix { width: max-content; max-width: calc(100% - var(--yj-space-8)); margin: var(--yj-space-4) var(--yj-space-4) 0; }
 .chat-composer__connector-prefix + .chat-composer__textarea { padding-top: var(--yj-space-2); }
 .chat-composer__input--inline-prefix .chat-composer__connector-prefix { position: absolute; top: var(--yj-space-4); left: var(--yj-space-4); margin: 0; }

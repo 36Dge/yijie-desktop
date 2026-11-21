@@ -31,6 +31,12 @@ export function parseDocumentPreviewResponse(value: unknown, requestId: string, 
   if (data.viewId !== viewId || !["ready", "resized", "position", "closed", "located", "saved", "cancelled"].includes(String(data.status))) throw new DocumentPreviewError("artifact_native_unavailable");
   if (["saved", "cancelled"].includes(String(data.status)) && (data.document !== null || data.position !== null || data.path !== undefined)) throw new DocumentPreviewError("artifact_native_unavailable");
   if (data.status === "located" && (typeof data.path !== "string" || !data.path.startsWith("/") || data.path.length > 4096 || data.path.includes("\0") || data.document !== null || data.position !== null)) throw new DocumentPreviewError("artifact_native_unavailable");
+  if (data.fileInfo !== undefined) {
+    const info = object(data.fileInfo);
+    if (data.status !== "located" || !Number.isSafeInteger(info.sizeBytes) || Number(info.sizeBytes) < 0 || typeof info.saveSupported !== "boolean") {
+      throw new DocumentPreviewError("artifact_native_unavailable");
+    }
+  }
   const doc = document(data.document);
   if (data.status === "ready" && !doc) throw new DocumentPreviewError("artifact_native_unavailable");
   if (data.position !== null) {
@@ -45,7 +51,7 @@ export function createDocumentPreviewClient(nativeInvoke: Invoker = invoke) {
       const request: Request = { schemaVersion: 1, requestId: crypto.randomUUID(), contextId, payload };
       try {
         const result = parseDocumentPreviewResponse(await nativeInvoke("chat_document_preview_v1", { request }), request.requestId, payload.viewId);
-        const expected = { locate: ["located"], open: ["ready"], resize: ["resized"], position: ["position"], close: ["closed"], save: ["saved", "cancelled"] }[payload.action];
+        const expected = { locate: ["located"], open: ["ready"], resize: ["resized"], position: ["position"], close: ["closed"], save: ["saved", "cancelled"], saveMessageFile: ["saved", "cancelled"] }[payload.action];
         if (!expected.includes(result.status)) throw new DocumentPreviewError("artifact_native_unavailable");
         return result;
       }

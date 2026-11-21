@@ -29,6 +29,33 @@ function renderDeepSearch(mcp: NonNullable<NativeItem["mcp"]>, fields: Partial<N
 
 describe("native Tool display",()=>{
   it.each([
+    {method: "item/started", live: true, expected: "正在读取图片"},
+    {method: "item/started", live: false, expected: "图片读取结果待确认"},
+    {method: "thread/read", live: false, expected: "图片读取结果待确认"},
+    {method: "item/completed", live: false, duration: 1200, expected: "已读取图片 · 用时 1.2 秒"},
+  ] as const)("shows the image-view outcome for $method (live=$live)", async test => {
+    const view: NativeConversationView = {
+      sessionId: "session", turnId: "turn", runtimeThreadId: "thread", runtimeTurnId: "rt", revision: "1",
+      source: test.method === "thread/read" ? "native_rebuilt" : "native_observed", availability: "partial",
+      status: test.live ? "inProgress" : "interrupted", statusSource: test.method === "thread/read" ? "runtime_read" : "runtime_notification",
+      terminalObserved: !test.live, items: [{ordinal: 0, lastMethod: test.method, item: {
+        id: "view", type: "imageView", availability: "partial", ...("duration" in test && {durationMs: test.duration}),
+      }}],
+    };
+    const state = composeConversationView({threads: [{threadId: "session", status: "ready"}], turns: [], items: []}, [view]);
+    const item = selectConversationTimeline(state, "session", undefined, {
+      liveTurnId: test.live ? "turn" : null, protectApprovalProcessContent: false,
+    })!.turns[0]!.items[0]!;
+    if (item.execution?.kind !== "tool" || !("native" in item.execution)) throw new Error("missing image view");
+    const wrapper = mount(ChatNativeToolItem, {props: {item, execution: item.execution, processPresentation: true}});
+    const toggle = wrapper.get("button");
+    expect(toggle.text()).toBe("查看图片");
+    await toggle.trigger("click");
+    expect(wrapper.get(".chat-timeline-item-shell__body").text()).toBe(test.expected);
+    wrapper.unmount();
+  });
+
+  it.each([
     {status: "completed", site: "example.org", title: "Reading guide", outcome: "已读取部分正文，网页内容较长。", expected: "已读取部分正文"},
     {status: "failed", site: "example.org", title: "", outcome: "网页未返回可用正文。", expected: "网页未返回可用正文"},
     {status: "completed", site: "example.org", title: "Old guide", outcome: '{"url":"https://example.org/page","title":"Old guide","markdown":"Recorded page body","truncated":false}', expected: "已读取网页正文"},
@@ -133,22 +160,41 @@ describe("native Tool display",()=>{
     expect(wrapper.get("[aria-label='网页检索材料']").text()).toContain("普通检索材料");
     expect(activityToolSourceLabel(item)).toBe("易界网页检索");wrapper.unmount();
   });
-  it("shows native file changes and child activity without inventing an MCP result or child completion", async()=>{
-    for (const raw of [
-      traceItem("patch169", "fileChange", {status:"completed",toolLabel:"修改文件",text:"新增 note.txt",outputText:"+ordinary note"}),
-      traceItem("spawn169", "subAgentActivity", {toolLabel:"启动子任务",text:"启动子任务 /root/report"}),
-    ]) {
-      const original=JSON.stringify(raw);const item=traceTurn([raw]).items[0]!;
-      if(item.execution?.kind!=="tool"||!("native" in item.execution))throw new Error("native operation missing");
-      const wrapper=mount(ChatNativeToolItem,{props:{item,execution:item.execution}});
-      const button=wrapper.get("button.chat-timeline-item-shell__disclosure");
-      if(button.attributes("aria-expanded")!=="true")await button.trigger("click");
-      expect(wrapper.text()).toContain(raw.text);
-      expect(wrapper.text()).not.toContain("工具身份信息不完整");
-      expect(wrapper.text()).not.toContain("服务返回文本");
-      if(raw.type==="subAgentActivity") {expect(wrapper.get(".chat-timeline-item-shell__disclosure").attributes("aria-description")).toBe("已记录");expect(wrapper.text()).not.toContain("子任务已完成");}
-      expect(JSON.stringify(raw)).toBe(original);wrapper.unmount();
-    }
+  it.each([
+    { availability: "available", text: "新增 杭州与苏州城市对比报告.html" },
+    { availability: "partial", text: "修改 report.css；删除 old.html" },
+    { availability: "unavailable", text: undefined },
+  ] as const)("shows only the file change summary when details are $availability", async ({ availability, text }) => {
+    const raw = traceItem("patch", "fileChange", {
+      status: "completed", toolLabel: "修改文件", availability, text,
+      outputText: [text, "<!DOCTYPE html>", "<style>:root { --ink: #18332f; }</style>"].join("\n"),
+    });
+    const item = traceTurn([raw]).items[0]!;
+    if (item.execution?.kind !== "tool" || !("native" in item.execution)) throw new Error("missing file change");
+    const wrapper = mount(ChatNativeToolItem, { props: { item, execution: item.execution, processPresentation: true } });
+    const button = wrapper.get("button.chat-timeline-item-shell__disclosure");
+    expect(button.text()).toBe("修改文件");
+    expect(button.get("svg").classes()).toContain("lucide-file-pen-line");
+    expect(button.attributes("aria-expanded")).toBe("false");
+    await button.trigger("click");
+    expect(wrapper.get(".chat-timeline-item-shell__body").text()).toBe(text ?? "文件变更明细不可用。");
+    expect(wrapper.find("pre").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("shows the recorded child activity without an MCP result or child completion", async () => {
+    const raw = traceItem("spawn169", "subAgentActivity", { toolLabel: "启动子任务", text: "启动子任务 /root/report" });
+    const original = JSON.stringify(raw);
+    const item = traceTurn([raw]).items[0]!;
+    if (item.execution?.kind !== "tool" || !("native" in item.execution)) throw new Error("missing child activity");
+    const wrapper = mount(ChatNativeToolItem, { props: { item, execution: item.execution } });
+    const button = wrapper.get("button.chat-timeline-item-shell__disclosure");
+    await button.trigger("click");
+    expect(button.attributes("aria-description")).toBe("已记录");
+    expect(wrapper.get(".chat-timeline-item-shell__body").text()).toBe(raw.text);
+    expect(wrapper.text()).not.toContain("子任务已完成");
+    expect(JSON.stringify(raw)).toBe(original);
+    wrapper.unmount();
   });
   it("shows a readable broker tool name without contradicting a real failed status or rewriting facts", async()=>{
     const raw=traceItem("fetch", "mcpToolCall", {status:"failed",availability:"partial",toolLabel:"yijie_market / kimi_web_fetch",mcp:{server:"yijie_market",tool:"kimi_web_fetch",resultKind:"text",texts:[{index:0,text:"普通失败说明"}],diagnostics:["content_truncated"]}});

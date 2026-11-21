@@ -4,7 +4,8 @@
 use super::database::ActiveTurnContext;
 use super::error::ChatError;
 use super::native_conversation_generated::{
-    NativeConversationView, NativeDisplayItem, NativeEvent, NativeItem, NativeViewCursor,
+    NativeConversationView, NativeDisplayItem, NativeEvent, NativeItem, NativeTextPreview,
+    NativeViewCursor,
 };
 
 const MAX_VIEW_BYTES: usize = 4 * 1024 * 1024 - 4096; // reserve room for cursor and availability diagnostics
@@ -84,6 +85,8 @@ fn bound_display_content(view: &mut NativeConversationView) -> Result<(), ChatEr
 pub struct NativeDisplayBuffer {
     context: ActiveTurnContext,
     pub view: NativeConversationView,
+    // Strictly live display data. The repository only receives view.
+    previews: Vec<NativeTextPreview>,
 }
 
 impl NativeDisplayBuffer {
@@ -119,7 +122,59 @@ impl NativeDisplayBuffer {
         {
             return Err(ChatError::ConversationConflict);
         }
-        Ok(Self { context, view })
+        Ok(Self {
+            context,
+            view,
+            previews: Vec::new(),
+        })
+    }
+
+    pub fn previews(&self) -> &[NativeTextPreview] {
+        &self.previews
+    }
+
+    /// An offset addresses UTF-8 bytes, independently of SSE sequence and Vue's UTF-16 cursor.
+    fn observe_preview(&mut self, id: &str, offset: i64, delta: &str) -> bool {
+        const ITEM_LIMIT: usize = 256 * 1024;
+        const TURN_LIMIT: usize = 2 * 1024 * 1024;
+        if id.is_empty()
+            || id.len() > 512
+            || delta.is_empty()
+            || self.view.terminal_observed
+            || self.view.status.as_deref() != Some("inProgress")
+            || self.view.items.iter().any(|entry| entry.item.id == id)
+        {
+            return false;
+        }
+        let Ok(offset) = usize::try_from(offset) else {
+            return false;
+        };
+        if offset.saturating_add(delta.len()) > ITEM_LIMIT
+            || self.previews.iter().map(|p| p.text.len()).sum::<usize>() + delta.len() > TURN_LIMIT
+        {
+            return false;
+        }
+        if let Some(index) = self.previews.iter().position(|p| p.item_id == id) {
+            let body = &mut self.previews[index].text;
+            if offset == body.len() {
+                body.push_str(delta);
+                return true;
+            }
+            if body.as_bytes().get(offset..offset + delta.len()) == Some(delta.as_bytes()) {
+                return false;
+            }
+            // A suffix from a different or incomplete stream is not a readable prefix.
+            self.previews.remove(index);
+            return true;
+        }
+        if offset != 0 || self.previews.len() >= 128 {
+            return false;
+        }
+        self.previews.push(NativeTextPreview {
+            item_id: id.into(),
+            text: delta.into(),
+        });
+        true
     }
 
     pub fn context(&self) -> &ActiveTurnContext {
@@ -141,6 +196,7 @@ impl NativeDisplayBuffer {
     }
 
     pub fn mark_unavailable(&mut self, code: &str) {
+        self.previews.clear();
         self.view.availability = "partial".into();
         self.view.diagnostic = Some(code.into());
     }
@@ -209,8 +265,19 @@ impl NativeDisplayBuffer {
             return Ok(true);
         }
         match n.method.as_str() {
+            "item/agentMessage/previewDelta" => {
+                return Ok(match (&n.item_id, n.preview_offset, &n.delta) {
+                    (Some(id), Some(offset), Some(delta)) => {
+                        self.observe_preview(id, offset, delta)
+                    }
+                    _ => false,
+                });
+            }
             "item/started" | "item/completed" => {
                 if let Some(item) = &n.item {
+                    if n.method == "item/completed" || item.kind != "agentMessage" {
+                        self.previews.retain(|preview| preview.item_id != item.id);
+                    }
                     if item.id.is_empty() || item.id.len() > 512 {
                         self.mark_unavailable("invalid_item_identity");
                         return Ok(true);
@@ -347,6 +414,9 @@ impl NativeDisplayBuffer {
                 target.push_str(delta);
             }
             "turn/started" | "turn/completed" => {
+                if n.method == "turn/completed" {
+                    self.previews.clear();
+                }
                 if let Some(turn) = &n.turn {
                     if turn.id != self.view.runtime_turn_id {
                         return Err(ChatError::OrchestrationUnavailable);
@@ -733,6 +803,40 @@ mod tests {
         assert_eq!(buffer.view.notices.as_ref().unwrap()[3].scope, "thread");
         assert!(!buffer.observe(&notice).unwrap());
         assert_eq!(buffer.view.notices.as_ref().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn public_preview_is_ephemeral_offset_checked_and_reconciled() {
+        let mut buffer = NativeDisplayBuffer::new(context(), None).unwrap();
+        let start = serde_json::json!({"turn":{"id":context().runtime_turn_id,"status":"inProgress","items":[],"itemsComplete":false}});
+        buffer.observe(&event(1, "turn/started", start)).unwrap();
+        let part = |sequence, offset, delta: &str| {
+            event(
+                sequence,
+                "item/agentMessage/previewDelta",
+                serde_json::json!({"itemId":"a","previewOffset":offset,"delta":delta}),
+            )
+        };
+        assert!(buffer.observe(&part(2, 0, "第一")).unwrap());
+        assert!(!buffer.observe(&part(2, 0, "第一")).unwrap());
+        assert!(buffer.observe(&part(3, 6, "段")).unwrap());
+        assert_eq!(buffer.previews()[0].text, "第一段");
+        assert!(buffer.view.items.is_empty());
+        let mut reopened = NativeDisplayBuffer::new(context(), Some(buffer.view.clone())).unwrap();
+        assert!(reopened.previews().is_empty());
+        assert!(!reopened.observe(&part(4, 9, "后文")).unwrap());
+        let item = |body| serde_json::json!({"item":{"id":"a","type":"agentMessage","text":body,"phase":"commentary","availability":"available"}});
+        buffer.observe(&event(4, "item/started", item(""))).unwrap();
+        buffer
+            .observe(&event(5, "item/completed", item("第一段")))
+            .unwrap();
+        assert!(buffer.previews().is_empty());
+        assert_eq!(buffer.view.items.len(), 1);
+        assert_eq!(
+            buffer.view.items[0].item.phase.as_deref(),
+            Some("commentary")
+        );
+        assert!(!buffer.observe(&part(6, 9, "迟到")).unwrap());
     }
 
     #[test]

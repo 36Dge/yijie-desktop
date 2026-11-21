@@ -424,28 +424,38 @@ it("locates the exact requested local turn without sending or substituting the l
 });
 
 describe("FEAT-126 ChatPage", () => {
-  it.skipIf(!kimiK31Candidate)("opens the linked output from a saved answer in the ordinary chat sidebar", async () => {
-    const reference = "file:///Users/example/Desktop/杭州旅游介绍.md";
-    const answer = `**[杭州旅游介绍.md](${reference})**\n\n路径：\`/Users/example/Desktop/杭州旅游介绍.md\``;
+  it.skipIf(!kimiK31Candidate).for([
+    {name: "杭州旅游介绍.md", destination: "file:///Users/example/Desktop/杭州旅游介绍.md", path: "/Users/example/Desktop/杭州旅游介绍.md"},
+    {name: "南京3天行程.html", destination: "./南京3天行程.html", path: "南京3天行程.html"},
+  ])("opens the linked output from a saved answer in the ordinary chat sidebar ($name)", async ({name, destination, path}) => {
+    const answer = `已完成文档。\n\n**[打开 / 下载《${name}》](${destination})**` +
+      (path.startsWith("/") ? `\n\n路径：\`${path}\`` : "");
     const turn = HISTORY_WITHOUT_REASONING.turns[0]!;
     const history = {turns: [{...turn, messages: turn.messages.map(message =>
       message.role === "assistant" ? {...message, content: answer} : message)}], nextCursor: null};
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(924);
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 336, 600));
     const native = vi.spyOn(documentPreviewClient, "run").mockImplementation(async (_context, action) => ({
-      status: action.action === "open" ? "ready" : "closed", viewId: action.viewId, position: null,
+      status: action.action === "locate" ? "located" : action.action === "saveMessageFile" ? "cancelled" : action.action === "open" ? "ready" : "closed",
+      viewId: action.viewId, position: null,
+      ...(action.action === "locate" && {path: path.startsWith("/") ? path : "/work/" + path, fileInfo: {sizeBytes: 37817, saveSupported: true}}),
       document: action.action === "open" ? {kind:"text", revision:"a".repeat(64), expiresAt:Math.floor(Date.now()/1000)+600,
         sections:[],section:0,offset:0,nextOffset:null,previousOffset:null,partial:false,notice:null} : null,
     }));
     const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true, history);
-    const links = wrapper.findAll(".chat-file-link");
-    expect(links.map(link => link.text())).toEqual(["《杭州旅游介绍.md》"]);
-    await links[0]!.trigger("mouseenter");
-    expect(native).not.toHaveBeenCalled();
-    await links[0]!.trigger("click"); await flushPromises();
-    expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toBe("杭州旅游介绍.md");
+    const cards = wrapper.findAll(".chat-artifact-document-card");
+    expect(cards.map(card => card.get(".chat-artifact-document-card__name").text())).toEqual([name]);
+    expect(wrapper.find(".chat-file-link").exists()).toBe(false);
+    const source = {kind:"messageFile", sessionId:SESSION_ID,turnId:TURN_ID,itemId:`${TURN_ID}:assistant:0`,reference:path};
+    expect(cards[0]!.get(".chat-artifact-document-card__size").text()).toBe("36.9 KB");
+    expect(native).toHaveBeenCalledExactlyOnceWith(store.context!.contextId, expect.objectContaining({action:"locate", source}));
+    await cards[0]!.get('button[aria-label="另存为"]').trigger("click"); await flushPromises();
+    expect(native).toHaveBeenCalledWith(store.context!.contextId, expect.objectContaining({action:"saveMessageFile", source}));
+    expect(wrapper.find('[role="tab"][aria-selected="true"]').exists()).toBe(false);
+    await cards[0]!.get(`button[aria-label="预览 ${name}"]`).trigger("click"); await flushPromises();
+    expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toBe(name);
     expect(native).toHaveBeenCalledWith(store.context!.contextId, expect.objectContaining({
-      action:"open", source:{kind:"messageFile", sessionId:SESSION_ID,turnId:TURN_ID,itemId:`${TURN_ID}:assistant:0`,reference: "/Users/example/Desktop/杭州旅游介绍.md"},
+      action:"open", source,
     }));
   });
 
@@ -705,7 +715,7 @@ describe("FEAT-126 ChatPage", () => {
       const options = menu.findAll<HTMLButtonElement>('button[role="menuitemradio"]');
       const kimiOptions = options.filter(option => option.text().includes("Kimi K3.1 Pro"));
       expect(kimiOptions).toHaveLength(1);
-      expect(kimiOptions[0]!.text()).toContain("· high");
+      expect(kimiOptions[0]!.get(".model-option-label").text()).toBe("Kimi K3.1 Pro");
       expect(kimiOptions[0]!.element.disabled).toBe(true);
       await options.find(option => option.text() === "MiniMax-M3")!.trigger("click");
       expect(input.element.value).toBe(draft);
@@ -731,6 +741,7 @@ describe("FEAT-126 ChatPage", () => {
       await trigger.trigger("click");
       await flushPromises();
       const menu = new DOMWrapper(document.querySelector(".model-menu")!);
+      expect(menu.get('[aria-checked="true"]').text()).toBe("Kimi K3.1 Pro");
       await menu.findAll('button[role="menuitemradio"]').find(option => option.text() === "MiniMax-M3")!.trigger("click");
       expect(trigger.text()).toBe("Kimi K3.1 Pro");
       expect(trigger.attributes("aria-busy")).toBe("true");

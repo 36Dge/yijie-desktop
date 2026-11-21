@@ -6,6 +6,34 @@ import ChatTurnGroup from "./ChatTurnGroup.vue";
 import ChatTraceNotices from "./ChatTraceNotices.vue";
 
 enableAutoUnmount(afterEach);
+it("numbers visible image views across groups and shows their own result after an interrupted turn", async () => {
+  const image = (id: string) => traceItem(id, "imageView", {
+    toolLabel: "查看图片", toolDisplay: {provenance: "registeredTool", title: "查看图片", sourceLabel: "原生工具"},
+  });
+  const turn = traceTurn([
+    image("first"), traceItem("command", "commandExecution", {exitCode: 0}), image("second"),
+    traceItem("opening", "agentMessage", {phase: "commentary", text: "接下来检查窄屏效果。"}),
+    traceItem("failed", "imageView", {status: "failed"}), image("third"),
+  ]);
+  turn.domainStatus = turn.terminalStatus = "interrupted";
+  const wrapper = mount(ChatTurnGroup, {props: {turn, position: 1}});
+  await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
+  const mixed = wrapper.get(".chat-activity-group__toggle");
+  expect(mixed.text()).toBe("查看图片 2 次、运行了命令");
+  expect(mixed.get("svg").classes()).toContain("lucide-scan-eye");
+  await mixed.trigger("click");
+  const rows = wrapper.findAll("button.chat-timeline-item-shell__disclosure").filter(row => row.text() === "查看图片");
+  expect(rows).toHaveLength(3);
+  for (const [index, row] of rows.entries()) {
+    expect(row.get("svg").classes()).toContain("lucide-scan-eye");
+    expect(row.attributes("aria-description")).toBe("已读取图片");
+    await row.trigger("click");
+    const detail = wrapper.get(`[id="${row.attributes("aria-controls")}"]`);
+    expect(detail.text()).toBe(`已读取图片 · 本轮第 ${index + 1} 次查看`);
+    expect(detail.find("pre, h3").exists()).toBe(false);
+  }
+});
+
 it("uses the same book icon on a completed fetch group and its rows", async () => {
   const items = ["home", "board"].map(id => traceItem(id, "mcpToolCall", {
     mcp: {server: "yijie_web", tool: "kimi_web_fetch", resultKind: "omitted", texts: [], diagnostics: []},
@@ -112,11 +140,15 @@ it("folds ordinary cold history without replaying failed tools or past retries",
   expect(wrapper.find(".chat-archive-activity").exists()).toBe(false);
 });
 
-it("keeps notice scope readable without exposing opaque runtime codes", () => {
+it("shows only the turn-scoped copy of a native warning", () => {
   const turn = traceTurn([traceItem("a", "agentMessage", {text: "Answer"})]);
-  turn.traceNotices = [{eventId: "notice", sequence: "1", method: "warning", code: "answer_completion_continuing", scope: "thread"}];
+  turn.traceNotices = [
+    {eventId: "thread-notice", sequence: "1", method: "warning", code: "answer_completion_continuing", scope: "thread"},
+    {eventId: "turn-notice", sequence: "2", method: "warning", code: "answer_completion_continuing", scope: "turn"},
+  ];
   const wrapper = mount(ChatTurnGroup, {props: {turn, position: 1}});
-  expect(wrapper.get(".chat-trace-notices summary").text()).toBe("对话提示");
+  expect(wrapper.findAll(".chat-trace-notices details")).toHaveLength(1);
+  expect(wrapper.get(".chat-trace-notices summary").text()).toBe("本轮提示");
   expect(wrapper.get(".chat-trace-notices details").attributes("open")).toBeUndefined();
   expect(wrapper.text()).not.toContain("answer_completion_continuing");
 });

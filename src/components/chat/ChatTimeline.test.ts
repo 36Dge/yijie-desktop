@@ -544,9 +544,13 @@ describe("ChatTimeline", () => {
     expect(disclosureFor("commentary-b").getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("hides generic warnings without concealing a failed turn or an error notice", async () => {
+  it("filters thread warnings and keeps the failed turn and a later thread error visible", async () => {
+    const warnings = [
+      { severity: "warning", code: "conversation_warning", diagnostic: "native_history_partial" },
+      { severity: "warning", code: "conversation_warning", diagnostic: "runtime_notice" },
+    ] as const;
     const timeline = projectedTimeline({
-      threadNotices: [{ severity: "warning", code: "conversation_warning", diagnostic: "runtime_notice" }],
+      threadNotices: warnings,
       turns: [{ ...completedTurn("turn-main", 0), status: "failed", terminalStatus: "failed", terminalCode: "other" }],
       items: [message("turn-main", "user", 0, "user_message", "普通问题")],
     });
@@ -555,8 +559,9 @@ describe("ChatTimeline", () => {
     expect(wrapper.text()).not.toContain("未分类提示");
     expect(wrapper.text()).toContain("这次回复未能完成");
     expect(wrapper.findAllComponents(ChatTimelineItemShell)).toHaveLength(1);
-    await wrapper.setProps({timeline: {...timeline, notices: timeline.notices.map(notice => ({...notice, severity: "error" as const}))}});
-    expect(wrapper.get(".chat-timeline__notices").text()).toContain("对话发生错误");
+    const mixed = projectedTimeline({threadNotices: [...warnings, {severity: "error", code: "conversation_error", diagnostic: "runtime_notice"}]});
+    await wrapper.setProps({timeline: {...timeline, notices: mixed.notices}});
+    expect(wrapper.get(".chat-timeline__notices").text()).toBe("对话发生错误，已保留可用内容。");
     expect(wrapper.text()).not.toContain("未提供可显示的详细原因");
     wrapper.unmount();
   });
@@ -580,8 +585,8 @@ describe("ChatTimeline", () => {
         "item-actions": () => h("button", { type: "button" }, "复制"),
       },
     });
-    expect(wrapper.get(".chat-timeline__notices").text())
-      .toContain("对话连接存在需要注意的信息");
+    expect(wrapper.find(".chat-timeline__notices").exists()).toBe(false);
+    expect(wrapper.get('[aria-label="本轮通知"]').text()).toContain("本轮存在需要注意的信息");
     expect(wrapper.text()).not.toContain("conversation_warning");
     expect((await axe.run(wrapper.element)).violations).toEqual([]);
     wrapper.unmount();

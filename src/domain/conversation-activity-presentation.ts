@@ -2,7 +2,7 @@ import { observedProgressMessages, tailCommentaryCandidate } from "./conversatio
 import { traceDiagnosticBlocksLive } from "./conversation-trace-liveness";
 import { reasoningSummaryIsCurrent } from "./conversation-reasoning-summary";
 import { showConversationActivity } from "./conversation-tool-visibility";
-import { deepSearchEvidence, deepSearchReceipt, activityEntriesForItem, type ConversationActivityEntry } from "./conversation-activity-entry";
+import { deepSearchEvidence, deepSearchReceipt, activityEntriesForItem, activityNativeItem, type ConversationActivityEntry } from "./conversation-activity-entry";
 import type { ConversationTimelineItemViewModel as Item, ConversationTimelineTurnViewModel as Turn } from "./conversation-timeline";
 
 export type ConversationActivityHeaderState =
@@ -32,7 +32,9 @@ export function conversationActivityPresentation(turn: Turn, attentionIds: Reado
   const visibleItems = turn.items.filter(item => item.approval?.status === "pending" || showConversationActivity(item));
   // Filter each call before choosing the representative of a shared operation.
   const searches = new Map<string, Map<string, Item>>();
+  const imageViewNumbers = new Map<string, number>();
   for (const item of visibleItems) {
+    if (activityNativeItem(item)?.type === "imageView") imageViewNumbers.set(item.identity, imageViewNumbers.size + 1);
     const id = deepSearchReceipt(item)?.operation_id;
     if (!id) continue;
     const calls = searches.get(id) ?? new Map<string, Item>();
@@ -52,7 +54,10 @@ export function conversationActivityPresentation(turn: Turn, attentionIds: Reado
     const identity = `${turn.identity}:activity:${pending[0]!.identity}`;
     const entries = pending.flatMap(item => {
       const related = searchCalls(item);
-      return activityEntriesForItem(item).map(entry => related ? {...entry, searchCalls: related} : entry);
+      const itemEntries = activityEntriesForItem(item);
+      if (related) return itemEntries.map(entry => ({...entry, searchCalls: related}));
+      const imageViewNumber = imageViewNumbers.size > 1 ? imageViewNumbers.get(item.identity) : undefined;
+      return imageViewNumber ? itemEntries.map(entry => ({...entry, imageViewNumber})) : itemEntries;
     });
     nodes.push({kind: "activity", identity, group: {identity, items: pending, entries, state: {kind: "summary"}}});
     pending = [];

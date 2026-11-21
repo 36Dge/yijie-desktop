@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import YjTooltip from "../../components/yijie/YjTooltip.vue";
 import { documentPreviewClient } from "../../api/chat-document-preview-client";
-import { messageFileWorkspaceKey, messageFileLocationKey, messageFileActionKey } from "../../composables/useChatMessageLink";
+import { messageFileWorkspaceKey, messageFileServicesKey, messageFileActionKey, type MessageFileLocation, type MessageLinkTarget } from "../../composables/useChatMessageLink";
+import type { MessageFileReference } from "../../domain/message-file-reference";
 import { provideWebSourceActions } from "../../composables/useWebSources";
 import { useChatTurnTimingDetails } from "../../composables/useChatTurnTiming";
 import { useChatTurnModels } from "../../composables/useChatTurnModels";
@@ -9,6 +10,7 @@ import { nativeCompletedAt } from "../../domain/chat-answer-actions";
 import { completedTurnAnswer } from "../../domain/conversation-process";
 import { traceIsLive } from "../../domain/conversation-activity-presentation";
 import ChatAnswerActions from "../../components/chat/ChatAnswerActions.vue";
+import { liveAnswerArrivalKey } from "../../composables/useChatTextReveal";
 import { computed, inject, provide, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -143,6 +145,7 @@ const chatStore = useChatStore();
 // Keep stable field identities so streaming text remains frame-batched even
 // when the aggregate reading view changes.
 const readingHistory = computed(() => chatStore.readingView.history);
+provide(liveAnswerArrivalKey, target => chatStore.takeLiveAnswerArrival(target));
 const readingConversation = computed(() => chatStore.readingView.conversation);
 const readingApprovals = computed(() => chatStore.readingView.approvals);
 const readingPurpose = computed(() => chatStore.readingView.purpose);
@@ -176,20 +179,35 @@ const fileWorkspace = computed(() => {
   return value && value.context === chatStore.context?.contextId && value.session === chatStore.selectedSessionId && previewEnabled.value ? value.path : null;
 });
 provide(messageFileWorkspaceKey, fileWorkspace);
-provide(messageFileLocationKey, computed(() => {
+provide(messageFileServicesKey, computed(() => {
   const context = chatStore.context?.contextId;
   const session = chatStore.selectedSessionId;
   if (!context || !session || !previewEnabled.value) return undefined;
-  return async (target, file) => {
-    if (target.sessionId !== session) throw new Error("file_location_unavailable");
-    if (fileWorkspace.value && !file.path.startsWith("/")) return fileWorkspace.value + "/" + file.path;
-    const result = await documentPreviewClient.run(context, { action: "locate", viewId: crypto.randomUUID(),
-      source: { kind: "messageFile", ...target, reference: file.path } });
-    if (!result.path || chatStore.context?.contextId !== context || chatStore.selectedSessionId !== session) throw new Error("file_location_unavailable");
-    if (!file.path.startsWith("/") && result.path.endsWith("/" + file.path)) {
-      locatedWorkspace.value = { context, session, path: result.path.slice(0, -file.path.length - 1) };
-    }
-    return result.path;
+  const pending = new Map<string, Promise<MessageFileLocation>>();
+  const active = () => previewEnabled.value && chatStore.context?.contextId === context && chatStore.selectedSessionId === session;
+  function sourceFor(target: MessageLinkTarget, file: MessageFileReference) {
+    if (target.sessionId !== session || !active()) throw new Error("file_location_unavailable");
+    return {kind: "messageFile" as const, ...target, reference: file.path};
+  }
+  return {
+    async locate(target, file) {
+      const source = sourceFor(target, file);
+      const key = JSON.stringify(source);
+      const existing = pending.get(key);
+      if (existing) return existing;
+      const request = documentPreviewClient.run(context, {action: "locate", viewId: crypto.randomUUID(), source}).then(result => {
+        if (!result.path || !active()) throw new Error("file_location_unavailable");
+        if (!file.path.startsWith("/") && result.path.endsWith("/" + file.path)) {
+          locatedWorkspace.value = {context, session, path: result.path.slice(0, -file.path.length - 1)};
+        }
+        return {path: result.path, fileInfo: result.fileInfo};
+      }).finally(() => pending.delete(key));
+      pending.set(key, request);
+      return request;
+    },
+    async save(target, file) {
+      await documentPreviewClient.run(context, {action: "saveMessageFile", viewId: crypto.randomUUID(), source: sourceFor(target, file)});
+    },
   };
 }));
 function openArtifactFile(artifact: ArtifactProjection) {

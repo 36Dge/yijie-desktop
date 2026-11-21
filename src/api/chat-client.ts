@@ -748,10 +748,20 @@ export function createChatClient(transport: ChatClientTransport = productionTran
       }, signal);
     },
     async onNativeView(handler, onInvalid) {
-      return transport.listen("chat:native-view:v7", payload => {
-        if (validateNativeViewEvent(payload) && payload.schemaVersion === 7 && payload.view.sessionId === payload.sessionId) handler(payload);
+      const listen = (version: 7 | 8) => transport.listen("chat:native-view:v" + version, payload => {
+        if (validateNativeViewEvent(payload) && payload.schemaVersion === version &&
+            payload.view.sessionId === payload.sessionId &&
+            (version === 8 ? Boolean(payload.previews?.length) && !payload.view.terminalObserved : !payload.previews)) handler(payload);
         else onInvalid?.(invalidEventScope(payload));
       });
+      const stopPreview = await listen(8);
+      try {
+        const stopFormal = await listen(7);
+        return () => { stopPreview(); stopFormal(); };
+      } catch (error) {
+        stopPreview();
+        throw error;
+      }
     },
     async onEvent(handler, onInvalid) {
       return transport.listen(CHAT_EVENT_CHANNEL, (payload) => {

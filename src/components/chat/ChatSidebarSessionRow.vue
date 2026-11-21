@@ -101,7 +101,7 @@ function selectAction(key: string | number): void {
     >
       <ChatSidebarSessionTitle class="chat-tree__session-title" :text="session.title" :active="(titleHovered || titleFocused) && !menuVisible && !actionPending" />
       <span class="chat-tree__session-status" aria-hidden="true">
-        <YjIcon v-if="status === 'running'" class="chat-tree__session-running" name="taskRunning" size="sm" />
+        <YjIcon v-if="status === 'running'" class="chat-tree__session-running" name="taskRunning" size="sm" :stroke-width="2.2" />
         <span v-else-if="status === 'completed'" class="chat-tree__session-completed" />
       </span>
     </button>

@@ -4,7 +4,7 @@ import type { ChatComposerFocusSnapshot } from "../../domain/chat-composer";
 import type { ChatSkillChip } from "../../domain/chat-skills";
 import { skillOffset, skillTextParts, type SkillPosition } from "../../domain/chat-skill-placement";
 import ChatSkillChips from "./ChatSkillChips.vue";
-import { readSkillEditor } from "./skill-editor-dom";
+import { readSkillEditor, syncSkillCarets } from "./skill-editor-dom";
 
 defineOptions({ inheritAttrs: false });
 const props = defineProps<{
@@ -59,6 +59,7 @@ function sync() {
   const offsets = props.skills.map(skill => skillOffset(skill, props.text));
   if (current.text === props.text && current.positions.length === props.skills.length &&
     current.positions.every((p, i) => p.id === props.skills[i]!.id && p.offset === offsets[i])) {
+    syncSkillCarets(el, current.tokens);
     if (current.tokens.size !== targets.value.size || [...current.tokens].some(([id, target]) => targets.value.get(id) !== target)) targets.value = current.tokens;
     return;
   }
@@ -74,6 +75,7 @@ function sync() {
   });
   const focused = el.ownerDocument.activeElement === el;
   el.replaceChildren(...nodes);
+  syncSkillCarets(el, next);
   targets.value = next;
   if (focused && current.range) restore(current.range);
 }
@@ -121,5 +123,6 @@ defineExpose({ capture, restore, positionHint, inputState: () => root.value && r
 <style scoped>
 [role="textbox"] { white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; -webkit-user-select: text; user-select: text; }
 [role="textbox"] :deep(.inline-skill-token) { display: inline-block; max-width: 100%; padding-inline: var(--yj-space-1); vertical-align: middle; }
+[role="textbox"] :deep(.inline-skill-separator) { -webkit-user-select: none; user-select: none; pointer-events: none; }
 .inline-skill-hint { position: absolute; margin-inline-start: var(--yj-space-1); color: var(--yj-color-text-tertiary); pointer-events: none; }
 </style>

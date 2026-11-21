@@ -13,13 +13,16 @@ const exchange = path.resolve(process.argv[2]);
 const root = fileURLToPath(new URL("../", import.meta.url));
 const data = {views: JSON.parse(await readFile(path.join(exchange, "native-views.json"))),
   reopened: JSON.parse(await readFile(path.join(exchange, "native-reopened.json")))};
+const requirePreview = process.argv.includes("--expect-preview");
+if (requirePreview) data.liveFrames = JSON.parse(await readFile(path.join(exchange, "native-live-frames.json")));
 const page = `<!doctype html><meta charset="utf-8"><div id="app"></div><script type="module">
 import {createApp, h, shallowRef, nextTick} from "/node_modules/.vite/deps/vue.js";
 import ChatTurnGroup from "/src/components/chat/ChatTurnGroup.vue";
 import {composeConversationView} from "/src/domain/conversation-view.ts";
 import {selectConversationTimeline} from "/src/domain/conversation-timeline.ts";
+import {createLiveAnswerPresentation} from "/src/domain/live-answer-presentation.ts";
 window.runAcceptance = async function(mode) {
-  const {views,reopened} = await (await fetch("/__publication/data")).json();
+  const {views,reopened,liveFrames} = await (await fetch("/__publication/data")).json();
   const project = view => {
     const state = composeConversationView({threads:[{threadId:view.sessionId,status:"ready"}],turns:[],items:[]},[view]);
     return selectConversationTimeline(state,view.sessionId,undefined,{protectApprovalProcessContent:false,
@@ -34,9 +37,32 @@ window.runAcceptance = async function(mode) {
   const state = ()=>button()?.getAttribute("aria-expanded") ?? null;
   const transitions = [];
   let last = null, manual = false;
-  for(const view of frames) {
-    turn.value = project(view);
+  const overlay = createLiveAnswerPresentation();
+  const finalItem = reopened.items.findLast(entry => entry.item.phase === "final_answer")?.item;
+  const finalId = finalItem?.id;
+  const visibleLengths = [];
+  let previous, prefixSize = 0;
+  for(const [index, view] of frames.entries()) {
+    const preview = mode === "preview" ? liveFrames[index] : null;
+    if (preview) {
+      if (preview.view.revision !== view.revision) throw Error("Unpaired native revision");
+      overlay.observe({view, previews: preview.previews}, previous);
+    }
+    turn.value = project(preview ? overlay.view(view) : view);
+    previous = view;
     await nextTick();
+    if (preview && !view.terminalObserved && !view.items.some(entry => entry.item.id === finalId)) {
+      const body = preview.previews.find(entry => entry.itemId === finalId)?.text;
+      if (body && body.length > prefixSize && visibleLengths.length < 3) {
+        prefixSize = body.length;
+        // The supplier input is still open in this captured revision. Observe
+        // painted partial text before advancing to a later native revision.
+        await new Promise(resolve => setTimeout(resolve, 70));
+        const rows = root.querySelectorAll(".chat-safe-content--answer");
+        const length = rows[rows.length - 1]?.innerText.trim().length ?? 0;
+        if (length > (visibleLengths.at(-1) ?? 0) && length < finalItem.text.length) visibleLengths.push(length);
+      }
+    }
     const current = state();
     const final = view.items.find(({item})=>item.type==="agentMessage" && item.phase==="final_answer" && item.text?.trim());
     if(current!==null && current!==last) {
@@ -58,7 +84,7 @@ window.runAcceptance = async function(mode) {
   const detail = root.querySelector("details.chat-activity-row__unpublished");
   let partialVisible=false;
   if(neutral && detail){ detail.open=true; await nextTick(); partialVisible=detail.innerText.includes(neutral.item.text.slice(0,20)); }
-  const result={transitions,manual,expanded:state(),answerVisible:readable,answerId:final?.item.id,partialVisible};
+  const result={transitions,manual,expanded:state(),answerVisible:readable,answerId:final?.item.id,partialVisible,visibleLengths};
   app.unmount();
   return result;
 };
@@ -109,24 +135,38 @@ try {
     return result.result.value;
   }
   await go();
-  const live=await run("live"),manual=await run("manual");
-  await go();
-  const history=await run("history");
-  const folds=live.transitions.filter(t=>t.previous==="true"&&t.current==="false");
-  const result={browser:info.Browser,live,manual,history,autoFolds:folds.length,prematureFolds:folds.filter(t=>!t.readableFinalId).length};
-  await writeFile(path.join(exchange,"browser-result.json"),JSON.stringify(result,null,2)+"\n");
-  if(data.reopened.status==="interrupted") {
-    assert.equal(result.autoFolds,0);assert.equal(live.expanded,"true");
-    assert.equal(live.partialVisible,true);assert.equal(history.partialVisible,true);
+  if (requirePreview) {
+    const observed = await run("preview");
+    assert.ok(observed.visibleLengths.length >= 2, "Two increasing screen lengths before formal publication are required");
+    assert.ok(observed.answerVisible, "The formal answer must remain visible");
+    await writeFile(path.join(exchange,"browser-preview-result.json"),JSON.stringify(observed,null,2)+"\n");
+    console.log(JSON.stringify({partialLengths:observed.visibleLengths,answerVisible:observed.answerVisible}));
   } else {
-  assert.equal(result.autoFolds,1);
-  assert.equal(result.prematureFolds,0);
-  assert.equal(manual.manual,true);
-  assert.equal(manual.expanded,"true");
-  assert.equal(history.expanded,"false");
-  assert.equal(history.answerVisible,true);
+    const live = await run("live"), manual = await run("manual");
+    await go();
+    const history = await run("history");
+    const folds = live.transitions.filter(t => t.previous === "true" && t.current === "false");
+    const result = {browser:info.Browser,live,manual,history,autoFolds:folds.length,
+      prematureFolds:folds.filter(t => !t.readableFinalId).length};
+    await writeFile(path.join(exchange,"browser-result.json"),JSON.stringify(result,null,2)+"\n");
+    if (data.reopened.status === "interrupted") {
+      const onlyPartial = !data.reopened.plan && data.reopened.items.every(({item}) =>
+        item.type === "userMessage" || item.type === "unpublishedText");
+      assert.equal(result.autoFolds,0);
+      assert.equal(live.expanded,onlyPartial ? null : "true");
+      assert.equal(live.partialVisible,true);
+      assert.equal(history.partialVisible,true);
+    } else {
+      assert.equal(result.autoFolds,1);
+      assert.equal(result.prematureFolds,0);
+      assert.equal(manual.manual,true);
+      assert.equal(manual.expanded,"true");
+      assert.equal(history.expanded,"false");
+      assert.equal(history.answerVisible,true);
+    }
+    console.log(JSON.stringify({browser:info.Browser,autoFolds:result.autoFolds,
+      prematureFolds:result.prematureFolds,manualReopen:manual.expanded,history:history.expanded}));
   }
-  console.log(JSON.stringify({browser:info.Browser,autoFolds:result.autoFolds,prematureFolds:result.prematureFolds,manualReopen:manual.expanded,history:history.expanded}));
 } finally {
   if(tab)tab.close();
   if(browser)await browser.rpc("Browser.close").catch(()=>{});

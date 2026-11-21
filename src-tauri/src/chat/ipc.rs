@@ -965,6 +965,14 @@ impl TurnProjectionSink for ChatEventBridge {
         &self,
         view: super::native_conversation_generated::NativeConversationView,
     ) -> Result<(), ChatError> {
+        self.publish_with_previews(view, &[])
+    }
+
+    fn publish_with_previews(
+        &self,
+        view: super::native_conversation_generated::NativeConversationView,
+        previews: &[super::native_conversation_generated::NativeTextPreview],
+    ) -> Result<(), ChatError> {
         let session_id =
             Uuid::parse_str(&view.session_id).map_err(|_| ChatError::OrchestrationUnavailable)?;
         let now = unix_seconds()?;
@@ -993,6 +1001,7 @@ impl TurnProjectionSink for ChatEventBridge {
                 .map(|(id, record)| {
                     super::native_conversation_generated::NativeConversationViewEvent {
                         schema_version: 6,
+                        previews: None,
                         context_id: record.context_id.to_string(),
                         subscription_id: id.to_string(),
                         session_id: session_id.to_string(),
@@ -1006,6 +1015,14 @@ impl TurnProjectionSink for ChatEventBridge {
             .get_webview_window("main")
             .ok_or(ChatError::OrchestrationUnavailable)?;
         for mut event in events {
+            if !previews.is_empty() {
+                event.schema_version = 8;
+                event.previews = Some(previews.to_vec());
+                window
+                    .emit("chat:native-view:v8", &event)
+                    .map_err(|_| ChatError::OrchestrationUnavailable)?;
+                event.previews = None;
+            }
             event.schema_version = 7;
             window
                 .emit("chat:native-view:v7", &event)

@@ -73,10 +73,10 @@ it("retains the recorded guard reason and filters tool notices without hiding a 
   const timeline = selectConversationTimeline(composeConversationView(snapshot, [saved]), "session")!;
   expect(timeline.notices[0]?.diagnostic).toBe("web_retrieval_local_fetch_blocked");
   for (const method of ["warning", "error"] as const) {
-    expect(showConversationNotice(method, timeline.notices[0]!.diagnostic)).toBe(false);
-    expect(showConversationNotice(method, "operation_retry_network_unchanged")).toBe(false);
-    expect(showConversationNotice(method, "operation_guard_capacity")).toBe(true);
-    expect(showConversationNotice(method, "session_budget_exceeded")).toBe(true);
+    expect(showConversationNotice("thread", method, timeline.notices[0]!.diagnostic)).toBe(false);
+    expect(showConversationNotice("turn", method, "operation_retry_network_unchanged")).toBe(false);
+    expect(showConversationNotice("turn", method, "operation_guard_capacity")).toBe(true);
+    expect(showConversationNotice("turn", method, "session_budget_exceeded")).toBe(true);
   }
   expect(timeline.turns[0]?.domainStatus).toBe("completed");
   expect(timeline.turns[0]?.items).toEqual([]);

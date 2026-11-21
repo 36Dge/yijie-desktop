@@ -42,13 +42,8 @@ const traceChoices = createChatTracePresentationStore();
 provide(chatTracePresentationKey, traceChoices);
 watch(() => props.timeline.identity, () => traceChoices.clear());
 
-// A normal output notification describes the existing final-output safety
-// policy, not an execution failure. Keep the diagnostic inspectable without
-// promoting it to a conversation warning. Errors and unknown notices stay out.
-const isOutputPolicyNotice = (notice: ConversationTimelineNoticeViewModel) =>
-  notice.severity === "warning" && notice.diagnostic === "command_output_pending_final";
-const outputPolicyNotices = computed(() => props.timeline.notices.filter(isOutputPolicyNotice));
-const visibleNotices = computed(() => props.timeline.notices.filter(notice => !isOutputPolicyNotice(notice) && showConversationNotice(notice.severity, notice.diagnostic)));
+const threadErrors = computed(() => props.timeline.notices.filter(notice =>
+  showConversationNotice("thread", notice.severity, notice.diagnostic)));
 
 const emit = defineEmits<{
   "disclosure-change": [change: ChatTimelineDisclosureChange];
@@ -83,11 +78,9 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
   emit("approval-decision", change);
 }
 
-function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): string {
+function threadErrorMessage(notice: ConversationTimelineNoticeViewModel): string {
   if (notice.diagnostic && notice.diagnostic !== "runtime_notice") return conversationDiagnosticMessage(notice.diagnostic);
-  const message = notice.severity === "error"
-    ? "对话发生错误，已保留可用内容。"
-    : "对话连接存在需要注意的信息，已确认的内容仍可阅读。";
+  const message = "对话发生错误，已保留可用内容。";
   return notice.count > 1 ? `${message} 共 ${notice.count} 次。` : message;
 }
 </script>
@@ -106,28 +99,18 @@ function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): strin
       对话状态需要核对，现有内容仍可阅读。
     </p>
 
-    <ul v-if="visibleNotices.length > 0" class="chat-timeline__notices" aria-label="对话通知">
+    <ul v-if="threadErrors.length" class="chat-timeline__notices" aria-label="对话通知">
       <li
-        v-for="notice in visibleNotices"
+        v-for="notice in threadErrors"
         :key="notice.identity"
-        class="chat-timeline__notice"
-        :class="`chat-timeline__notice--${notice.severity}`"
+        class="chat-timeline__notice chat-timeline__notice--error"
       >
         <div class="chat-timeline__notice-body" role="note">
-          <YjIcon
-            name="warning"
-            size="sm"
-            :tone="notice.severity === 'error' ? 'error' : 'warning'"
-          />
-          <span>{{ threadNoticeMessage(notice) }}</span>
+          <YjIcon name="warning" size="sm" tone="error" />
+          <span>{{ threadErrorMessage(notice) }}</span>
         </div>
       </li>
     </ul>
-
-    <details v-if="outputPolicyNotices.length" class="chat-timeline__output-policy" aria-label="命令输出说明">
-      <summary>命令输出说明</summary>
-      <p v-for="notice in outputPolicyNotices" :key="notice.identity" role="note">{{ threadNoticeMessage(notice) }}</p>
-    </details>
 
     <p
       v-if="timeline.phase === 'loading'"
@@ -267,19 +250,6 @@ function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): strin
   list-style: none;
 }
 
-.chat-timeline__output-policy {
-  color: var(--yj-color-text-tertiary);
-  font-size: var(--yj-font-size-caption);
-  line-height: var(--yj-line-height-caption);
-  overflow-wrap: anywhere;
-}
-.chat-timeline__output-policy summary { cursor: pointer; }
-.chat-timeline__output-policy summary:focus-visible {
-  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
-  outline-offset: var(--yj-space-1);
-}
-.chat-timeline__output-policy p { margin-block: var(--yj-space-2) var(--yj-space-0); }
-
 .chat-timeline__notice-body {
   display: grid;
   min-width: 0;
@@ -298,11 +268,6 @@ function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): strin
 .chat-timeline__notice--error .chat-timeline__notice-body {
   border-color: var(--yj-color-error);
   background: var(--yj-color-error-soft);
-}
-
-.chat-timeline__notice--warning .chat-timeline__notice-body {
-  border-color: var(--yj-color-warning);
-  background: var(--yj-color-warning-soft);
 }
 
 .chat-timeline__skeleton {

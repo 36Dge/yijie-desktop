@@ -27,3 +27,16 @@ it("accepts save outcomes only for the correlated save action", async () => {
   }
   expect(()=>parseDocumentPreviewResponse({...response,data:{...response.data,status:'saved',path:'/ordinary/report.md'}},'request','view')).toThrow();
 });
+
+it("reads optional file-card metadata and uses the advertised message-file save action", async () => {
+  const data = {...response.data, status: "located", path: "/work/guide.html"};
+  expect(parseDocumentPreviewResponse({...response, data}, "request", "view").fileInfo).toBeUndefined();
+  const fileInfo = {sizeBytes: 29895, saveSupported: true};
+  expect(parseDocumentPreviewResponse({...response, data: {...data, fileInfo}}, "request", "view").fileInfo).toEqual(fileInfo);
+  expect(() => parseDocumentPreviewResponse({...response, data: {...data, fileInfo: {sizeBytes: 1.5, saveSupported: true}}}, "request", "view")).toThrow();
+  const source = {kind: "messageFile" as const, sessionId: "s", turnId: "t", itemId: "answer", reference: "guide.html"};
+  const invoke = vi.fn(async (_command, args) => ({...response, requestId: args.request.requestId, data: {...response.data, status: "cancelled"}}));
+  const action = {action: "saveMessageFile" as const, viewId: "view", source};
+  expect((await createDocumentPreviewClient(invoke).run("scope", action)).status).toBe("cancelled");
+  expect(invoke.mock.calls[0]?.[1].request.payload).toEqual(action);
+});

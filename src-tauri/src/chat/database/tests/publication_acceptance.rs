@@ -54,6 +54,7 @@ fn publication_sse_sqlcipher_reopen() {
     let mut buffer = NativeDisplayBuffer::new(context.clone(), None).unwrap();
     let mut decoder = SseDecoder::new(Uuid::parse_str(&first.stream_id).unwrap(), 0, 13);
     let mut views = Vec::new();
+    let mut preview_frames = Vec::new();
     for chunk in stream.as_bytes().chunks(379) {
         decoder.push(chunk).unwrap();
         while let Some(value) = decoder.next() {
@@ -64,6 +65,10 @@ fn publication_sse_sqlcipher_reopen() {
                 buffer.view = repo
                     .commit_native_view(&context, buffer.view.clone(), Some(&event), now)
                     .unwrap();
+                preview_frames.push(serde_json::json!({
+                    "sequence":event.sequence, "occurredAt":event.occurred_at,
+                    "view":buffer.view, "previews":buffer.previews()
+                }));
                 views.push(buffer.view.clone());
             }
             assert!(
@@ -111,6 +116,11 @@ fn publication_sse_sqlcipher_reopen() {
         .collect();
     assert!(!from_db.is_empty());
     assert_eq!(from_db, from_runtime);
+    fs::write(
+        dir.join("native-live-frames.json"),
+        serde_json::to_vec(&preview_frames).unwrap(),
+    )
+    .unwrap();
     fs::write(
         dir.join("native-views.json"),
         serde_json::to_vec(&views).unwrap(),

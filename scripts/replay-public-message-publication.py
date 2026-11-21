@@ -108,6 +108,7 @@ def main():
     p.add_argument("--case", choices=("blink", "e25"), required=True)
     for arg in ["binary", "capture", "catalog", "output"]:
         p.add_argument("--"+arg, type=Path, required=True)
+    p.add_argument("--preview", action="store_true", help="Negotiate live declared-body previews for this loopback turn")
     p.add_argument("--interrupt-before-final",action="store_true",help="Use ordinary user interrupt during the final captured item")
     args = p.parse_args()
     directory = args.output.resolve()
@@ -218,6 +219,8 @@ def main():
         send({"method":"initialized","params":{}})
         start={"model": model,"modelProvider":provider,"approvalPolicy":"never","sandbox":"read-only",
                "cwd":str(cwd),"developerInstructions":"[yijie-public-message-v1]\n[yijie-answer-completion-v1]\n[yijie-publication-v2]"}
+        if args.preview:
+            start["developerInstructions"] += "\n[yijie-public-preview-v1]"
         thread = rpc("thread/start",start)["thread"]["id"]
         turn = rpc("turn/start",{"threadId":thread,"input":[{"type":"text","text":"整理现有资料并给出完整建议。","text_elements":[]}]})["turn"]["id"]
         if args.interrupt_before_final:

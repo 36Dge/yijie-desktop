@@ -24,10 +24,14 @@ function native(overrides: Partial<NativeConversationView> = {}): NativeConversa
     }}], ...overrides};
 }
 
-it.each(["failed", "interrupted"] as const)("shows one friendly note for a stopped reply on delivery and reopen (%s)", status => {
+it.each([
+  {status: "failed", statusSource: "runtime_notification", diagnostic: "runtime_notice"},
+  {status: "interrupted", statusSource: "runtime_notification", diagnostic: "runtime_notice"},
+  {status: "interrupted", statusSource: "runtime_read", diagnostic: "native_history_partial"},
+] as const)("shows one turn note on delivery and reopen ($status / $statusSource)", ({status, statusSource, diagnostic}) => {
   const saved = native({
-    status, terminalObserved: true, terminalErrorCode: status === "failed" ? "sessionBudgetExceeded" : null,
-    diagnostic: "runtime_notice",
+    status, statusSource, diagnostic, terminalObserved: statusSource === "runtime_notification",
+    terminalErrorCode: status === "failed" ? "sessionBudgetExceeded" : null,
     items: [{ ordinal: 0, lastMethod: "item/completed", item: { id: "u", type: "userMessage", text: "城市对比报告", availability: "available" } }],
     notices: [{ eventId: "end", sequence: "2", method: "error", code: "runtime_notice", scope: "turn", willRetry: false }],
   });
@@ -257,13 +261,13 @@ describe("FEAT-134 native streaming presentation", () => {
     expect(timeline({...view, availability: "partial", diagnostic: "stream_gap"}, "turn").turns[0]!.items[0]!.busy).toBe(false);
   });
 
-  it("preserves Item availability and displays diagnostics without guessing Turn scope", () => {
+  it("preserves item availability and thread diagnostics without displaying a thread warning", () => {
     const base = native();
     const projected = timeline({...base, diagnostic: "display_limit", items: [{...base.items[0]!, item: {...base.items[0]!.item, availability: "partial"}}]}, "turn");
     expect(projected.turns[0]!.notices).toEqual([]);
     expect(projected.notices[0]).toMatchObject({source: "thread_notice", diagnostic: "display_limit"});
     const wrapper = mount(ChatTimeline, {props: {timeline: projected}});
-    expect(wrapper.text()).toContain("显示内容达到容量限制");
+    expect(wrapper.text()).not.toContain("显示内容达到容量限制");
     expect(projected.turns[0]!.items[0]!.availability).toBe("partial");
     expect(wrapper.find('.chat-deep-thinking').exists()).toBe(false);
     const unknown = timeline({...base, diagnostic: "unrecognized-provider-detail"});

@@ -2,6 +2,7 @@
 import { mount } from "@vue/test-utils";
 import { h, nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { liveAnswerArrivalKey } from "../../composables/useChatTextReveal";
 import ChatStreamText from "./ChatStreamText.vue";
 import ChatSafeContent from "./ChatSafeContent.vue";
 import ChatTurnGroup from "./ChatTurnGroup.vue";
@@ -29,6 +30,24 @@ async function drain() {
 }
 const block = (text: string) => [{identity: "body", blockIndex: 0, type: "text" as const, text}];
 describe("message-wide stream presentation", () => {
+  it("paces a newly arrived long answer even when the page first paints the completed item", async () => {
+    const text = "同一帧中到达的正式正文。".repeat(35);
+    let armed = true;
+    const take = () => { const claim = armed; armed = false; return claim; };
+    const mountAnswer = () => mount(ChatSafeContent, {
+      props: {blocks: block(text), streaming: false, linkTarget: {sessionId: "s", turnId: "t", itemId: "answer"}},
+      global: {provide: {[liveAnswerArrivalKey as symbol]: take}},
+    });
+    const live = mountAnswer(); wrappers.push(live);
+    await advance(48);
+    expect(live.text().length).toBeGreaterThan(0);
+    expect(live.text().length).toBeLessThan(text.length);
+    const reopened = mountAnswer(); wrappers.push(reopened);
+    expect(reopened.text()).toBe(text);
+    await drain();
+    expect(live.text()).toBe(text);
+  });
+
   it("folds on explicit final text and waits for the last fade before showing actions", async () => {
     const processItems = [
       traceItem("opening", "agentMessage", {phase: "commentary", text: "先整理资料。"}),

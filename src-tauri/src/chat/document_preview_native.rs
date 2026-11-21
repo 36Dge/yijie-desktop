@@ -5,7 +5,7 @@ use super::artifact_native::{
 };
 use super::authorization::{AuthorizationFailure, ChatAction};
 use super::document_preview_content::{self as content, Section, SOURCE_BUDGET};
-use super::message_file_preview::MessageFile;
+use super::message_file_preview::{MessageFile, MessageFileInfo};
 use super::{ChatRuntime, ConversationApplication};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -94,6 +94,11 @@ enum Action {
         revision: String,
     },
     #[serde(rename_all = "camelCase")]
+    SaveMessageFile {
+        view_id: Uuid,
+        source: DocumentSource,
+    },
+    #[serde(rename_all = "camelCase")]
     Locate {
         view_id: Uuid,
         source: DocumentSource,
@@ -128,6 +133,7 @@ impl Action {
         match *self {
             Self::Locate { view_id, .. }
             | Self::Save { view_id, .. }
+            | Self::SaveMessageFile { view_id, .. }
             | Self::Open { view_id, .. }
             | Self::Resize { view_id, .. }
             | Self::Position { view_id }
@@ -174,6 +180,8 @@ pub struct Position {
 pub struct ResultData {
     #[serde(skip_serializing_if = "Option::is_none")]
     path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_info: Option<MessageFileInfo>,
     status: &'static str,
     view_id: Uuid,
     document: Option<DocumentMetadata>,
@@ -317,15 +325,18 @@ pub async fn chat_document_preview_v1(
         let id = request.payload.view_id();
         let context = request.context_id;
         let data = match request.payload {
-            Action::Save {
-                source, revision, ..
-            } => {
+            Action::Save { ref source, .. } | Action::SaveMessageFile { ref source, .. } => {
+                let revision = match &request.payload {
+                    Action::Save { revision, .. } => Some(revision.as_str()),
+                    _ if matches!(source, DocumentSource::MessageFile(_)) => None,
+                    _ => return Err(fail(Code::InvalidRequest)),
+                };
                 let _read_lease = image_runtime.borrow_read(SOURCE_BUDGET).map_err(fail)?;
                 let status = super::document_preview_save::save(
                     &chat_runtime,
                     context,
-                    &source,
-                    &revision,
+                    source,
+                    revision,
                     webview.path().desktop_dir().ok(),
                     file_runtime.process_epoch(),
                 )
@@ -333,6 +344,7 @@ pub async fn chat_document_preview_v1(
                 .map_err(fail)?;
                 ResultData {
                     path: None,
+                    file_info: None,
                     status,
                     view_id: id,
                     document: None,
@@ -342,30 +354,40 @@ pub async fn chat_document_preview_v1(
             Action::Locate {
                 source, revision, ..
             } => {
-                let path = if let DocumentSource::MessageFile(target) = &source {
+                let (path, file_info) = if let DocumentSource::MessageFile(target) = &source {
                     if revision.is_some() {
                         return Err(fail(Code::InvalidRequest));
                     }
-                    super::message_file_preview::locate(
+                    let (path, root) = super::message_file_preview::locate(
                         &chat_runtime,
                         context,
                         target,
                         webview.path().desktop_dir().ok(),
                     )
                     .await
-                    .map_err(fail)?
-                    .0
+                    .map_err(fail)?;
+                    // The path hint also works for a missing file. Only an
+                    // authorized regular file can additionally supply its size.
+                    let located = tokio::task::spawn_blocking(move || {
+                        let info = super::message_file_preview::card_info(&path, &root).ok();
+                        (path, info)
+                    })
+                    .await
+                    .map_err(|_| fail(Code::Unavailable))?;
+                    authorize(&chat_runtime, context).map_err(fail)?;
+                    located
                 } else {
                     let revision = revision.ok_or_else(|| fail(Code::InvalidRequest))?;
                     let _read_lease = image_runtime.borrow_read(SOURCE_BUDGET).map_err(fail)?;
-                    super::document_preview_location::locate(
+                    let path = super::document_preview_location::locate(
                         &chat_runtime,
                         context,
                         &source,
                         &revision,
                     )
                     .await
-                    .map_err(fail)?
+                    .map_err(fail)?;
+                    (path, None)
                 };
                 ResultData {
                     path: Some(
@@ -374,6 +396,7 @@ pub async fn chat_document_preview_v1(
                             .to_owned(),
                     ),
                     status: "located",
+                    file_info,
                     view_id: id,
                     document: None,
                     position: None,
@@ -565,6 +588,7 @@ pub async fn chat_document_preview_v1(
                 ResultData {
                     path: None,
                     status: "ready",
+                    file_info: None,
                     view_id: id,
                     document: Some(metadata),
                     position: None,
@@ -588,6 +612,7 @@ pub async fn chat_document_preview_v1(
                 ResultData {
                     path: None,
                     status: "resized",
+                    file_info: None,
                     view_id: id,
                     document: None,
                     position: None,
@@ -607,6 +632,7 @@ pub async fn chat_document_preview_v1(
                 ResultData {
                     path: None,
                     status: "position",
+                    file_info: None,
                     view_id: id,
                     document: None,
                     position: Some(position),
@@ -625,6 +651,7 @@ pub async fn chat_document_preview_v1(
                 ResultData {
                     path: None,
                     status: "closed",
+                    file_info: None,
                     view_id: id,
                     document: None,
                     position: None,

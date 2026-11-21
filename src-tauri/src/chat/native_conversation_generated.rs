@@ -156,6 +156,12 @@ pub struct NativeNotification {
     pub availability: String,
     #[serde(rename = "willRetry", default, skip_serializing_if = "Option::is_none")]
     pub will_retry: Option<bool>,
+    #[serde(
+        rename = "previewOffset",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub preview_offset: Option<i64>,
 }
 impl std::fmt::Debug for NativeNotification {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -548,6 +554,8 @@ pub struct NativeConversationViewEvent {
     pub session_id: String,
     #[serde(rename = "view")]
     pub view: NativeConversationView,
+    #[serde(rename = "previews", default, skip_serializing_if = "Option::is_none")]
+    pub previews: Option<Vec<NativeTextPreview>>,
 }
 impl std::fmt::Debug for NativeConversationViewEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -662,6 +670,20 @@ pub struct NativeTraceNotice {
 impl std::fmt::Debug for NativeTraceNotice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("NativeTraceNotice([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeTextPreview {
+    #[serde(rename = "itemId")]
+    pub item_id: String,
+    #[serde(rename = "text")]
+    pub text: String,
+}
+impl std::fmt::Debug for NativeTextPreview {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NativeTextPreview([REDACTED])")
     }
 }
 

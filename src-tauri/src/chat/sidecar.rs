@@ -1018,6 +1018,8 @@ impl SidecarSupervisor {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .kill_on_drop(false)
+                // The private expert-submit pipe has no HTTP header. Opt in only for this owned child.
+                .env("YIJIE_NATIVE_PIPE_PUBLIC_PREVIEW", "1")
                 .env("YIJIE_MARKET_CONNECTORS_ENABLED", "true")
                 .env("YIJIE_MARKET_WORKER_MANIFEST", manifest);
             if let Ok(origin)=std::env::var("YIJIE_DESKTOP_API_ORIGIN"){command.env("YIJIE_WEB_API_ORIGIN",origin);}

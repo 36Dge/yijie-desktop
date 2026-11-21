@@ -1,11 +1,15 @@
 /* Generated from native conversation source contracts. Do not edit. */
 
 export interface NativeConversationViewEvent {
-  schemaVersion: 6 | 7;
+  schemaVersion: 6 | 7 | 8;
   contextId: string;
   subscriptionId: string;
   sessionId: string;
   view: NativeConversationView;
+  /**
+   * @maxItems 128
+   */
+  previews?: NativeTextPreview[];
 }
 export interface NativeConversationView {
   sessionId: string;
@@ -615,4 +619,8 @@ export interface NativeTraceNotice {
   scope: "thread" | "turn";
   willRetry?: boolean | null;
   itemId?: string;
+}
+export interface NativeTextPreview {
+  itemId: string;
+  text: string;
 }

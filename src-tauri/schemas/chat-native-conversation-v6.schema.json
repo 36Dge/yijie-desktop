@@ -168,7 +168,8 @@
           "type": "integer",
           "enum": [
             6,
-            7
+            7,
+            8
           ]
         },
         "contextId": {
@@ -182,6 +183,13 @@
         },
         "view": {
           "$ref": "#/definitions/NativeConversationView"
+        },
+        "previews": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/definitions/NativeTextPreview"
+          }
         }
       },
       "required": [
@@ -386,6 +394,25 @@
         "itemId": {
           "type": "string",
           "maxLength": 512
+        }
+      }
+    },
+    "NativeTextPreview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "itemId",
+        "text"
+      ],
+      "properties": {
+        "itemId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 262144
         }
       }
     }

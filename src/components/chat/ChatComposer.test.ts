@@ -32,10 +32,7 @@ it.each([
       onSelect: () => view.setProps({ skills: [{ ...installedSkill, unavailableReason: null }] }),
     }),
   });
-  await view.get('.chat-composer__add').trigger('click'); await flushPromises();
-  const menu = new DOMWrapper(document.querySelector('.composer-add-menu')!);
-  await menu.get('[data-resource-menu="skills"]').trigger('click'); await flushPromises();
-  await menu.get('[role="checkbox"]').trigger('click'); await flushPromises();
+  await pickFirstSkill(view);
   const textarea = view.get('textarea').element;
   expect(view.get('.chat-composer__add').attributes('aria-expanded')).toBe('false');
   expect(view.get('[aria-label="本轮使用的技能"]').text()).toContain(installedSkill.displayName);
@@ -113,12 +110,103 @@ function mountComposer(overrides: Record<string, unknown> = {}, slots = {}) {
   return wrapper;
 }
 
+async function pickFirstSkill(wrapper: ReturnType<typeof mountComposer>) {
+  await wrapper.get(".chat-composer__add").trigger("click");
+  await flushPromises();
+  const menu = new DOMWrapper(document.querySelector(".composer-add-menu")!);
+  await menu.get('[data-resource-menu="skills"]').trigger("click");
+  await flushPromises();
+  await menu.get('[role="checkbox"]').trigger("click");
+  await flushPromises();
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 describe("ChatComposer", () => {
+  it("shows a measured caret only while typing with a collapsed selection outside IME composition", async () => {
+    const wrapper = mountComposer({ modelValue: "打卡" });
+    const input = wrapper.get("textarea");
+    const host = wrapper.get<HTMLElement>(".chat-composer__input").element;
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    vi.spyOn(host, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 40, 600, 64));
+    Object.defineProperty(host, "offsetWidth", { configurable: true, value: 600 });
+    vi.spyOn(Range.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(128, 50, 0, 16));
+
+    const caret = () => wrapper.find<HTMLElement>(".chat-composer__caret");
+    input.element.focus();
+    input.element.setSelectionRange(1, 1);
+    await vi.waitFor(() => expect(caret().exists()).toBe(true));
+    expect([caret().element.style.left, caret().element.style.top]).toEqual(["28px", "18px"]);
+    expect(input.element.selectionStart).toBe(1);
+
+    await input.trigger("compositionstart");
+    expect(caret().exists()).toBe(false);
+    await input.trigger("compositionend");
+    await vi.waitFor(() => expect(caret().exists()).toBe(true));
+    input.element.setSelectionRange(0, 2);
+    await input.trigger("select");
+    await vi.waitFor(() => expect(caret().exists()).toBe(false));
+    expect(input.element.value).toBe("打卡");
+    input.element.blur();
+    expect(wrapper.get(".chat-composer__caret-mirror").text()).toBe("");
+  });
+
+  it.each([
+    { mode: "new", suffix: "" },
+    { mode: "reply", suffix: "" },
+    { mode: "reply", suffix: "\n下一行" },
+  ] as const)("continues typing after a skill picked before '$suffix' in $mode", async ({ mode, suffix }) => {
+    const wrapper = mountComposer({
+      mode, modelValue: suffix,
+      onInsertSkill: (_id: string, range: SkillSelectionRange) => {
+        const draft = insertDraftSkill(suffix, [], installedSkill, range);
+        return wrapper.setProps({ skills: draft.skills.map(skill => ({ ...skill, unavailableReason: null })) });
+      },
+    }, {
+      "skill-control": ({ close, select }: { close: () => void; select: (id: string) => void }) => h(ChatSkillControl, {
+        entries: [installedSkill], disabled: false, loading: false, error: null,
+        operations: {}, operationErrors: {}, onClose: close, onSelect: select,
+      }),
+    });
+    const input = wrapper.get("textarea").element;
+    input.focus();
+    input.setSelectionRange(0, 0);
+    await pickFirstSkill(wrapper);
+
+    const editor = wrapper.get<HTMLElement>('[contenteditable="true"]');
+    const token = editor.get("[data-skill-id]").element;
+    const caret = document.getSelection()!.getRangeAt(0);
+    expect(document.activeElement).toBe(editor.element);
+    expect(caret.collapsed).toBe(true);
+    expect(caret.startContainer).toBe(editor.element);
+    expect(caret.startContainer.childNodes[caret.startOffset - 1]).toBe(token);
+    expect(caret.startContainer.childNodes[caret.startOffset]).toBeInstanceOf(HTMLImageElement);
+    expect(readSkillEditor(editor.element).text).toBe(suffix);
+    caret.insertNode(document.createTextNode("继续"));
+    await editor.trigger("input");
+    expect(wrapper.emitted("edit-skill-draft")).toEqual([["继续" + suffix, [{ id: installedSkill.id, offset: 0 }]]]);
+  });
+
+  it("counts a native line break after a skill once and clears the displaced caret separator", async () => {
+    const wrapper = mountComposer({
+      modelValue: "", skills: [{ ...installedSkill, offset: 0, unavailableReason: null }],
+      onEditSkillDraft: (modelValue: string) => wrapper.setProps({ modelValue }),
+    });
+    const editor = wrapper.get<HTMLElement>('[contenteditable="true"]');
+    const token = editor.get("[data-skill-id]").element;
+    const separator = token.nextSibling!;
+    // WebKit moves the remainder of the line into a div when the user presses Shift+Enter.
+    const line = document.createElement("div");
+    line.append("下一行", separator);
+    token.after(document.createElement("br"), line);
+    await editor.trigger("input");
+    expect(wrapper.props("modelValue")).toBe("\n下一行");
+    expect(line.contains(separator)).toBe(false);
+  });
+
   it.each(["new", "reply"])("shows an inline hint for an empty slash filter in %s without editing the draft", async mode => {
     const wrapper = mountComposer({ mode, modelValue: "" });
     const input = wrapper.get("textarea");
@@ -198,6 +286,7 @@ describe("ChatComposer", () => {
     expect(body).toBe("请整理 明细");
     expect(positions).toEqual([{ id: installedSkill.id, offset: 3 }]);
     expect(range).toMatchObject({ selectionStart: 4, selectionEnd: 4 });
+    expect(document.getSelection()?.anchorNode).toBe(editor.lastChild);
     expect(document.activeElement).toBe(editor);
     expect(document.querySelector('[role="listbox"]')).toBeNull();
   });

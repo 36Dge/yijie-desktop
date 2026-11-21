@@ -850,6 +850,14 @@ pub trait TurnProjectionSink: Send + Sync {
     ) -> Result<(), ChatError> {
         Ok(())
     }
+    fn publish_with_previews(
+        &self,
+        view: super::native_conversation_generated::NativeConversationView,
+        _previews: &[super::native_conversation_generated::NativeTextPreview],
+    ) -> Result<(), ChatError> {
+        self.publish_native(view)
+    }
+
     fn publish(&self, projection: LiveTurnProjection) -> Result<(), ChatError>;
 
     fn publish_feat137(
@@ -3076,7 +3084,7 @@ impl ConversationApplication {
                 unix_seconds()?,
             )
             .await?;
-        sink.publish_native(buffer.view.clone())
+        sink.publish_with_previews(buffer.view.clone(), buffer.previews())
     }
 
     /// Observe every already-running session while retaining one outbox dispatcher.

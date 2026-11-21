@@ -18,10 +18,10 @@ const overlay = ref<HTMLElement | null>(null);
 const open = ref(false);
 const trigger = ref<HTMLButtonElement | null>(null);
 const menu = ref<HTMLElement | null>(null);
-const presentation: Record<ProfileId, { label: string; icon: YjIconName }> = {
+const presentation: Record<ProfileId, { label: string; icon: YjIconName; triggerLabel?: string }> = {
   "kimi-k3-max-v1": { label: "Kimi-K3", icon: "modelKimi" },
   "kimi-k3-1-pro-high-v1": { label: "Kimi K3.1 Pro", icon: "modelKimi" },
-  "kimi-k3-1-pro-max-v1": { label: "Kimi K3.1 Pro · max", icon: "modelKimi" },
+  "kimi-k3-1-pro-max-v1": { label: "Kimi K3.1 Pro", icon: "modelKimi", triggerLabel: "Kimi K3.1 Pro · max" },
   "minimax-m3-high-v1": { label: "MiniMax-M3", icon: "modelMiniMax" },
 };
 // Display-only placeholders deliberately have no runtime profile IDs or handlers.
@@ -31,7 +31,7 @@ const upcomingModels: readonly { label: string; icon: YjIconName }[] = [
 ];
 const selected = computed(() => props.profile ? presentation[props.profile] : null);
 const busyLabel = computed(() => props.saving ? "正在切换模型…" : props.loading ? "模型加载中" : "");
-const label = computed(() => selected.value?.label ?? (busyLabel.value || "模型待识别"));
+const label = computed(() => selected.value?.triggerLabel ?? selected.value?.label ?? (busyLabel.value || "模型待识别"));
 const retired = computed(() => props.catalog?.schema_version === 2 && props.profile === "kimi-k3-max-v1");
 // The max profile stays visible on a conversation that was opened with it.
 const modelOptions = computed(() => props.catalog?.models.filter(
@@ -93,7 +93,7 @@ function key(event: KeyboardEvent): void {
     <div ref="menu" class="model-menu chat-control-menu" role="menu" aria-label="对话模型" @keydown="key">
       <button v-for="entry in modelOptions" :key="entry.profile.profile_id" class="chat-control-option" type="button" role="menuitemradio" :aria-checked="entry.profile.profile_id === profile" :disabled="!entry.available" @click="choose(entry.profile.profile_id)">
         <span class="model-brand" :class="{ 'is-kimi': presentation[entry.profile.profile_id].icon === 'modelKimi' }"><YjIcon :name="presentation[entry.profile.profile_id].icon" size="sm" /></span>
-        <span class="model-option-label">{{ presentation[entry.profile.profile_id].label }}<template v-if="entry.profile.profile_id === 'kimi-k3-1-pro-high-v1'"> · high</template></span>
+        <span class="model-option-label">{{ presentation[entry.profile.profile_id].label }}</span>
         <span v-if="!entry.available" class="model-option-status">{{ unavailableLabel(entry.reason) }}</span>
       </button>
       <span v-if="!catalog?.models.length" class="model-menu-empty">暂无可用模型</span>

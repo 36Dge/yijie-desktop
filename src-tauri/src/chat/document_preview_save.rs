@@ -33,13 +33,16 @@ pub(super) async fn save(
     runtime: &ChatRuntime,
     context: Uuid,
     source: &DocumentSource,
-    revision: &str,
+    expected_revision: Option<&str>,
     desktop: Option<PathBuf>,
     process_epoch: Uuid,
 ) -> Result<&'static str, Code> {
     let _dialog = SAVE_DIALOG.try_acquire().map_err(|_| Code::Conflict)?;
     let first = read_source(runtime, context, source, desktop.clone()).await?;
-    let name = checked_name(&first, revision)?;
+    // A preview supplies the exact revision the reader saw. A file-card
+    // click pins the current file before presenting the same system picker.
+    let revision = expected_revision.unwrap_or(&first.revision).to_owned();
+    let name = checked_name(&first, &revision)?;
     let mime = first.mime.clone();
     drop(first);
     let Some(selected) = pick_native_file_save_target(&name, &mime).await? else {
@@ -47,9 +50,9 @@ pub(super) async fn save(
     };
     let target = normalized_file_target(&selected, &mime)?;
     // Closing the dialog does not extend the authority or preserve an old copy:
-    // re-read the same source and require the revision that was previewed.
+    // re-read the same source and require the revision selected before the picker.
     let second = read_source(runtime, context, source, desktop).await?;
-    if checked_name(&second, revision)? != name || second.mime != mime {
+    if checked_name(&second, &revision)? != name || second.mime != mime {
         return Err(Code::IntegrityFailed);
     }
     authorize(runtime, context)?;

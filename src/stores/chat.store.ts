@@ -37,6 +37,7 @@ historyPageToConversationSnapshot,
 historyPageV5ToConversationSnapshot,
 } from "../api/chat-conversation-adapter";
 import type { NativeRecordDiagnostic } from "../api/generated/native-conversation-history.gen";
+import {createLiveAnswerPresentation} from "../domain/live-answer-presentation";
 import type { NativeConversationView,NativeConversationViewEvent } from "../api/generated/native-conversation-private.gen";
 import { feat134StreamingUiEnabled } from "../authorization/feat134-streaming-ui-config";
 import { feat136ExecutionUiEnabled } from "../authorization/feat136-execution-ui-config";
@@ -408,6 +409,7 @@ export function createChatStoreDefinition(
     const nativeLiveTurnId = ref<string | null>(null);
     let nativeLiveRevocationEpoch = 0;
     watch(phase, value => { if (value !== "streaming") nativeLiveTurnId.value = null; }, {flush: "sync"});
+    const liveAnswers = createLiveAnswerPresentation();
     const nativeViews = shallowRef<Readonly<Record<string, NativeConversationView>>>({});
     // Invalidation only: reuse the existing native subscription, without a new
     // listener, result lifecycle or timer. Text deltas do not change this key.
@@ -790,6 +792,7 @@ export function createChatStoreDefinition(
       history.value = null;
       conversationState.value = emptyConversationView();
       nativeViews.value = {};
+      liveAnswers.clear();
       artifactReferenceItems.value = [];
       nativeRecordDiagnostics.value = {};
       nativeLiveRevocationEpoch += 1;
@@ -1866,7 +1869,7 @@ export function createChatStoreDefinition(
       const sessionId = selectedSessionId.value;
       if (!sessionId || !history.value) return;
       if (cachedHistory?.sessionId !== sessionId || cachedHistory.history !== history.value) cachedHistory = { sessionId, history: history.value, snapshot: conversationSnapshotFromHistory(sessionId, history.value) };
-      conversationState.value = measureChatRender("conversation", () => composeNativeViews(cachedHistory!.snapshot, Object.values(nativeViews.value), Object.values(localSubmissions.value), Object.values(nativeRecordDiagnostics.value), artifactReferenceItems.value));
+      conversationState.value = measureChatRender("conversation", () => composeNativeViews(cachedHistory!.snapshot, Object.values(nativeViews.value).map(liveAnswers.view), Object.values(localSubmissions.value), Object.values(nativeRecordDiagnostics.value), artifactReferenceItems.value));
       const latest = Object.values(nativeViews.value).sort((a,b) => (b.ordinal ?? 0) - (a.ordinal ?? 0))[0];
       if (!latest) return;
       syncLiveProjection(liveProjection(conversationState.value, sessionId, latest.turnId));
@@ -1881,7 +1884,9 @@ export function createChatStoreDefinition(
       if (event.contextId !== context.value?.contextId || event.subscriptionId !== subscriptionId || event.sessionId !== selectedSessionId.value) return;
       if (nativeRecordDiagnostics.value[event.view.turnId]) return;
       const previous = nativeViews.value[event.view.turnId];
-      if (previous && BigInt(previous.revision) >= BigInt(event.view.revision)) return;
+      if (previous && (BigInt(previous.revision) > BigInt(event.view.revision) ||
+          (previous.revision === event.view.revision && !event.previews?.length))) return;
+      liveAnswers.observe(event, previous);
       nativeViews.value = {...nativeViews.value, [event.view.turnId]: event.view};
       const submission = localSubmissions.value[event.view.turnId];
       if (submission && submission.status !== "submitted") localSubmissions.value = {...localSubmissions.value, [event.view.turnId]: {...submission, status: "submitted"}};
@@ -4549,6 +4554,7 @@ export function createChatStoreDefinition(
       readingView,
       conversationState,
       nativeLiveTurnId,
+      takeLiveAnswerArrival: liveAnswers.take,
       marketNativeRevision,
       conversationApprovalState,
       approvalTransients,

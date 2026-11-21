@@ -1,5 +1,5 @@
-//! A clicked assistant reference is a locator. The stored message and the
-//! session's native workspace (or OS Desktop) independently authorize the read.
+//! The stored assistant reference and the session's native workspace
+//! (or OS Desktop) authorize both card metadata and explicit file reads.
 use super::artifact_native::ArtifactNativeCode as Code;
 use super::database::ChatRepository;
 #[cfg(target_os = "macos")]
@@ -516,32 +516,45 @@ fn check_location(path: &Path, root: &Path) -> Result<(), Code> {
 }
 
 #[cfg(target_os = "macos")]
-pub(super) fn read(path: &Path, root: &Path, now: i64) -> Result<StoredDocument, Code> {
+fn media_type(path: &Path) -> Result<&'static str, Code> {
+    Ok(
+        match path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "md" | "markdown" => "text/markdown",
+            "txt" => "text/plain",
+            "csv" => "text/csv",
+            "json" => "application/json",
+            "htm" | "html" => "text/html",
+            "pdf" => "application/pdf",
+            "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "png" => "image/png",
+            "jpg" | "jpeg" => "image/jpeg",
+            "webp" => "image/webp",
+            "svg" => "image/svg+xml",
+            "gif" => "image/gif",
+            "mp4" => "video/mp4",
+            _ => return Err(Code::Unsupported),
+        },
+    )
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct MessageFileInfo {
+    size_bytes: u64,
+    save_supported: bool,
+}
+
+#[cfg(target_os = "macos")]
+fn regular_file(path: &Path, root: &Path) -> Result<(std::fs::File, u64), Code> {
     check_location(path, root)?;
-    let mime = match path
-        .extension()
-        .and_then(|value| value.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "md" | "markdown" => "text/markdown",
-        "txt" => "text/plain",
-        "csv" => "text/csv",
-        "json" => "application/json",
-        "htm" | "html" => "text/html",
-        "pdf" => "application/pdf",
-        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "webp" => "image/webp",
-        "svg" => "image/svg+xml",
-        "gif" => "image/gif",
-        "mp4" => "video/mp4",
-        _ => return Err(Code::Unsupported),
-    };
     // macOS rejects symlinks in ANY component in the open itself, including the
     // selected root. The size/type checks and bounded read use that same handle.
     let file = OpenOptions::new()
@@ -557,10 +570,34 @@ pub(super) fn read(path: &Path, root: &Path, now: i64) -> Result<StoredDocument,
     if !meta.is_file() || meta.nlink() != 1 {
         return Err(Code::Forbidden);
     }
-    if meta.len() > SOURCE_BUDGET as u64 {
+    Ok((file, meta.len()))
+}
+
+#[cfg(target_os = "macos")]
+pub(super) fn card_info(path: &Path, root: &Path) -> Result<MessageFileInfo, Code> {
+    let (_, size_bytes) = regular_file(path, root)?;
+    if size_bytes > (1_u64 << 53) - 1 {
         return Err(Code::LimitExceeded);
     }
-    let mut bytes = Vec::with_capacity(meta.len() as usize);
+    let save_supported = (1..=SOURCE_BUDGET as u64).contains(&size_bytes)
+        && media_type(path)
+            .ok()
+            .and_then(super::artifact_file_native::canonical_file_extension)
+            .is_some();
+    Ok(MessageFileInfo {
+        size_bytes,
+        save_supported,
+    })
+}
+
+#[cfg(target_os = "macos")]
+pub(super) fn read(path: &Path, root: &Path, now: i64) -> Result<StoredDocument, Code> {
+    let mime = media_type(path)?;
+    let (file, size) = regular_file(path, root)?;
+    if size > SOURCE_BUDGET as u64 {
+        return Err(Code::LimitExceeded);
+    }
+    let mut bytes = Vec::with_capacity(size as usize);
     file.take(SOURCE_BUDGET as u64 + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| Code::Unavailable)?;
@@ -652,6 +689,9 @@ mod tests {
         ] {
             let path = root.join(filename);
             std::fs::write(&path, &bytes).unwrap();
+            let info = card_info(&path, &root).unwrap();
+            assert_eq!(info.size_bytes, bytes.len() as u64);
+            assert_eq!(info.save_supported, kind == "html");
             let file = read(&path, &root, 100).unwrap();
             let view =
                 document_preview_content::render(&file.mime, &file.bytes, 0, 0, true, 1.0).unwrap();

@@ -248,18 +248,16 @@ describe("native process reading layout", () => {
 });
 
 describe("model and runtime progress have distinct provenance", () => {
-  it("keeps routine output policy inspectable without presenting it as an execution warning", () => {
+  it("retains output policy and history conflict diagnostics without rendering thread warnings", () => {
     const base = selectConversationTimeline(composeConversationView(snapshot,[native()]),'session')!;
     const routine = {identity:'output-policy', source:'thread_notice' as const, role:'system' as const, severity:'warning' as const, code:'conversation_warning' as const, diagnostic:'command_output_pending_final', count:1};
     const conflict = {...routine, identity:'conflict', diagnostic:'history_source_conflict'};
     const timeline = {...base,notices:[routine,conflict]};
     const before = JSON.stringify(timeline);
     const wrapper = mount(ChatTimeline, {props:{timeline}});
-    expect(wrapper.get('details summary').text()).toBe('命令输出说明');
-    expect(wrapper.get('details').attributes('open')).toBeUndefined();
-    expect(wrapper.get('details').text()).toContain('安全输出以各命令的结束记录为准');
-    expect(wrapper.get('[aria-label="对话通知"]').text()).toContain('历史读取与已观察事实不同');
-    expect(wrapper.get('[aria-label="对话通知"]').text()).not.toContain('安全输出');
+    expect(wrapper.find('[aria-label="命令输出说明"]').exists()).toBe(false);
+    expect(wrapper.find('[aria-label="对话通知"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toMatch(/命令输出说明|历史读取与已观察事实不同|安全输出/);
     expect(JSON.stringify(timeline)).toBe(before);
     wrapper.unmount();
   });

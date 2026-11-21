@@ -126,6 +126,8 @@ export interface components {
             availability: "available" | "partial" | "unavailable";
             /** @description Native retry intent only. Omitted/null means unknown, never false; does not drive client execution. */
             willRetry?: boolean | null;
+            /** @description Only for item/agentMessage/previewDelta. UTF-8 byte offset in the bounded, cleaned public body. Offset zero starts a preview. The formal item snapshot wins; previews carry no phase or execution authority. */
+            previewOffset?: number;
         };
         NativeThreadSnapshot: {
             /** @enum {integer} */
@@ -321,6 +323,8 @@ export interface operations {
                 "X-Yijie-Search-Receipt"?: "2";
                 /** @description Opt in to stable message identities, publication provenance and bounded undelivered text. */
                 "X-Yijie-Publication"?: "2";
+                /** @description Together with publication 2, opt into a dedicated replay cursor including transient public text previews. The Host echoes this header only for a paired Runtime. */
+                "X-Yijie-Publication-Preview"?: "1";
             };
             path: {
                 agent_session_id: string;
