@@ -84,7 +84,7 @@ onBeforeUnmount(cancelScroll);
       <ChatActivityChevron :expanded="expanded" />
     </button>
     <p v-if="!items && item.availability && item.availability !== 'available'" class="chat-deep-thinking__notice" role="note">
-      {{ item.availability === 'unavailable' ? '此项内容暂不可用' : '此项信息不完整' }}；不代表执行失败。
+      {{ item.availability === 'unavailable' ? '此项内容暂不可用。' : '此项信息不完整。' }}
     </p>
     <p v-if="stateMessage" class="chat-deep-thinking__notice" role="note">{{ stateMessage }}</p>
     <div v-show="expanded" class="chat-deep-thinking__scroll-frame">

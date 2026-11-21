@@ -190,7 +190,6 @@ const diagnosticLabels = {
       <ul v-if="mcp?.diagnostics.length" aria-label="内容可用性提示">
         <li v-for="code in mcp.diagnostics" :key="code">{{ diagnosticLabels[code] }}</li>
       </ul>
-      <p v-else-if="native.availability !== 'available'" role="note">该项内容信息不完整；这不改变原生执行结果。</p>
       </template>
     </div>
   </ChatTimelineItemShell>

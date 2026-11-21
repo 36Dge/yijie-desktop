@@ -45,14 +45,11 @@ const plainProcess = computed(() => props.processPresentation &&
   ["commentary", "reasoning", "assistant_unclassified"].includes(props.item.presentation));
 const activityRow = computed(() => ["command", "tool", "web_search", "unknown"].includes(props.item.presentation));
 const statusText = computed(() => props.item.activityLabel ?? props.statusLabel);
-const availabilityInDetails = computed(() => props.collapsible && props.processPresentation &&
-  ["web_search", "command", "tool"].includes(props.item.presentation) &&
-  props.item.availability === "partial" && !props.item.activityLabel && !props.item.approval);
 const availabilityText = computed(() => {
-  const content = props.item.availability === "unavailable" ? "此项内容暂不可用" : "此项信息不完整";
-  return props.item.execution?.status === "failed"
-    ? `${content}。`
-    : `${content}；不代表执行失败。`;
+  if (!props.showAvailability || props.item.role === "user") return null;
+  if (props.item.availability === "unavailable") return "此项内容暂不可用。";
+  if (props.item.availability === "partial" && !activityRow.value) return "此项信息不完整。";
+  return null;
 });
 const id = useId();
 const titleId = `${id}-title`;
@@ -96,7 +93,7 @@ function toggle(): void {
     :aria-description="activityRow && !collapsible ? statusText : undefined"
     :aria-busy="busy ? 'true' : 'false'"
   >
-    <p v-if="showAvailability && !availabilityInDetails && item.role !== 'user' && item.availability && item.availability !== 'available'" class="chat-timeline-item-shell__availability" role="note">
+    <p v-if="availabilityText" class="chat-timeline-item-shell__availability" role="note">
       {{ availabilityText }}
     </p>
     <header v-if="item.role !== 'user' && !plainProcess && !hideNormalAnswerStatus" class="chat-timeline-item-shell__header">
@@ -154,11 +151,10 @@ function toggle(): void {
     </header>
 
     <div
-      v-if="(slots.default || (showAvailability && availabilityInDetails)) && (!collapsible || expanded)"
+      v-if="slots.default && (!collapsible || expanded)"
       :id="contentId"
       class="chat-timeline-item-shell__body"
     >
-      <p v-if="showAvailability && availabilityInDetails" class="chat-timeline-item-shell__availability" role="note">{{ availabilityText }}</p>
       <slot />
     </div>
 

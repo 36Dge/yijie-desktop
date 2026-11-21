@@ -78,13 +78,16 @@ describe("FEAT-136 native Command display", () => {
     expect(wrapper.find('[aria-label="复制代码"]').exists()).toBe(false);
   });
 
-  it("does not infer output truncation from partial metadata", async () => {
+  it.each([false, true])("shows the recorded output without a generic partial notice (processPresentation=%s)", async processPresentation => {
     const wrapper = setup(view({availability: "partial", durationMs: null}));
+    await wrapper.setProps({processPresentation});
+    expect(wrapper.text()).not.toContain("此项信息不完整");
     await expand(wrapper);
-    expect(wrapper.text()).toContain("此项信息不完整");
+    expect(wrapper.text()).not.toContain("此项信息不完整");
     expect(wrapper.text()).not.toContain("截断");
     expect(wrapper.text()).not.toContain("上游仅提供");
     expect(wrapper.get("pre").text()).toBe("普通安全输出");
+    expect(wrapper.get(".chat-timeline-item-shell__disclosure").attributes("aria-description")).toBe("已完成");
     expect(wrapper.find(".chat-command-item__error").exists()).toBe(false);
   });
 

@@ -3,7 +3,7 @@
   "feature": "FEAT-174",
   "mode": "local_worktree_candidate",
   "release": false,
-  "host_base_commit": "1548e5b43813192d9e6d5a606b303c98a5adac6b",
+  "host_base_commit": "e7457721f082bd41af1f757e59cd249aa0d3131d",
   "host_sources": {
     "api/README.md": "d270ca2dabf257b528ee2f178ba03e3d7fb3f1e04ffc8b4414247d4c47c50807",
     "api/artifact-media.candidate.json": "6d3ba9477e73b9e04a76e5933ba1d87e68076c62a97d28d2941b5d005c0f9864",
