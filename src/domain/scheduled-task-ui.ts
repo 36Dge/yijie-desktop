@@ -112,5 +112,6 @@ export const pauseReasonLabels: Record<PauseReason, string> = {
 };
 
 export function scheduleModelLabel(profile?: string): string {
+  if (profile === "kimi-k3-1-pro-high-v1") return "Kimi K3.1 Pro · high";
   return profile === "kimi-k3-1-pro-max-v1" ? "Kimi K3.1 Pro · max" : profile === "kimi-k3-max-v1" ? "Kimi K3 · max（历史模型）" : profile === "minimax-m3-high-v1" ? "MiniMax M3" : "MiniMax M3（既有配置）";
 }

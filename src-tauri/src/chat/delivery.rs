@@ -188,14 +188,9 @@ pub(crate) fn market_claim_predicate(db: &Connection) -> Result<String, ChatErro
         return Ok("1=1".into());
     }
     let profiles = if super::models::enabled() && cfg!(feature = "kimi-k31-pro-candidate") {
-        ["kimi-k3-1-pro-max-v1", "minimax-m3-high-v1"]
-            .into_iter()
-            .filter(|p| super::models::dispatch_profile_available(p))
-            .map(|p| format!("'{p}'"))
-            .collect::<Vec<_>>()
-            .join(",")
+        super::models::dispatch_profiles_sql()
     } else {
-        "NULL".into()
+        "NULL"
     };
     Ok(format!("(d.state!='pending' OR EXISTS(SELECT 1 FROM chat_delivery_proofs proof WHERE proof.operation_id=m.turn_operation_id AND proof.session_id=m.session_id AND proof.family IN ('market','expert') AND proof.format_version=1 AND proof.phase!='cancelled' AND proof.turn_attempts=0 AND proof.profile_id IN ({profiles})))"))
 }

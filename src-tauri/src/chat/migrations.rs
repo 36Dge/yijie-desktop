@@ -31,7 +31,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 48] = [
+const CATALOG: [CatalogEntry; 49] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -268,6 +268,11 @@ const CATALOG: [CatalogEntry; 48] = [
         sql: include_str!("../../migrations/chat/0047_market_decision_facts.sql"),
     },
     CatalogEntry {version:48,name:"0048_builtin_web_selection_origins",sql:include_str!("../../migrations/chat/0048_builtin_web_selection_origins.sql")},
+    CatalogEntry {
+        version: 49,
+        name: "0049_kimi_k31_high_effort",
+        sql: include_str!("../../migrations/chat/0049_kimi_k31_high_effort.sql"),
+    },
 ];
 
 // Preserve the existing activated-version surface; reader support is separate.
@@ -298,6 +303,7 @@ pub const TOOL_PROFILE_RETIREMENT_SCHEMA_VERSION: i64 = 45;
 pub const MARKET_INITIAL_HOST_TURN_SCHEMA_VERSION: i64 = 46;
 pub const MARKET_DECISION_FACTS_SCHEMA_VERSION: i64 = 47;
 pub const BUILTIN_WEB_SELECTION_SCHEMA_VERSION:i64=48;
+pub const KIMI_HIGH_EFFORT_SCHEMA_VERSION: i64 = 49;
 pub const SCHEDULE_CHAT_WORKSPACE_SCHEMA_VERSION: i64 = 29;
 pub const MARKET_CONNECTORS_SCHEMA_VERSION: i64 = 30;
 pub const MARKET_SELECTION_SCHEMA_VERSION: i64 = 31;
@@ -364,6 +370,7 @@ pub(super) fn migrate_to_target(connection: &mut Connection, target: i64) -> Res
         MARKET_INITIAL_HOST_TURN_SCHEMA_VERSION,
         MARKET_DECISION_FACTS_SCHEMA_VERSION,
         BUILTIN_WEB_SELECTION_SCHEMA_VERSION,
+        KIMI_HIGH_EFFORT_SCHEMA_VERSION,
     ]
     .contains(&target)
     {
@@ -518,6 +525,47 @@ mod tests {
     use rusqlite::OpenFlags;
     use std::fs;
     use uuid::Uuid;
+
+    #[cfg(feature = "kimi-k31-pro-candidate")]
+    #[test]
+    fn kimi_high_upgrade_preserves_model_facts_and_accepts_new_requests() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.pragma_update(None, "foreign_keys", true).unwrap();
+        migrate_to_target(&mut db, BUILTIN_WEB_SELECTION_SCHEMA_VERSION).unwrap();
+        db.execute("INSERT INTO chat_projects(id,owner_user_id,tenant_id,safe_name,canonical_hash,bookmark_ref,last_used_at) VALUES('project','owner','tenant','Project',printf('%064d',1),X'0102',1)", []).unwrap();
+        let insert = |db: &Connection, id: &str, profile: &str| {
+            db.execute("INSERT INTO chat_sessions(id,owner_user_id,tenant_id,project_id,title,title_source,title_job_status,created_at,last_activity_at) VALUES(?1,'owner','tenant','project','Title','fallback','not_started',1,1)", [id]).unwrap();
+            db.execute("INSERT INTO chat_turns(id,session_id,operation_id,status) VALUES(?1,?1,?1,'queued')", [id]).unwrap();
+            db.execute("INSERT INTO chat_scheduled_plans(plan_id,owner_user_id,tenant_id,revision,schedule_epoch,name,content,rule_json,rule_version,tzdb_version,target_mode,target_state,state,effective_from,cursor_at) VALUES(?1,'owner','tenant',1,1,'Plan','Task','{}',1,'2026b','dedicated_chat','unbound','paused',0,0)", [id]).unwrap();
+            db.execute("INSERT INTO chat_model_selections(session_id,profile_id,revision,state) VALUES(?1,?2,2,'ready')", [id,profile]).unwrap();
+            db.execute("INSERT INTO chat_operation_models VALUES(?1,?1,?2,2)", [id,profile]).unwrap();
+            db.execute("INSERT INTO chat_plan_models VALUES(?1,?2)", [id,profile]).unwrap();
+            db.execute("INSERT INTO chat_model_operations_v2 VALUES(?1,?1,2,'host','thread',?2,?2,2,'committed','original receipt')", [id,profile]).unwrap();
+            db.execute("INSERT INTO chat_delivery_proofs(operation_id,session_id,turn_id,format_version,family,profile_id,model_revision,fingerprint,phase,created_at) VALUES(?1,?1,?1,1,'ordinary',?2,2,printf('%064d',42),'prepared',1)", [id,profile]).unwrap();
+        };
+        let original = "kimi-k3-1-pro-max-v1";
+        let high = "kimi-k3-1-pro-high-v1";
+        insert(&db, "previous", original);
+        migrate_to_target(&mut db, KIMI_HIGH_EFFORT_SCHEMA_VERSION).unwrap();
+        insert(&db, "new", high);
+        migrate_to_target(&mut db, KIMI_HIGH_EFFORT_SCHEMA_VERSION).unwrap();
+        for (id, profile) in [("previous", original), ("new", high)] {
+            let preserved: bool = db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM chat_model_selections s
+                 JOIN chat_operation_models o ON o.session_id=s.session_id
+                 JOIN chat_plan_models p ON p.plan_id=s.session_id
+                 JOIN chat_model_operations_v2 r ON r.operation_id=o.operation_id
+                 JOIN chat_delivery_proofs d ON d.operation_id=o.operation_id
+                 WHERE s.session_id=?1 AND s.profile_id=?2 AND o.profile_id=?2 AND p.profile_id=?2
+                   AND r.previous_profile_id=?2 AND r.target_profile_id=?2 AND d.profile_id=?2
+                   AND r.receipt_json='original receipt' AND d.fingerprint=printf('%064d',42)
+                   AND s.revision=2 AND o.revision=2 AND d.model_revision=2 AND d.claim_count=0)",
+                [id, profile], |row| row.get(0),
+            ).unwrap();
+            assert!(preserved, "{id}");
+        }
+        validate_reader(&db).unwrap();
+    }
 
     #[cfg(feature = "kimi-k31-pro-candidate")]
     #[test]

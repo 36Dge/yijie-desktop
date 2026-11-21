@@ -14,7 +14,7 @@ pub(super) fn profile(definition: &PlanDefinition) -> Result<String, Error> {
 }
 pub(super) fn require_definition(definition: &PlanDefinition) -> Result<(), Error> {
     let id = profile(definition)?;
-    if !models::executable_profile(&id) || (id == "kimi-k3-1-pro-max-v1" && !models::v2_enabled()) {
+    if !models::executable_profile(&id) || (models::kimi_k31_profile(&id) && !models::v2_enabled()) {
         return Err(Error::ExecutionNotReady);
     }
     Ok(())
@@ -158,7 +158,7 @@ pub(super) fn due_plan_ids(
     } else {
         "'minimax-m3-high-v1'"
     };
-    let mut q=db.prepare(&format!("SELECT p.plan_id FROM chat_scheduled_plans p WHERE p.owner_user_id=?1 AND p.tenant_id=?2 AND p.state NOT IN ('deleted','completed') AND p.next_at<=?3 AND (?4=0 OR {model_sql}!='kimi-k3-max-v1') AND (?5=0 OR {model_sql}!='kimi-k3-1-pro-max-v1') ORDER BY p.next_at,p.plan_id LIMIT ?6")).map_err(|_|ChatError::DatabaseUnavailable)?;
+    let mut q=db.prepare(&format!("SELECT p.plan_id FROM chat_scheduled_plans p WHERE p.owner_user_id=?1 AND p.tenant_id=?2 AND p.state NOT IN ('deleted','completed') AND p.next_at<=?3 AND (?4=0 OR {model_sql}!='kimi-k3-max-v1') AND (?5=0 OR {model_sql} NOT IN ('kimi-k3-1-pro-high-v1','kimi-k3-1-pro-max-v1')) ORDER BY p.next_at,p.plan_id LIMIT ?6")).map_err(|_|ChatError::DatabaseUnavailable)?;
     let rows = q
         .query_map(
             params![
@@ -167,7 +167,7 @@ pub(super) fn due_plan_ids(
                 now,
                 cfg!(feature = "kimi-k31-pro-candidate"),
                 !models::v2_enabled()
-                    || !models::dispatch_profile_available("kimi-k3-1-pro-max-v1"),
+                    || !models::dispatch_profile_available("kimi-k3-1-pro-high-v1"),
                 limit
             ],
             |r| r.get::<_, String>(0),

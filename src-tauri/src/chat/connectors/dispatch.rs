@@ -1365,6 +1365,7 @@ mod tests {
             return;
         }
         let mut f = Fixture::new();
+        let initial_schema = f.repo().schema_version().unwrap();
         let pending = f.create();
         let now = super::super::now().unwrap();
         let host = Uuid::now_v7().to_string();
@@ -1542,11 +1543,8 @@ mod tests {
             .unwrap();
         assert_eq!(old_outbox, "failed");
         assert_eq!(
-            f.repo()
-                .connection
-                .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
-                .unwrap(),
-            46
+            f.repo().schema_version().unwrap(),
+            initial_schema.max(crate::chat::migrations::MARKET_INITIAL_HOST_TURN_SCHEMA_VERSION)
         );
     }
 

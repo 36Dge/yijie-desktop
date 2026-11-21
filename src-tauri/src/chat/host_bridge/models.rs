@@ -20,7 +20,13 @@ impl HostBridge {
             .recovery_get(&format!("{}catalog", model_prefix()))
             .await?
             .ok_or_else(protocol_error)?;
-        if value.schema_version != crate::chat::models::schema_version() || value.models.len() != 2
+        let expected_profiles = if cfg!(feature = "kimi-k31-pro-candidate") {
+            3
+        } else {
+            2
+        };
+        if value.schema_version != crate::chat::models::schema_version()
+            || value.models.len() != expected_profiles
         {
             return Err(protocol_error());
         }

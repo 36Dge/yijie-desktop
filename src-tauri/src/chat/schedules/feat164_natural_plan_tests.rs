@@ -218,7 +218,7 @@ fn feat164_natural_plan_upgrade() {
             assert!(cfg!(feature = "kimi-k31-pro-candidate") && crate::chat::models::v2_enabled());
             let saved: Handoff = serde_json::from_slice(&std::fs::read(&handoff).unwrap()).unwrap();
             let mut r = open(&dir);
-            assert_eq!(r.schema_version().unwrap(), 41);
+            assert_eq!(r.schema_version().unwrap(), crate::chat::migrations::KIMI_HIGH_EFFORT_SCHEMA_VERSION);
             assert_eq!(
                 r.read_schedule(&saved.minimax.plan_id).unwrap(),
                 saved.minimax

@@ -15,7 +15,7 @@ import {verifyMarketCallSurfaces} from "./check-market-call-surfaces.mjs";
 const desktop=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const contracts=path.resolve(desktop,"../yijie-contracts"),host=path.resolve(desktop,"../yijie-agent-host");
 const hash=b=>createHash("sha256").update(b).digest("hex");
-const commit="62070251d0da84ce4c5eba0c7b25d9a48e5d5929";
+const commit="05bbf1b59826ae67c33d4757ed6a34c6492478a7";
 const lockFile="contracts/kimi-k31-host-build.candidate.json";
 const imageLock="contracts/host-images-build.candidate.json";
 function imageHostSnapshot(hostRoot, contractsRoot, hostCommit) {
@@ -80,7 +80,7 @@ export function verifyKimiK31BuildCandidate(desktopRoot,contractsRoot,hostRoot,e
  const selection=kimiCallSurfaces(env);
  checkSurfaces(desktopRoot,contractsRoot,selection,env);
  const planLock=JSON.parse(readFileSync(path.join(desktopRoot,"contracts/scheduled-plan-v2.candidate.json")));
- assert.equal(planLock.source_commit,"2dd214d6a702064edae78510c035442854bf9789");
+ assert.equal(planLock.source_commit,commit);
  execFileSync(process.execPath,["scripts/sync-scheduled-plan-v2.mjs","--check"],{cwd:contractsRoot,stdio:"pipe"});
  execFileSync(process.execPath,["scripts/generate-scheduled-ipc-v2.mjs","--check"],{cwd:desktopRoot,stdio:"pipe"});
  const fixedDaily = env.YIJIE_DEVELOPMENT_CLIENT === "true" && env.YIJIE_FEAT164_DAILY === "true";

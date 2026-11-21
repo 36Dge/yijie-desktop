@@ -131,7 +131,7 @@ fn feat164_plan_retirement_before_dispatch() {
     let mut r = open(&t);
     assert_eq!(
         r.schema_version().unwrap(),
-        crate::chat::migrations::TOOL_PROFILE_RETIREMENT_SCHEMA_VERSION
+        crate::chat::migrations::KIMI_HIGH_EFFORT_SCHEMA_VERSION
     );
     let mut minimax_request = request(Some(PlanDefinitionModelProfile::MinimaxM3HighV1));
     let normal = r.save_schedule(minimax_request.clone(), n).unwrap();
@@ -517,13 +517,14 @@ fn feat164_s3_paused_candidate_preserves_authority() {
     assert!(!crate::chat::models::dispatch_profile_available(
         "kimi-k3-1-pro-max-v1"
     ));
+    assert!(!crate::chat::models::dispatch_profile_available("kimi-k3-1-pro-high-v1"));
     let t = Temp::new();
     let mut r = open(&t);
     let n = chrono::Utc::now().timestamp();
     let a = ScheduleAuthority::local(n).unwrap();
     let p = r
         .save_schedule(
-            request(Some(PlanDefinitionModelProfile::KimiK31ProMaxV1)),
+            request(Some(PlanDefinitionModelProfile::KimiK31ProHighV1)),
             n,
         )
         .unwrap();
@@ -550,12 +551,13 @@ fn feat164_s3_paused_candidate_preserves_authority() {
         PlanState::Enabled,
         "MiniMax keeps its prior enable semantics"
     );
-    for _ in 0..33 {
-        r.save_schedule(
-            request(Some(PlanDefinitionModelProfile::KimiK31ProMaxV1)),
-            n,
-        )
-        .unwrap();
+    for index in 0..33 {
+        let profile = if index % 2 == 0 {
+            PlanDefinitionModelProfile::KimiK31ProHighV1
+        } else {
+            PlanDefinitionModelProfile::KimiK31ProMaxV1
+        };
+        r.save_schedule(request(Some(profile)), n).unwrap();
     }
     assert_eq!(
         due_plan_ids(&r.connection, &r.scope, n + 86400, 32).unwrap(),

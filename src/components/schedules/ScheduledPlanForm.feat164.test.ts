@@ -13,8 +13,8 @@ import { chatModelClient } from "../../api/chat-model-client";
 import { modelDefinitions } from "../../domain/chat-models-v2.generated";
 const disposers: (()=>void)[]=[];
 afterEach(()=>{disposers.splice(0).forEach(f=>f());vi.restoreAllMocks();document.body.innerHTML="";});
-it.each(["kimi-k3-1-pro-max-v1","kimi-k3-max-v1"] as const)("mounted candidate form preserves explicit model %s through save admission",async model=>{
- vi.spyOn(chatModelClient,"catalog").mockResolvedValue({schema_version:2,default_profile:"kimi-k3-1-pro-max-v1",models:modelDefinitions.map(profile=>({profile,available:true,reason:"ready" as const}))});
+it.each(["kimi-k3-1-pro-high-v1","kimi-k3-1-pro-max-v1","kimi-k3-max-v1"] as const)("mounted candidate form preserves explicit model %s through save admission",async model=>{
+ vi.spyOn(chatModelClient,"catalog").mockResolvedValue({schema_version:2,default_profile:"kimi-k3-1-pro-high-v1",models:modelDefinitions.map(profile=>({profile,available:true,reason:"ready" as const}))});
  const initialDefinition:PlanDefinition={name:"正常计划",content:"仅保存普通任务",model_profile:model,rule:{frequency:"daily",time_zone:"Asia/Shanghai",local_time:"09:00"},target:{mode:"new_chat_each_run"}};
  const saved=vi.fn();
  const root=mount(defineComponent({setup:()=>()=>h(NDialogProvider,null,{default:()=>h(ScheduledPlanForm,{plan:null,initialDefinition,busy:false,uncertain:false,error:"",preview:async()=>({next_at:1800000000,skipped_slots:[],candidates_examined:1,rule_version:1,tzdb_version:"2026b"}),targets:async()=>({items:[]}),onSave:saved})})}),{attachTo:document.body});

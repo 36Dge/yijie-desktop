@@ -115,7 +115,7 @@ vi.mock("@tauri-apps/api/webview", () => ({
 const PROJECT_ID = "019c1a00-0000-7000-8000-000000000001";
 const SESSION_ID = "019c1a00-0000-7000-8000-000000000002";
 const TURN_ID = "019c1a00-0000-7000-8000-000000000003";
-const pageDefaultProfile = kimiK31Candidate ? "kimi-k3-1-pro-max-v1" : "kimi-k3-max-v1";
+const pageDefaultProfile = kimiK31Candidate ? "kimi-k3-1-pro-high-v1" : "kimi-k3-max-v1";
 const sessionModel = { profileId: "minimax-m3-high-v1", revision: 3, state: "ready" } as const;
 const newTaskModelArgs = chatModelsEnabled ? [{ profileId: pageDefaultProfile, expectedRevision: 0 }] : [];
 const replyModelArgs = chatModelsEnabled ? [{ profileId: sessionModel.profileId, expectedRevision: sessionModel.revision }] : [];
@@ -683,8 +683,8 @@ describe("FEAT-126 ChatPage", () => {
   it.skipIf(!chatModelsEnabled || !kimiK31Candidate)("keeps the draft until the user selects an available model", async () => {
     vi.mocked(chatModelClient.catalog).mockResolvedValue(parseModelCatalog({
       schema_version: 2,
-      default_profile: "kimi-k3-1-pro-max-v1",
-      models: currentModelDefinitions.map(profile => profile.profile_id === "kimi-k3-1-pro-max-v1"
+      default_profile: "kimi-k3-1-pro-high-v1",
+      models: currentModelDefinitions.map(profile => profile.provider === "kimi"
         ? { profile, available: false, reason: "activation_required" }
         : { profile, available: true, reason: "ready" }),
     }));
@@ -703,7 +703,10 @@ describe("FEAT-126 ChatPage", () => {
       await flushPromises();
       const menu = new DOMWrapper(document.querySelector(".model-menu")!);
       const options = menu.findAll<HTMLButtonElement>('button[role="menuitemradio"]');
-      expect(options.find(option => option.text().includes("Kimi K3.1 Pro"))!.element.disabled).toBe(true);
+      const kimiOptions = options.filter(option => option.text().includes("Kimi K3.1 Pro"));
+      expect(kimiOptions).toHaveLength(1);
+      expect(kimiOptions[0]!.text()).toContain("· high");
+      expect(kimiOptions[0]!.element.disabled).toBe(true);
       await options.find(option => option.text() === "MiniMax-M3")!.trigger("click");
       expect(input.element.value).toBe(draft);
       expect(send.element.disabled).toBe(false);
@@ -714,7 +717,7 @@ describe("FEAT-126 ChatPage", () => {
   });
 
   it.skipIf(!chatModelsEnabled || !kimiK31Candidate)("holds the model label and send button through a pending model switch", async () => {
-    vi.spyOn(chatModelClient, "state").mockResolvedValue({ profileId: "kimi-k3-1-pro-max-v1", revision: 0, state: "ready" });
+    vi.spyOn(chatModelClient, "state").mockResolvedValue({ profileId: pageDefaultProfile, revision: 0, state: "ready" });
     let confirm!: (result: ModelState) => void;
     vi.spyOn(chatModelClient, "select").mockImplementation(() => new Promise(resolve => { confirm = resolve; }));
     const { wrapper } = await mountPage(`/chat/${SESSION_ID}`, true);
@@ -792,10 +795,10 @@ describe("FEAT-126 ChatPage", () => {
     await flushPromises();
     expect(drafts.planProfile).toBe("minimax-m3-high-v1");
     await router.push("/chat"); await flushPromises();
-    expect(drafts.planProfile).toBe("kimi-k3-1-pro-max-v1");
+    expect(drafts.planProfile).toBe(pageDefaultProfile);
     expect(drafts.newProfile).toBe("minimax-m3-high-v1");
     await router.push("/chat?create=schedule"); await flushPromises();
-    expect(wrapper.getComponent(ChatModelControl).props("profile")).toBe("kimi-k3-1-pro-max-v1");
+    expect(wrapper.getComponent(ChatModelControl).props("profile")).toBe(pageDefaultProfile);
     expect(select).not.toHaveBeenCalled();
     wrapper.unmount();
   });

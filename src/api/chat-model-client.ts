@@ -6,7 +6,7 @@ const modelDefinitions = kimiK31Candidate ? currentDefinitions : legacyDefinitio
 const knownDefinitions = [...legacyDefinitions, ...currentDefinitions];
 type Catalog = LegacyCatalog | CurrentCatalog;
 type ProfileId = LegacyProfileId | CurrentProfileId;
-export const defaultModelProfile: ProfileId = kimiK31Candidate ? "kimi-k3-1-pro-max-v1" : "kimi-k3-max-v1";
+export const defaultModelProfile: ProfileId = modelDefinitions[0]!.profile_id;
 import { parseCreatedTurnResponse, type ChatCreatedTurn, type ChatTurnContentBlock } from "../domain/chat-ipc";
 export type { ProfileId, Catalog };
 export interface ModelIntent { readonly profileId: ProfileId; readonly expectedRevision: number }
@@ -17,7 +17,7 @@ export function legacyProfile(profile: ProfileId): LegacyProfileId | undefined {
 }
 /** Active identity for the explicitly paired v2 consumers; never coerce a retired ID. */
 export function executionProfile(profile: ProfileId): ProfileId | undefined {
- return kimiK31Candidate ? (profile === "kimi-k3-1-pro-max-v1" || profile === "minimax-m3-high-v1" ? profile : undefined) : legacyProfile(profile);
+ return modelDefinitions.some(definition => definition.profile_id === profile) ? profile : undefined;
 }
 export function executionModelIntent(intent: ModelIntent): ModelIntent | undefined {
  const profileId=executionProfile(intent.profileId);
@@ -39,7 +39,7 @@ export function parseModelState(raw: unknown): ModelState {
 }
 export function parseModelCatalog(raw: unknown): Catalog {
  const v=record(raw);
- if (v.schema_version!==(kimiK31Candidate ? 2 : 1) || v.default_profile!==defaultModelProfile || !Array.isArray(v.models) || v.models.length!==2) throw new Error("当前执行环境不支持模型切换");
+ if (v.schema_version!==(kimiK31Candidate ? 2 : 1) || v.default_profile!==defaultModelProfile || !Array.isArray(v.models) || v.models.length!==modelDefinitions.length) throw new Error("当前执行环境不支持模型切换");
  const seen=new Set<string>();
  for(const rawEntry of v.models){const entry=record(rawEntry),p=record(entry.profile),known=modelDefinitions.find(d=>d.profile_id===p.profile_id);
   if(!known || seen.has(known.profile_id) || Object.entries(known).some(([k,value])=>p[k]!==value) || typeof entry.available!=="boolean" || !(kimiK31Candidate ? ["ready","not_configured","runtime_unavailable","activation_required"] : ["ready","not_configured","runtime_unavailable"]).includes(entry.reason as string)) throw new Error("模型目录不一致");

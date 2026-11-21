@@ -1331,7 +1331,7 @@ fn retain_unavailable_model_history(
                             models_generated::ModelAvailabilityReason::NotConfigured => true,
                             #[cfg(feature = "kimi-k31-pro-candidate")]
                             models_generated::ModelAvailabilityReason::ActivationRequired => {
-                                profile == "kimi-k3-1-pro-max-v1"
+                                models::kimi_k31_profile(profile)
                             }
                             _ => false,
                         }
@@ -1554,9 +1554,10 @@ mod tests {
             active_turn_operation_id: None,
         };
         let active_profile = model_test_support::active_profile();
+        let effort = if models::v2_enabled() { "high" } else { "max" };
         let mut catalog: models_generated::Catalog = serde_json::from_value(serde_json::json!({
             "schema_version": models::schema_version(), "default_profile": active_profile, "models": [{
-                "profile": {"profile_id":active_profile, "label":"Kimi", "provider":"kimi", "model":"test-model", "effort":"max", "context_window":1048576},
+                "profile": {"profile_id":active_profile, "label":"Kimi", "provider":"kimi", "model":"test-model", "effort":effort, "context_window":1048576},
                 "available":false, "reason":"not_configured"
             }]
         })).unwrap();

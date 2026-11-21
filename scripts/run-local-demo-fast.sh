@@ -390,7 +390,7 @@ export VITE_YIJIE_NATIVE_SKILL_INPUT_ENABLED=false
 if [[ "$chat_models_enabled" == "true" ]]; then
   [[ "$scheduled_enabled" == "true" && "$stable_api_only" == "false" ]] || fail "chat models require the current scheduled native runtime"
   if [[ "$kimi_k31_candidate" == "true" ]]; then
-    python3 "$host_root/scripts/sync-kimi-k31-pro-contracts.py" --commit 62070251d0da84ce4c5eba0c7b25d9a48e5d5929 --check
+    python3 "$host_root/scripts/sync-kimi-k31-pro-contracts.py" --commit 05bbf1b59826ae67c33d4757ed6a34c6492478a7 --check
     node "$workspace_root/yijie-contracts/scripts/generate-runtime-kimi-k31-pro.mjs" --check
     candidate_lock="$desktop_root/contracts/runtime-kimi-k31-pro.candidate.json"
     export VITE_YIJIE_NATIVE_SKILL_INPUT_ENABLED=true

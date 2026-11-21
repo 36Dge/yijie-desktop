@@ -3,21 +3,27 @@
 use crate::chat::{migrations, models};
 use rusqlite::Connection;
 
-pub(super) fn active_profile() -> &'static str {
-    if models::schema_version() == 2 {
-        "kimi-k3-1-pro-max-v1"
+// Compiling v2 also enables coverage of the older storage-only writer.
+// Only an activated v2 fixture should exercise today's default and delivery gates.
+fn fixture_profile() -> (&'static str, i64) {
+    if models::v2_enabled() {
+        (
+            "kimi-k3-1-pro-high-v1",
+            migrations::KIMI_HIGH_EFFORT_SCHEMA_VERSION,
+        )
+    } else if models::schema_version() == 2 {
+        ("kimi-k3-1-pro-max-v1", migrations::KIMI_K31_SCHEMA_VERSION)
     } else {
-        "kimi-k3-max-v1"
+        ("kimi-k3-max-v1", migrations::CHAT_MODELS_SCHEMA_VERSION)
     }
 }
 
+pub(super) fn active_profile() -> &'static str {
+    fixture_profile().0
+}
+
 pub(super) fn migrate_active_store(db: &mut Connection, legacy_target: i64) {
-    let target = if models::schema_version() == 2 {
-        legacy_target.max(migrations::KIMI_K31_SCHEMA_VERSION)
-    } else {
-        legacy_target
-    };
-    migrations::migrate_to_target(db, target).unwrap();
+    migrations::migrate_to_target(db, legacy_target.max(fixture_profile().1)).unwrap();
 }
 
 /// Run environment-dependent admission tests in the real test executable, so

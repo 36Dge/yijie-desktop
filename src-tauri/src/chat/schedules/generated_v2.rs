@@ -233,6 +233,8 @@ pub enum TimeRuleFrequency {
 pub enum PlanDefinitionModelProfile {
     #[serde(rename = "kimi-k3-max-v1")]
     KimiK3MaxV1,
+    #[serde(rename = "kimi-k3-1-pro-high-v1")]
+    KimiK31ProHighV1,
     #[serde(rename = "kimi-k3-1-pro-max-v1")]
     KimiK31ProMaxV1,
     #[serde(rename = "minimax-m3-high-v1")]

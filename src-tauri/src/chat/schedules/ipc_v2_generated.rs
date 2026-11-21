@@ -2483,6 +2483,8 @@ pub enum RunRecordAttention {
 pub enum SavedConfigurationModelProfile {
     #[serde(rename = "kimi-k3-max-v1")]
     KimiK3MaxV1,
+    #[serde(rename = "kimi-k3-1-pro-high-v1")]
+    KimiK31ProHighV1,
     #[serde(rename = "kimi-k3-1-pro-max-v1")]
     KimiK31ProMaxV1,
     #[serde(rename = "minimax-m3-high-v1")]
@@ -2518,6 +2520,8 @@ pub enum OperationCapabilityReason {
 pub enum PlanCardModelProfile {
     #[serde(rename = "kimi-k3-max-v1")]
     KimiK3MaxV1,
+    #[serde(rename = "kimi-k3-1-pro-high-v1")]
+    KimiK31ProHighV1,
     #[serde(rename = "kimi-k3-1-pro-max-v1")]
     KimiK31ProMaxV1,
     #[serde(rename = "minimax-m3-high-v1")]
@@ -2540,6 +2544,8 @@ pub enum ExecutionReceiptKeyOperation {
 pub enum DraftModelIntentProfileId {
     #[serde(rename = "kimi-k3-max-v1")]
     KimiK3MaxV1,
+    #[serde(rename = "kimi-k3-1-pro-high-v1")]
+    KimiK31ProHighV1,
     #[serde(rename = "kimi-k3-1-pro-max-v1")]
     KimiK31ProMaxV1,
     #[serde(rename = "minimax-m3-high-v1")]

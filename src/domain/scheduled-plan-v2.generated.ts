@@ -51,4 +51,4 @@ export interface TimePreview {
   tzdb_version: string;
 }
 export type TimeRuleFrequency = "once" | "daily" | "weekdays" | "weekly";
-export type PlanDefinitionModelProfile = "kimi-k3-max-v1" | "kimi-k3-1-pro-max-v1" | "minimax-m3-high-v1";
+export type PlanDefinitionModelProfile = "kimi-k3-max-v1" | "kimi-k3-1-pro-high-v1" | "kimi-k3-1-pro-max-v1" | "minimax-m3-high-v1";

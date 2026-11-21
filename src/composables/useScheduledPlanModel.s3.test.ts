@@ -7,7 +7,7 @@ import type { ProfileId } from "../api/chat-model-client";
 import type { TargetMode } from "../domain/scheduled-plan-v2.generated";
 import { useScheduledPlanModel } from "./useScheduledPlanModel";
 const client = vi.hoisted(() => ({ catalog: vi.fn(), state: vi.fn() }));
-vi.mock("../api/chat-model-client", () => ({ chatModelsEnabled: true, chatModelClient: client, kimiK31Candidate: true, defaultModelProfile: "kimi-k3-1-pro-max-v1" }));
+vi.mock("../api/chat-model-client", () => ({ chatModelsEnabled: true, chatModelClient: client, kimiK31Candidate: true, defaultModelProfile: "kimi-k3-1-pro-high-v1" }));
 vi.mock("../stores/chat.store", () => ({ useChatStore: () => ({ context: { contextId: "scope" } }) }));
 const roots: ReturnType<typeof mount>[] = [];
 function setup(mode: TargetMode, bound: string | null = null) {

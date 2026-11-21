@@ -6101,6 +6101,9 @@ impl AuthorizedConversationApplication {
         }
         #[cfg(feature = "kimi-k31-pro-candidate")]
         let target = match intent.profile_id {
+            super::models_generated::ProfileId::KimiK31ProHighV1 => {
+                super::models_generated::ActiveProfileId::KimiK31ProHighV1
+            }
             super::models_generated::ProfileId::KimiK31ProMaxV1 => {
                 super::models_generated::ActiveProfileId::KimiK31ProMaxV1
             }

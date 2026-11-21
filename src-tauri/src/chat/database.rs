@@ -937,6 +937,8 @@ impl ChatRepository {
                 migrations::TOOL_PROFILE_RETIREMENT_SCHEMA_VERSION,
                 migrations::MARKET_INITIAL_HOST_TURN_SCHEMA_VERSION,
                 migrations::MARKET_DECISION_FACTS_SCHEMA_VERSION,
+                migrations::BUILTIN_WEB_SELECTION_SCHEMA_VERSION,
+                migrations::KIMI_HIGH_EFFORT_SCHEMA_VERSION,
             ]
             .contains(&version)
             {
@@ -1044,7 +1046,7 @@ impl ChatRepository {
         if super::models::v2_enabled() {
             migrations::migrate_to_target(
                 &mut connection,
-                migrations::TOOL_PROFILE_RETIREMENT_SCHEMA_VERSION,
+                migrations::KIMI_HIGH_EFFORT_SCHEMA_VERSION,
             )?;
         }
         protect_database_files(&database_path)?;

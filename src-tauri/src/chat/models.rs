@@ -30,9 +30,13 @@ pub fn schema_version() -> i64 {
         1
     }
 }
+pub fn kimi_k31_profile(id: &str) -> bool {
+    matches!(id, "kimi-k3-1-pro-high-v1" | "kimi-k3-1-pro-max-v1")
+}
+
 pub fn executable_profile(id: &str) -> bool {
     if cfg!(feature = "kimi-k31-pro-candidate") {
-        matches!(id, "kimi-k3-1-pro-max-v1" | "minimax-m3-high-v1")
+        kimi_k31_profile(id) || id == "minimax-m3-high-v1"
     } else {
         matches!(id, "kimi-k3-max-v1" | "minimax-m3-high-v1")
     }
@@ -42,6 +46,7 @@ pub fn executable_profile(id: &str) -> bool {
 impl From<wire::ActiveProfileId> for wire::ProfileId {
     fn from(value: wire::ActiveProfileId) -> Self {
         match value {
+            wire::ActiveProfileId::KimiK31ProHighV1 => Self::KimiK31ProHighV1,
             wire::ActiveProfileId::KimiK31ProMaxV1 => Self::KimiK31ProMaxV1,
             wire::ActiveProfileId::MinimaxM3HighV1 => Self::MinimaxM3HighV1,
         }
@@ -60,18 +65,29 @@ pub fn profile_id(p: impl Into<wire::ProfileId>) -> &'static str {
     match p.into() {
         wire::ProfileId::KimiK3MaxV1 => "kimi-k3-max-v1",
         #[cfg(feature = "kimi-k31-pro-candidate")]
+        wire::ProfileId::KimiK31ProHighV1 => "kimi-k3-1-pro-high-v1",
+        #[cfg(feature = "kimi-k31-pro-candidate")]
         wire::ProfileId::KimiK31ProMaxV1 => "kimi-k3-1-pro-max-v1",
         wire::ProfileId::MinimaxM3HighV1 => "minimax-m3-high-v1",
     }
 }
 pub(crate) fn dispatch_profile_available(p: &str) -> bool {
     executable_profile(p)
-        && (p != "kimi-k3-1-pro-max-v1"
+        && (!kimi_k31_profile(p)
             || matches!(
                 std::env::var("YIJIE_KIMI_K31_EXECUTION_PAUSED").as_deref(),
                 Err(_) | Ok("false")
             ))
 }
+/// Internal SQL literals for the paired model profile and its pause switch.
+pub(super) fn dispatch_profiles_sql() -> &'static str {
+    if dispatch_profile_available("kimi-k3-1-pro-high-v1") {
+        "'kimi-k3-1-pro-high-v1','kimi-k3-1-pro-max-v1','minimax-m3-high-v1'"
+    } else {
+        "'minimax-m3-high-v1'"
+    }
+}
+
 pub fn valid_profile(p: &str) -> bool {
     executable_profile(p)
 }
@@ -536,11 +552,7 @@ pub(super) fn dispatch_predicate(db: &Connection, alias: &str) -> Result<String,
         return Ok(format!("{alias}.kind='interrupt_turn'"));
     }
     if enabled() && cfg!(feature = "kimi-k31-pro-candidate") && table(db)? {
-        let profiles = if dispatch_profile_available("kimi-k3-1-pro-max-v1") {
-            "'kimi-k3-1-pro-max-v1','minimax-m3-high-v1'"
-        } else {
-            "'minimax-m3-high-v1'"
-        };
+        let profiles = dispatch_profiles_sql();
         return Ok(format!("({alias}.kind='interrupt_turn' OR EXISTS(SELECT 1 FROM chat_operation_models model WHERE model.operation_id={alias}.operation_id AND model.profile_id IN ({profiles})))"));
     }
     if enabled() || !table(db)? {

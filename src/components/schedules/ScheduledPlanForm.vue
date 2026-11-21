@@ -14,6 +14,9 @@ const initial = props.plan?.definition ?? props.initialDefinition;
 const title = computed(() => props.confirmation ? "确认定时任务草案" : props.plan ? "编辑定时任务" : "新建定时任务");
 const form = reactive({ modelProfile: (initial?.model_profile ?? (props.plan ? "minimax-m3-high-v1" : defaultModelProfile)) as ProfileId, name: initial?.name ?? "", content: initial?.content ?? "", frequency: initial?.rule.frequency ?? "daily", timeZone: initial?.rule.time_zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, localTime: initial?.rule.local_time ?? "09:00", localDate: initial?.rule.local_date ?? "", weekdays: initial?.rule.weekdays?.slice() ?? [1], mode: initial?.target.mode ?? "dedicated_chat", conversationId: initial?.target.conversation_id ?? null });
 const {modelOptions,modelReady,modelNotice,modelLocked}=useScheduledPlanModel(form, () => props.boundConversationId ?? null);
+const visibleModelOptions = computed(() => modelOptions.filter(
+  option => option.value !== "kimi-k3-1-pro-max-v1" || option.value === form.modelProfile,
+));
 const formId = useId();
 const targetHelp = computed(() => ({ dedicated_chat: "在专属聊天中持续保存此任务的结果。", new_chat_each_run: "每次执行创建新聊天，分别保存结果。", existing_chat: "使用所选聊天及其目录执行。" })[form.mode]);
 const requiresModelReview = computed(() => kimiK31Candidate && (props.confirmation || form.modelProfile !== "minimax-m3-high-v1" || (props.plan && initial?.model_profile !== form.modelProfile)));
@@ -84,7 +87,7 @@ defineExpose({ dirty, close });
           <NFormItem v-if="form.frequency === 'weekly'" label="每周运行日" required><NCheckboxGroup v-model:value="form.weekdays" class="schedule-form__weekdays" aria-label="每周运行日"><NCheckbox v-for="(label,index) in weekLabels" :key="label" :value="index+1" :label="`周${label}`" /></NCheckboxGroup></NFormItem>
           <p :id="`${formId}-time-hint`" class="schedule-form__hint">时间格式为 HH:mm。<span role="status">{{ previewText }}</span></p>
         </div>
-        <NFormItem v-if="chatModelsEnabled" label="执行模型" required><div><NSelect v-model:value="form.modelProfile" :options="modelOptions" :disabled="blocked || !modelReady || modelLocked" aria-label="执行模型" /><p class="schedule-form__hint" role="status">{{ modelNotice }}</p></div></NFormItem>
+        <NFormItem v-if="chatModelsEnabled" label="执行模型" required><div><NSelect v-model:value="form.modelProfile" :options="visibleModelOptions" :disabled="blocked || !modelReady || modelLocked" aria-label="执行模型" /><p class="schedule-form__hint" role="status">{{ modelNotice }}</p></div></NFormItem>
         <NFormItem label="任务内容" required><NInput v-model:value="form.content" type="textarea" placeholder="描述任务要做什么，例如：汇总商品信息，列出价格变化和待优化项。" :autosize="{ minRows: 5, maxRows: 8 }" :maxlength="10000" show-count :input-props="{ 'aria-label': '任务内容' }" /></NFormItem>
         <details class="schedule-form__settings" :open="initial?.target.mode === 'existing_chat'">
           <summary>更多设置<span class="schedule-form__settings-summary">{{ form.timeZone }} · {{ targetLabels[form.mode] }}</span></summary>

@@ -20,7 +20,8 @@ const trigger = ref<HTMLButtonElement | null>(null);
 const menu = ref<HTMLElement | null>(null);
 const presentation: Record<ProfileId, { label: string; icon: YjIconName }> = {
   "kimi-k3-max-v1": { label: "Kimi-K3", icon: "modelKimi" },
-  "kimi-k3-1-pro-max-v1": { label: "Kimi K3.1 Pro", icon: "modelKimi" },
+  "kimi-k3-1-pro-high-v1": { label: "Kimi K3.1 Pro", icon: "modelKimi" },
+  "kimi-k3-1-pro-max-v1": { label: "Kimi K3.1 Pro · max", icon: "modelKimi" },
   "minimax-m3-high-v1": { label: "MiniMax-M3", icon: "modelMiniMax" },
 };
 // Display-only placeholders deliberately have no runtime profile IDs or handlers.
@@ -32,6 +33,10 @@ const selected = computed(() => props.profile ? presentation[props.profile] : nu
 const busyLabel = computed(() => props.saving ? "正在切换模型…" : props.loading ? "模型加载中" : "");
 const label = computed(() => selected.value?.label ?? (busyLabel.value || "模型待识别"));
 const retired = computed(() => props.catalog?.schema_version === 2 && props.profile === "kimi-k3-max-v1");
+// The max profile stays visible on a conversation that was opened with it.
+const modelOptions = computed(() => props.catalog?.models.filter(
+  entry => entry.profile.profile_id !== "kimi-k3-1-pro-max-v1" || entry.profile.profile_id === props.profile,
+) ?? []);
 const selectedAvailability = computed(() => props.catalog?.models.find((entry) => entry.profile.profile_id === props.profile));
 const unavailable = computed(() => selectedAvailability.value?.available === false);
 function unavailableLabel(reason?: string): string {
@@ -86,9 +91,9 @@ function key(event: KeyboardEvent): void {
       </span>
     </template>
     <div ref="menu" class="model-menu chat-control-menu" role="menu" aria-label="对话模型" @keydown="key">
-      <button v-for="entry in catalog?.models ?? []" :key="entry.profile.profile_id" class="chat-control-option" type="button" role="menuitemradio" :aria-checked="entry.profile.profile_id === profile" :disabled="!entry.available" @click="choose(entry.profile.profile_id)">
+      <button v-for="entry in modelOptions" :key="entry.profile.profile_id" class="chat-control-option" type="button" role="menuitemradio" :aria-checked="entry.profile.profile_id === profile" :disabled="!entry.available" @click="choose(entry.profile.profile_id)">
         <span class="model-brand" :class="{ 'is-kimi': presentation[entry.profile.profile_id].icon === 'modelKimi' }"><YjIcon :name="presentation[entry.profile.profile_id].icon" size="sm" /></span>
-        <span class="model-option-label">{{ presentation[entry.profile.profile_id].label }}</span>
+        <span class="model-option-label">{{ presentation[entry.profile.profile_id].label }}<template v-if="entry.profile.profile_id === 'kimi-k3-1-pro-high-v1'"> · high</template></span>
         <span v-if="!entry.available" class="model-option-status">{{ unavailableLabel(entry.reason) }}</span>
       </button>
       <span v-if="!catalog?.models.length" class="model-menu-empty">暂无可用模型</span>

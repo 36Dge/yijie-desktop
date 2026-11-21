@@ -5,7 +5,8 @@ afterEach(() => { vi.unstubAllEnvs(); vi.resetModules(); });
 it("uses the exact v2 catalog only in the candidate and preserves known old state", async () => {
  vi.stubEnv("VITE_YIJIE_KIMI_K31_PRO_CANDIDATE", "true"); vi.resetModules();
  const client = await import("./chat-model-client");
- expect(client.defaultModelProfile).toBe("kimi-k3-1-pro-max-v1");
+ expect(client.defaultModelProfile).toBe("kimi-k3-1-pro-high-v1");
+ expect(client.executionProfile("kimi-k3-1-pro-max-v1")).toBe("kimi-k3-1-pro-max-v1");
  const value = {schema_version:2,default_profile:client.defaultModelProfile,models:modelDefinitions.map(profile=>({profile,available:true,reason:"ready"}))};
  expect(client.parseModelCatalog(value).models[0]?.profile.model).toBe("kimi-k3.1-pro");
  expect(()=>client.parseModelCatalog({...value,schema_version:1})).toThrow();

@@ -65,7 +65,7 @@ export type SelectedSkills = SelectedSkillRef[];
 /**
  * Known persisted identity. Recognition grants no execution authority; the K3 identity is retired.
  */
-export type ProfileId = "kimi-k3-max-v1" | "kimi-k3-1-pro-max-v1" | "minimax-m3-high-v1";
+export type ProfileId = "kimi-k3-max-v1" | "kimi-k3-1-pro-high-v1" | "kimi-k3-1-pro-max-v1" | "minimax-m3-high-v1";
 export type ReferencedReferencedRevision = number;
 export type ReferencedRevision = number;
 /**

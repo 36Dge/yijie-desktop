@@ -10,7 +10,7 @@ export function useScheduledPlanModel(
 ) {
   const chat = chatModelsEnabled ? useChatStore() : null;
   const modelOptions = reactive<{ label: string; value: string; disabled: boolean }[]>([
-    { label: kimiK31Candidate ? "Kimi K3.1 Pro · max" : "Kimi K3 · max", value: defaultModelProfile, disabled: true },
+    { label: kimiK31Candidate ? "Kimi K3.1 Pro · high" : "Kimi K3 · max", value: defaultModelProfile, disabled: true },
     { label: "MiniMax M3", value: "minimax-m3-high-v1", disabled: false },
   ]);
   const target = computed(() => form.mode === "existing_chat" ? form.conversationId : form.mode === "dedicated_chat" ? boundConversation() : null);
@@ -41,7 +41,7 @@ export function useScheduledPlanModel(
         form.modelProfile = selection.profileId;
       }
       modelOptions.splice(0, modelOptions.length, ...catalog.models.map(m => ({
-        label: m.profile.label + (m.profile.effort === "max" ? " · max" : "") + (m.available ? "" : "（未配置）"),
+        label: m.profile.label + (m.profile.provider === "kimi" ? " · " + m.profile.effort : "") + (m.available ? "" : "（未配置）"),
         value: m.profile.profile_id, disabled: !m.available || (kimiK31Candidate && m.profile.profile_id === "kimi-k3-max-v1"),
       })));
       if (kimiK31Candidate && form.modelProfile === "kimi-k3-max-v1" && !modelOptions.some(m => m.value === form.modelProfile)) {

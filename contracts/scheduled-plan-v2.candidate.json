@@ -8,7 +8,7 @@
   "sources": [
     {
       "path": "jsonschema/chat/model-selection-v2.schema.json",
-      "sha256": "fa0ae10205dd9d0d2fead4366b67a03d21beda874f1fdb401e871390f72813af"
+      "sha256": "2f37739c99dea8d6194369c154d96f7ebb9604d68e12d7a62bb74bf8dfaed114"
     },
     {
       "path": "scripts/scheduled-schema-source.mjs",
@@ -42,21 +42,21 @@
   "generated": [
     {
       "path": "sdks/rust/scheduled-plan-v2/types.gen.rs",
-      "sha256": "8ada1d3f0e70c14a7c3885b66ceae113155d8eb9e2730dc686121479e7654814"
+      "sha256": "af7c2e3bd481185cb140d27aba5dfdca590a586d0c6f05f84299747312bac479"
     },
     {
       "path": "sdks/typescript/src/jsonschema/scheduled-plan-v2.gen.ts",
-      "sha256": "2f61d11cdba93d321c5538f07ea8f8ab1e3b421c61fd7501f2e423135bc0faf9"
+      "sha256": "bd9b57b81bf01398adbb712088660f05684be8db9f1edee157d14e9ee6ce1827"
     },
     {
       "path": "sdks/jsonschema/scheduled-plan-v2.schema.json",
-      "sha256": "2dc8d90043f5716076496e8e93bece9eb375081fe5d19577472411530cb30e20"
+      "sha256": "51519d2b47f1e08d04c950b9af78af0591dd675008da0c7e5627078763a3d6d1"
     }
   ],
   "generators": {
     "rust_typescript": "source-local closed schema subset v1; serde validation plus native semantics",
     "jsonschema": "canonical context-preserving draft references v2"
   },
-  "source_commit": "2dd214d6a702064edae78510c035442854bf9789",
+  "source_commit": "05bbf1b59826ae67c33d4757ed6a34c6492478a7",
   "source_lock_path": "compatibility/scheduled-plan-v2/source.lock.json"
 }

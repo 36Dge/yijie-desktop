@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 pub enum ProfileId {
     #[serde(rename = "kimi-k3-max-v1")]
     KimiK3MaxV1,
+    #[serde(rename = "kimi-k3-1-pro-high-v1")]
+    KimiK31ProHighV1,
     #[serde(rename = "kimi-k3-1-pro-max-v1")]
     KimiK31ProMaxV1,
     #[serde(rename = "minimax-m3-high-v1")]
@@ -73,10 +75,12 @@ pub struct Error {
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActiveProfileId {
-    #[serde(rename = "kimi-k3-1-pro-max-v1")]
-    KimiK31ProMaxV1,
+    #[serde(rename = "kimi-k3-1-pro-high-v1")]
+    KimiK31ProHighV1,
     #[serde(rename = "minimax-m3-high-v1")]
     MinimaxM3HighV1,
+    #[serde(rename = "kimi-k3-1-pro-max-v1")]
+    KimiK31ProMaxV1,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SelectionAvailability {

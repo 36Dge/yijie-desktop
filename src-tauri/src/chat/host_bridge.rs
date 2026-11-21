@@ -1691,7 +1691,7 @@ async fn parse_session_response_for_model(
     let expected = match profile {
         Some("kimi-k3-max-v1") => ("kimi-k3", "kimi"),
         #[cfg(feature = "kimi-k31-pro-candidate")]
-        Some("kimi-k3-1-pro-max-v1") => ("kimi-k3.1-pro", "kimi"),
+        Some(profile) if super::models::kimi_k31_profile(profile) => ("kimi-k3.1-pro", "kimi"),
         Some("minimax-m3-high-v1") => ("MiniMax-M3", "minimax"),
         _ => return Err(protocol_error()),
     };

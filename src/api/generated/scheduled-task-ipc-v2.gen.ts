@@ -674,12 +674,12 @@ export type TimingDuration = "not_started" | "unknown" | "known" | "in_progress"
 export type TimingSource = "no_execution_clock" | "runtime_read";
 export type TimingDiagnostic = "format_unsupported" | "field_invalid" | "source_conflict" | "history_unavailable" | "identity_mismatch";
 export type RunRecordAttention = "none" | "needs_attention";
-export type SavedConfigurationModelProfile = "kimi-k3-max-v1" | "kimi-k3-1-pro-max-v1" | "minimax-m3-high-v1";
+export type SavedConfigurationModelProfile = "kimi-k3-max-v1" | "kimi-k3-1-pro-high-v1" | "kimi-k3-1-pro-max-v1" | "minimax-m3-high-v1";
 export type DraftPreviewStatus = "candidate" | "needs_clarification" | "unavailable" | "confirmed";
 export type OperationCapabilityReason = "ready" | "storage_disabled" | "storage_read_only" | "authority_missing" | "candidate_disabled" | "runtime_unqualified";
-export type PlanCardModelProfile = "kimi-k3-max-v1" | "kimi-k3-1-pro-max-v1" | "minimax-m3-high-v1";
+export type PlanCardModelProfile = "kimi-k3-max-v1" | "kimi-k3-1-pro-high-v1" | "kimi-k3-1-pro-max-v1" | "minimax-m3-high-v1";
 export type ExecutionReceiptKeyOperation = "grant" | "manual" | "enable" | "single_grant" | "rerun";
-export type DraftModelIntentProfileId = "kimi-k3-max-v1" | "kimi-k3-1-pro-max-v1" | "minimax-m3-high-v1";
+export type DraftModelIntentProfileId = "kimi-k3-max-v1" | "kimi-k3-1-pro-high-v1" | "kimi-k3-1-pro-max-v1" | "minimax-m3-high-v1";
 export interface Requests {
 "schedule_availability_v1":AvailabilityRequest;
 "schedule_list_plans_v1":ListPlansRequest;
