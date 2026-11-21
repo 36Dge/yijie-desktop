@@ -120,7 +120,6 @@ function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): strin
             :tone="notice.severity === 'error' ? 'error' : 'warning'"
           />
           <span>{{ threadNoticeMessage(notice) }}</span>
-          <code>{{ notice.code }}</code>
         </div>
       </li>
     </ul>
@@ -284,7 +283,7 @@ function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): strin
 .chat-timeline__notice-body {
   display: grid;
   min-width: 0;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
   gap: var(--yj-space-2);
   padding: var(--yj-space-2) var(--yj-space-3);
@@ -294,11 +293,6 @@ function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): strin
   background: var(--yj-color-bg-subtle);
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
-}
-
-.chat-timeline__notice-body code {
-  color: var(--yj-color-text-tertiary);
-  overflow-wrap: anywhere;
 }
 
 .chat-timeline__notice--error .chat-timeline__notice-body {
@@ -348,13 +342,4 @@ function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): strin
   min-width: 0;
 }
 
-@media (max-width: 40rem) {
-  .chat-timeline__notice-body {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .chat-timeline__notice-body code {
-    grid-column: 2;
-  }
-}
 </style>

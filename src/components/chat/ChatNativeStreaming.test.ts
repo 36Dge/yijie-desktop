@@ -23,6 +23,24 @@ function native(overrides: Partial<NativeConversationView> = {}): NativeConversa
       id: "reasoning", type: "reasoning", content: ["普通正文 **保持纯文本**"], summary: [], availability: "available",
     }}], ...overrides};
 }
+
+it.each(["failed", "interrupted"] as const)("shows one friendly note for a stopped reply on delivery and reopen (%s)", status => {
+  const saved = native({
+    status, terminalObserved: true, terminalErrorCode: status === "failed" ? "sessionBudgetExceeded" : null,
+    diagnostic: "runtime_notice",
+    items: [{ ordinal: 0, lastMethod: "item/completed", item: { id: "u", type: "userMessage", text: "城市对比报告", availability: "available" } }],
+    notices: [{ eventId: "end", sequence: "2", method: "error", code: "runtime_notice", scope: "turn", willRetry: false }],
+  });
+  for (const view of [saved, JSON.parse(JSON.stringify(saved)) as NativeConversationView]) {
+    const wrapper = mount(ChatTimeline, { props: { timeline: timeline(view) } });
+    const note = wrapper.get(".chat-turn-group__turn-state");
+    expect(note.text()).toBe(status === "failed" ? "这次回复未能完成。你可以在新对话中继续。" : "这次回复已停止。");
+    expect(wrapper.findAll('[role="note"]')).toHaveLength(1);
+    expect(wrapper.text().indexOf("城市对比报告")).toBeLessThan(wrapper.text().indexOf(note.text()));
+    expect(wrapper.text()).not.toMatch(/conversation_warning|runtime_notice|预算|未安排重试/);
+    wrapper.unmount();
+  }
+});
 function timeline(view: NativeConversationView, liveTurnId: string | null = null) {
   return selectConversationTimeline(composeConversationView(archive, [view]), "session", undefined,
     {protectApprovalProcessContent: false, liveTurnId})!;

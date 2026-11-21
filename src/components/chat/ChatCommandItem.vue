@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { formatToolDuration } from "../../domain/chat-ui";
 import { activityItemTitle } from "../../domain/conversation-activity-summary";
-import type { ConversationActivityEntry } from "../../domain/conversation-activity-entry";
+import { activityItemIcon, type ConversationActivityEntry } from "../../domain/conversation-activity-entry";
 import { computed } from "vue";
 import { browserChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
 import type { ConversationApproval } from "../../domain/conversation-approval";
@@ -295,7 +295,7 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
     :item="item"
     :label="activityEntry?.title ?? activityItemTitle(item)"
     :status-label="statusPresentation.label"
-    icon="terminal"
+    :icon="activityItemIcon(item)"
     :collapsible="!approvalNeedsAttention"
     :default-expanded="processPresentation ? false : defaultExpanded"
     @disclosure-change="forwardDisclosure"

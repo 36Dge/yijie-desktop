@@ -8,7 +8,7 @@ import { browserChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
 import ChatCopyAction from "./ChatCopyAction.vue";
 import WebRetrievalResult from "./WebRetrievalResult.vue";
 import type { ConversationNativeToolExecution } from "../../domain/conversation-view";
-import { activityNativeItem, deepSearchEvidence, deepSearchReceipt } from "../../domain/conversation-activity-entry";
+import { activityItemIcon, activityNativeItem, deepSearchEvidence, deepSearchReceipt } from "../../domain/conversation-activity-entry";
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
 import ChatTimelineItemShell, { type ChatTimelineDisclosureChange } from "./ChatTimelineItemShell.vue";
 
@@ -129,7 +129,7 @@ const diagnosticLabels = {
   <ChatTimelineItemShell
     :class="{ 'deep-search-row': deepSearch, 'web-fetch-row': webFetch }"
     :process-presentation="processPresentation"
-    :item="item" :label="title" :status-label="headerStatus" :icon="deepSearch ? 'scanSearch' : webFetch ? 'readPage' : 'skillOperations'"
+    :item="item" :label="title" :status-label="headerStatus" :icon="activityItemIcon(item, mcp)"
     collapsible :show-availability="!deepSearch && !webFetch" :default-expanded="!deepSearch && !webFetch && !processPresentation && item.busy"
     @disclosure-change="emit('disclosure-change', $event)"
   >

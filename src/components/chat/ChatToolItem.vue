@@ -8,6 +8,7 @@ import type {
   ConversationTruncationReason,
 } from "../../domain/conversation-view";
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
+import { activityItemIcon } from "../../domain/conversation-activity-entry";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatCopyAction from "./ChatCopyAction.vue";
 import ChatTimelineItemShell, {
@@ -85,7 +86,7 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
     :item="item"
     label="工具调用"
     :status-label="statusPresentation.label"
-    icon="skillOperations"
+    :icon="activityItemIcon(item)"
     collapsible
     :default-expanded="processPresentation ? false : defaultExpanded"
     @disclosure-change="forwardDisclosure"

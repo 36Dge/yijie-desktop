@@ -1410,9 +1410,9 @@ onBeforeUnmount(() => {
       <p v-if="!isDraftMode && runtimePermissionsEnabled && permissions.error.value" class="chat-workspace__composer-error" role="alert">{{ permissions.error.value }} <button type="button" @click="permissions.refresh">重试</button></p>
       <p v-if="!isDraftMode && !workspaceSelectionValid" class="chat-workspace__composer-error" role="alert">所选工作空间已不可用，请重新选择或取消工作空间后发送。</p>
       <ScheduledDraftPanel v-if="isDraftMode" ref="draftPanel" :model="draft" @accepted="openDraftConversation" @view-plan="viewDraftPlan" @recover="recoverDraft" />
-      <p v-if="chatModelsEnabled && models.error.value" class="chat-workspace__composer-error" role="alert">
-        {{ models.error.value }}
-        <button type="button" class="yj-control" :disabled="modelBlocked || models.saving.value" @click="models.retry">{{ models.retryLabel.value }}</button>
+      <p v-if="chatModelsEnabled && (models.error.value || models.notice.value)" class="chat-workspace__composer-note chat-workspace__model-notice" role="status">
+        {{ models.error.value || models.notice.value }}
+        <button v-if="models.error.value" type="button" class="yj-control" :disabled="modelBlocked || models.saving.value || models.loading.value" @click="models.retry">{{ models.retryLabel.value }}</button>
       </p>
       <p v-if="expertNotice" class="chat-workspace__composer-error" role="status">{{ expertNotice }} <button type="button" class="yj-control" :disabled="submitting" @click="refreshExpert">{{ expertSubmission ? "确认原提交" : "重新读取" }}</button><template v-if="expertRecoveryOperation">恢复会重新应用原选择，不发送消息。<button type="button" class="yj-control" :disabled="expertRecoveryBlocked" @click="recoverExpertBinding">恢复原操作</button></template></p>
       <p v-if="uncertainLocalSubmission" class="chat-workspace__composer-error" role="status">原提交结果尚未确认，请勿重复发送。<button type="button" class="yj-control" :disabled="submitting || chatStore.phase === 'resyncing' || !chatStore.hasAction('read_sessions')" @click="chatStore.resyncSelected">重新读取原提交</button></p>
@@ -1483,7 +1483,7 @@ onBeforeUnmount(() => {
           <ChatSkillControl :entries="skills.skills" :selected-ids="skillSelection.map(skill => skill.id)" :disabled="skillPickerDisabled" :loading="skills.phase === 'loading'" :refreshing="skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @select="select" @manage="manageSkills" @close="close" />
         </template>
         <template v-if="chatModelsEnabled" #model-control>
-          <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" @select="models.select" />
+          <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked || models.selectionLocked.value" :disabled-reason="models.selectionLocked.value ? models.error.value : modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" @select="models.select" />
         </template>
         <template v-if="!isDraftMode && runtimePermissionsEnabled" #permission-control>
           <ChatPermissionControl :state="permissions.state.value" :disabled="!permissions.ready.value || permissions.busy.value" :saving="permissions.saving.value" @select="permissions.setMode" />
@@ -1677,9 +1677,9 @@ onBeforeUnmount(() => {
       <p v-if="!isDraftMode && runtimePermissionsEnabled && permissions.error.value" class="chat-workspace__composer-error" role="alert">{{ permissions.error.value }} <button type="button" @click="permissions.refresh">重试</button></p>
       <p v-if="!isDraftMode && !workspaceSelectionValid" class="chat-workspace__composer-error" role="alert">所选工作空间已不可用，请重新选择或取消工作空间后发送。</p>
       <ScheduledDraftPanel v-if="isDraftMode" ref="draftPanel" :model="draft" @accepted="openDraftConversation" @view-plan="viewDraftPlan" @recover="recoverDraft" />
-      <p v-if="chatModelsEnabled && models.error.value" class="chat-workspace__composer-error" role="alert">
-        {{ models.error.value }}
-        <button type="button" class="yj-control" :disabled="modelBlocked || models.saving.value" @click="models.retry">{{ models.retryLabel.value }}</button>
+      <p v-if="chatModelsEnabled && (models.error.value || models.notice.value)" class="chat-workspace__composer-note chat-workspace__model-notice" role="status">
+        {{ models.error.value || models.notice.value }}
+        <button v-if="models.error.value" type="button" class="yj-control" :disabled="modelBlocked || models.saving.value || models.loading.value" @click="models.retry">{{ models.retryLabel.value }}</button>
       </p>
       <p v-if="expertNotice" class="chat-workspace__composer-error" role="status">{{ expertNotice }} <button type="button" class="yj-control" :disabled="submitting" @click="refreshExpert">{{ expertSubmission ? "确认原提交" : "重新读取" }}</button><template v-if="expertRecoveryOperation">恢复会重新应用原选择，不发送消息。<button type="button" class="yj-control" :disabled="expertRecoveryBlocked" @click="recoverExpertBinding">恢复原操作</button></template></p>
       <p v-if="uncertainLocalSubmission" class="chat-workspace__composer-error" role="status">原提交结果尚未确认，请勿重复发送。<button type="button" class="yj-control" :disabled="submitting || chatStore.phase === 'resyncing' || !chatStore.hasAction('read_sessions')" @click="chatStore.resyncSelected">重新读取原提交</button></p>
@@ -1740,7 +1740,7 @@ onBeforeUnmount(() => {
         </template>
         <template v-if="chatModelsEnabled" #model-control>
           <ChatContextWindow :sample="contextWindow.sample.value" :last-model="contextWindow.lastModel.value" />
-          <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" @select="models.select" />
+          <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked || models.selectionLocked.value" :disabled-reason="models.selectionLocked.value ? models.error.value : modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" @select="models.select" />
         </template>
         <template v-if="!isDraftMode && runtimePermissionsEnabled" #permission-control>
           <ChatPermissionControl :state="permissions.state.value" :disabled="!permissions.ready.value || permissions.busy.value" :saving="permissions.saving.value" @select="permissions.setMode" />
@@ -1939,7 +1939,8 @@ onBeforeUnmount(() => {
 .chat-generation-notice { flex: none; margin: var(--yj-space-2) 0 0; color: var(--yj-color-chat-generation-notice); font-size: var(--yj-font-size-chat-generation-notice); line-height: var(--yj-line-height-chat-generation-notice); text-align: center; }
 .chat-workspace__composer-note { width: min(100%, var(--yj-layout-chat-composer-max)); margin: 0 0 var(--yj-space-2); color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
 .chat-workspace__composer-error { width: min(100%, var(--yj-layout-chat-composer-max)); margin: 0 0 var(--yj-space-2); color: var(--yj-color-semantic-error-ink); font-size: var(--yj-font-size-caption); }
-.chat-workspace__composer-error button { padding: 0; border: 0; color: inherit; background: transparent; font-weight: var(--yj-font-weight-semibold); text-decoration: underline; }
+.chat-workspace__composer-error button,
+.chat-workspace__model-notice button { padding: 0; border: 0; color: inherit; background: transparent; font-weight: var(--yj-font-weight-semibold); text-decoration: underline; }
 
 .chat-notice { display: flex; width: min(100%, var(--yj-layout-chat-column-max)); align-items: center; gap: var(--yj-space-3); padding: var(--yj-space-3) var(--yj-space-4); border: var(--yj-border-width) solid var(--yj-color-border-default); border-radius: var(--yj-radius-lg); margin: 0 auto var(--yj-space-4); color: var(--yj-color-text-secondary); background: var(--yj-color-bg-card); }
 .chat-notice--warning { border-color: color-mix(in srgb, var(--yj-color-warning) 32%, transparent); background: var(--yj-color-warning-soft); }

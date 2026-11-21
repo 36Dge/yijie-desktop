@@ -34,7 +34,7 @@ function toggle() {
     </div>
     <template v-else>
     <button class="chat-activity-group__toggle chat-activity-disclosure" type="button" :aria-expanded="expanded" :aria-controls="contentId" :aria-description="summary.counts || undefined" @click="toggle">
-      <YjIcon :name="header.icon" size="sm" tone="muted" />
+      <YjIcon :name="summary.icon" size="sm" :stroke-width="1.5" tone="muted" />
       <span class="chat-activity-group__title" ><ChatThinkingIndicator :label="header.title" :active="header.state !== 'summary' && live" :paused="!visible" /></span>
       <ChatActivityChevron :expanded="expanded" />
     </button>

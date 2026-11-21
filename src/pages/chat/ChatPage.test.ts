@@ -755,14 +755,16 @@ describe("FEAT-126 ChatPage", () => {
     const recover = vi.spyOn(chatModelClient, "recover").mockResolvedValue({ profileId: pending.profileId, revision: 2, state: "ready" });
     const { wrapper } = await mountPage(`/chat/${SESSION_ID}`, true);
     try {
-      const retry = wrapper.get('.chat-workspace__composer-error[role="alert"] button');
-      expect(retry.text()).toBe("恢复原切换");
+      const retry = wrapper.get('.chat-workspace__model-notice[role="status"] button');
+      expect(retry.text()).toBe("继续切换");
+      expect(wrapper.get(".chat-workspace__model-notice").text()).toContain("MiniMax M3");
+      expect(wrapper.get(".model-trigger").attributes("disabled")).toBeDefined();
       expect(recover).not.toHaveBeenCalled();
       await retry.trigger("click");
       await flushPromises();
       expect(recover).toHaveBeenCalledOnce();
       expect(wrapper.get(".model-trigger").text()).toBe("MiniMax-M3");
-      expect(wrapper.find('.chat-workspace__composer-error[role="alert"]').exists()).toBe(false);
+      expect(wrapper.find(".chat-workspace__model-notice").exists()).toBe(false);
     } finally { wrapper.unmount(); }
   });
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, useId, watch } from "vue";
 import { webSearchQueryTitle } from "../../domain/web-search-presentation";
+import { activityItemIcon } from "../../domain/conversation-activity-entry";
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
 import type { ChatTimelineDisclosureChange } from "./ChatTimelineItemShell.vue";
 import { sourceHref, sourceInitial, useWebSources } from "../../composables/useWebSources";
@@ -51,7 +52,7 @@ watch(() => props.item.identity, () => { expanded.value = false; });
   <article class="chat-web-search" data-progress-source="runtime_records" :aria-label="label" :aria-busy="item.busy ? 'true' : 'false'">
     <button class="chat-web-search__toggle chat-activity-disclosure" type="button" :aria-expanded="expanded" :aria-controls="contentId"
       :aria-label="`${label}${detail ? ` ${detail}` : ''}，${status}，${expanded ? '收起' : '展开'}`" @click="toggle">
-      <YjIcon class="chat-web-search__globe" name="skillCrossBorderSelection" size="xs" :stroke-width="1.5" />
+      <YjIcon class="chat-web-search__globe" :name="activityItemIcon(item)" size="xs" :stroke-width="1.5" />
       <span class="chat-web-search__label">{{ label }}</span>
       <span v-if="detail"  class="chat-web-search__query" >{{ detail }}</span>
       <ChatActivityChevron :expanded="expanded" />

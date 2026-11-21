@@ -160,18 +160,18 @@ describe("v2 normal reading acceptance", () => {
   it("A14 / A23 preserves interrupted work and pending plan steps", () => {
     const input = view([command("c", "inProgress")], false, {status: "interrupted", plan: [{step: "Read public sources", status: "inProgress"}, {step: "Write answer", status: "pending"}]});
     const before = JSON.stringify(input), wrapper = render(input);
-    expect(wrapper.text()).toContain("已中断");
+    expect(wrapper.get(".chat-turn-group__turn-state").text()).toBe("这次回复已停止。");
     expect(wrapper.find(".chat-turn-group__item--command").exists()).toBe(false);
     expect(input.plan?.map(step => step.status)).toEqual(["inProgress", "pending"]);
     expect(JSON.stringify(input)).toBe(before);
   });
 
-  it("A17 shows current native retry intent once and folds consecutive equivalent notices", () => {
+  it("A17 shows the current retry once and retains the underlying notices", () => {
     const notices = [1, 2].map(i => ({eventId: `event-${i}`, sequence: `${i}`, method: "error" as const, code: "transport_error", scope: "turn" as const, willRetry: true}));
     const input = view([command("c")], true, {notices, cursor: {eventId: "event-2", streamId: "stream", sequence: "2"}});
     const wrapper = render(input, true);
-    expect(wrapper.get(".chat-activity-group__title").text()).toBe("运行时正在重试");
-    expect(wrapper.findAll(".chat-trace-notices details")).toHaveLength(1);
+    expect(wrapper.get(".chat-activity-group__title").text()).toBe("正在重试…");
+    expect(wrapper.find(".chat-trace-notices").exists()).toBe(false);
     expect(traceCurrentStatus(turn(input, true))).toBeNull();
     expect(input.notices).toHaveLength(2);
   });

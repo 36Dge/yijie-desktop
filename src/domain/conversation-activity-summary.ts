@@ -1,6 +1,6 @@
 import type { ConversationTimelineItemViewModel as Item } from "./conversation-timeline";
 import type { ConversationActivityGroup } from "./conversation-activity-presentation";
-import { deepSearchEvidence, deepSearchReceipt, activityEntriesForItem, activityNativeItem, activityToolSourceLabel, activityToolTitle, activityWebTitle } from "./conversation-activity-entry";
+import { deepSearchEvidence, deepSearchReceipt, activityEntriesForItem, activityItemIcon, activityNativeItem, activityToolSourceLabel, activityToolTitle, activityWebTitle } from "./conversation-activity-entry";
 
 export function activityItemTitle(item: Item): string {
   if (item.presentation === "web_search") return activityWebTitle(item);
@@ -41,11 +41,13 @@ export function summarizeActivity(group: ConversationActivityGroup, live: boolea
   if (webActions.has("findInPage")) parts.push("查找了网页内容");
   if ([...webActions].some(action => !["search", "openPage", "findInPage"].includes(action ?? ""))) parts.push("网页活动");
   const state = live ? group.state : {kind: "summary" as const};
+  const activeItem = state.kind === "summary" ? undefined : state.entry?.item;
+  const iconItem = activeItem ?? calls[calls.length - 1];
   return {
     title: state.kind === "active" ? `正在${state.entry.title}` : state.kind === "thinking" ? state.label ?? "正在思考" : parts.join("、") || "其他活动",
     state: state.kind,
     key: state.kind === "active" ? `active:${state.entry.identity}` : state.kind,
-    icon: categories.has("tool") ? "toolGroup" as const : categories.has("web_search") ? "globe" as const : "terminal" as const,
+    icon: iconItem ? activityItemIcon(iconItem) : "warning" as const,
     callCount: calls.length, actionCount: actions, sourceCount: sources.size,
     counts: [dispatched ? `${dispatched} 次实际搜索` : "", reused ? `复用 ${reused} 次` : "", joined ? `并发合并 ${joined} 次` : "", attempted ? `${attempted} 项已尝试发送` : "", ordinary ? `${ordinary} 次调用` : "", actions ? `${actions} 个命令动作` : "", sources.size ? `${sources.size} 个来源` : "", unsupported ? `${unsupported} 项暂不支持展示` : ""].filter(Boolean).join(" · "),
   };

@@ -553,7 +553,7 @@ describe("ChatTimeline", () => {
     const wrapper = mount(ChatTimeline, { props: { timeline } });
     expect(wrapper.find(".chat-timeline__notices").exists()).toBe(false);
     expect(wrapper.text()).not.toContain("未分类提示");
-    expect(wrapper.text()).toContain("本轮未能完成");
+    expect(wrapper.text()).toContain("这次回复未能完成");
     expect(wrapper.findAllComponents(ChatTimelineItemShell)).toHaveLength(1);
     await wrapper.setProps({timeline: {...timeline, notices: timeline.notices.map(notice => ({...notice, severity: "error" as const}))}});
     expect(wrapper.get(".chat-timeline__notices").text()).toContain("对话发生错误");
@@ -582,7 +582,7 @@ describe("ChatTimeline", () => {
     });
     expect(wrapper.get(".chat-timeline__notices").text())
       .toContain("对话连接存在需要注意的信息");
-    expect(wrapper.get(".chat-timeline__notices code").text()).toBe("conversation_warning");
+    expect(wrapper.text()).not.toContain("conversation_warning");
     expect((await axe.run(wrapper.element)).violations).toEqual([]);
     wrapper.unmount();
 

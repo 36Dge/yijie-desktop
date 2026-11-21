@@ -19,9 +19,10 @@ it("keeps a saved runtime notice distinct from unknown while preserving the fail
   const original = JSON.stringify(saved);
   for (const view of [saved, JSON.parse(original) as NativeConversationView]) {
     const timeline = selectConversationTimeline(composeConversationView(snapshot, [view]), "session");
-    expect(timeline?.notices[0]?.diagnostic).toBe("runtime_notice");
+    expect(timeline?.notices).toEqual([]);
+    expect(timeline?.turns[0]?.diagnostic).toBe("runtime_notice");
     expect(timeline?.turns[0]?.domainStatus).toBe("failed");
-    expect(conversationDiagnosticMessage(timeline!.notices[0]!.diagnostic!))
+    expect(conversationDiagnosticMessage(timeline!.turns[0]!.diagnostic!))
       .toBe("运行时返回了提示，但未提供可显示的详细原因。已保留现有内容。");
     expect(JSON.stringify(view)).toBe(original);
   }
@@ -43,8 +44,9 @@ it("displays the existing native budget failure without changing the terminal fa
   const snapshot: ConversationSnapshot = { threads: [{ threadId: "session", status: "ready" }], turns: [], items: [] };
   const timeline = selectConversationTimeline(composeConversationView(snapshot, [saved]), "session")!;
   expect(timeline.turns[0]?.domainStatus).toBe("failed");
-  expect(timeline.notices[0]?.diagnostic).toBe("session_budget_exceeded");
-  expect(conversationDiagnosticMessage("session_budget_exceeded")).toContain("预算已用尽");
+  expect(timeline.notices).toEqual([]);
+  expect(timeline.turns[0]?.diagnostic).toBe("session_budget_exceeded");
+  expect(conversationDiagnosticMessage("session_budget_exceeded")).toBe("这次回复未能完成。你可以在新对话中继续。");
   expect(JSON.stringify(saved)).toBe(original);
   const running = {...saved, status: "inProgress" as const, terminalObserved: false};
   const live = selectConversationTimeline(composeConversationView(snapshot, [running]), "session")!;

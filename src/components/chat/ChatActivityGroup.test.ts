@@ -1,25 +1,86 @@
 // @vitest-environment happy-dom
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { enableAutoUnmount, mount } from "@vue/test-utils";
 import { traceItem, traceTurn } from "../../domain/conversation-activity-fixtures";
 import ChatTurnGroup from "./ChatTurnGroup.vue";
 import ChatTraceNotices from "./ChatTraceNotices.vue";
 
 enableAutoUnmount(afterEach);
-it("shows a hammer on the tool group and a book on each web fetch", async () => {
+it("uses the same book icon on a completed fetch group and its rows", async () => {
   const items = ["home", "board"].map(id => traceItem(id, "mcpToolCall", {
     mcp: {server: "yijie_web", tool: "kimi_web_fetch", resultKind: "omitted", texts: [], diagnostics: []},
   }));
   const wrapper = mount(ChatTurnGroup, {props: {turn: traceTurn(items), position: 1}});
   await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
   const group = wrapper.get(".chat-activity-group__toggle");
-  expect(group.get("svg").classes()).toContain("lucide-hammer");
+  expect(group.get("svg").classes()).toContain("lucide-book-open-text");
   expect(group.text()).toBe("已使用 易界网页检索");
   expect(group.find(".chat-activity-chevron.lucide-chevron-right").exists()).toBe(true);
   await group.trigger("click");
   expect(group.find(".chat-activity-chevron.lucide-chevron-down").exists()).toBe(true);
   expect(wrapper.findAll(".web-fetch-row .lucide-book-open-text")).toHaveLength(2);
   expect(wrapper.findAll(".web-fetch-row button").map(button => button.text())).toEqual(["读取指定网页", "读取指定网页"]);
+});
+
+it.each([
+  {last: traceItem("command", "commandExecution", {exitCode: 0}), glyph: "lucide-square-terminal"},
+  {last: traceItem("plugin", "mcpToolCall", {mcp: {
+    server: "external", tool: "kimi_web_search_pro", resultKind: "empty", texts: [], diagnostics: [],
+  }}), glyph: "lucide-blocks"},
+])("matches the final row's $glyph icon after a web search", async ({last, glyph}) => {
+  const turn = traceTurn([traceItem("web", "webSearch"), last]);
+  const wrapper = mount(ChatTurnGroup, {props: {turn, position: 1}});
+  await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
+  const group = wrapper.get(".chat-activity-group__toggle");
+  expect(group.get("svg").classes()).toContain(glyph);
+  await group.trigger("click");
+  const rows = wrapper.findAll("[data-activity-item]");
+  expect(rows[rows.length - 1]!.get("button svg").classes()).toContain(glyph);
+});
+
+it("switches the header icon immediately between parallel tools and restores the last visible tool in history", async () => {
+  vi.useFakeTimers({now: 0});
+  try {
+    const deep = (id: string, status: "inProgress" | "completed" = "completed") => traceItem(id, "mcpToolCall", {
+      status, mcp: {server: "yijie_web", tool: "kimi_web_search_pro", resultKind: "omitted", texts: [], diagnostics: []},
+    });
+    const web = (status: "inProgress" | "completed") => traceItem("web", "webSearch", {
+      status, webSearch: {action: "search", queries: ["杭州统计公报"]},
+    });
+    const active = [deep("one"), deep("two"), deep("three", "inProgress")];
+    const wrapper = mount(ChatTurnGroup, {props: {turn: traceTurn(active, true), position: 1}});
+    const group = () => wrapper.get(".chat-activity-group__toggle");
+    expect(group().get("svg").classes()).toContain("lucide-scan-search");
+    await group().trigger("click");
+
+    await wrapper.setProps({turn: traceTurn([...active, web("inProgress")], true)});
+    expect(group().get("svg").classes()).toContain("lucide-globe");
+    expect(group().attributes("aria-expanded")).toBe("true");
+    expect(wrapper.get(".chat-web-search__toggle svg").classes()).toContain("lucide-globe");
+
+    // The later search has finished while the earlier deep search is still running.
+    const remaining = traceTurn([...active, web("completed")], true);
+    await wrapper.setProps({turn: remaining});
+    expect(group().get("svg").classes()).toContain("lucide-scan-search");
+    await wrapper.setProps({turn: {...remaining, traceSequence: "8", traceNotices: [
+      {eventId: "retry", sequence: "8", scope: "turn", method: "error", code: "transport_error", willRetry: true},
+    ]}});
+    expect(group().get("svg").classes()).toContain("lucide-scan-search");
+
+    const history = [deep("one"), deep("two"), deep("three"), web("completed")];
+    await wrapper.setProps({turn: traceTurn(history, true)});
+    expect(group().get("svg").classes()).toContain("lucide-globe");
+    await wrapper.setProps({turn: traceTurn(history)});
+    expect(group().get("svg").classes()).toContain("lucide-globe");
+    expect(group().text()).toBe("已使用 易界网页检索、搜索了网页");
+    const reopened = mount(ChatTurnGroup, {props: {turn: traceTurn(history), position: 1}});
+    expect(reopened.get(".chat-activity-group__toggle svg").classes()).toContain("lucide-globe");
+
+    await wrapper.setProps({turn: traceTurn([web("completed"), deep("last"), traceItem("other", "unknown")])});
+    expect(group().get("svg").classes()).toContain("lucide-scan-search");
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("folds the process at the first answer and restores the chosen inner group on reopening", async () => {
@@ -40,13 +101,13 @@ it("folds the process at the first answer and restores the chosen inner group on
   expect(group.attributes("aria-expanded")).toBe("true");
   expect(wrapper.text()).toContain("Final result");
 });
-it("folds ordinary cold history, filters failed tools and still reports turn-level retries", () => {
+it("folds ordinary cold history without replaying failed tools or past retries", () => {
   const turn = traceTurn([traceItem("s", "webSearch", {webSearch: {action: "search", queries: ["Annual statistics"]}}), traceItem("e", "commandExecution", {status: "failed", exitCode: 1}), traceItem("f", "agentMessage", {phase: "final_answer", text: "Result"})]);
   turn.traceNotices = [{eventId: "notice", sequence: "1", method: "error", code: "transport_error", scope: "turn", willRetry: true}];
   const wrapper = mount(ChatTurnGroup, {attachTo: document.body, props: {turn, position: 1}});
   expect(wrapper.get(".chat-activity-group").isVisible()).toBe(false);
   expect(wrapper.find(".chat-turn-group__item--command").exists()).toBe(false);
-  expect(wrapper.text()).toContain("运行时曾报告重试");
+  expect(wrapper.text()).not.toContain("运行时曾报告重试");
   expect(wrapper.text()).not.toContain("第 2 次搜索");
   expect(wrapper.find(".chat-archive-activity").exists()).toBe(false);
 });
@@ -55,7 +116,7 @@ it("keeps notice scope readable without exposing opaque runtime codes", () => {
   const turn = traceTurn([traceItem("a", "agentMessage", {text: "Answer"})]);
   turn.traceNotices = [{eventId: "notice", sequence: "1", method: "warning", code: "answer_completion_continuing", scope: "thread"}];
   const wrapper = mount(ChatTurnGroup, {props: {turn, position: 1}});
-  expect(wrapper.get(".chat-trace-notices summary").text()).toBe("对话运行提示");
+  expect(wrapper.get(".chat-trace-notices summary").text()).toBe("对话提示");
   expect(wrapper.get(".chat-trace-notices details").attributes("open")).toBeUndefined();
   expect(wrapper.text()).not.toContain("answer_completion_continuing");
 });
@@ -72,8 +133,8 @@ it("hides generic warning-only notices without removing facts, meaningful notice
   ]});
   expect(wrapper.findAll("details")).toHaveLength(1);
   expect(wrapper.text()).toContain("正在根据已有结果补全回答");
-  expect(wrapper.text()).toContain("运行时曾报告重试");
-  expect(wrapper.text()).toContain("运行错误，未安排重试");
+  expect(wrapper.text()).not.toContain("运行时曾报告重试");
+  expect(wrapper.text()).not.toContain("运行错误，未安排重试");
   expect(wrapper.text()).not.toContain("未提供可显示的详细原因");
   expect(JSON.stringify(warnings)).toBe(before);
 });

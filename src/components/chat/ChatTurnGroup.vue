@@ -6,6 +6,7 @@ import type { YjIconName } from "../../icons/registry";
 import { conversationActivityPresentation, traceCurrentStatus, traceIsLive } from "../../domain/conversation-activity-presentation";
 import { groupConversationTurnOutput, type ConversationTurnReadingNode } from "../../domain/conversation-turn-output";
 import { completedTurnAnswer } from "../../domain/conversation-process";
+import { conversationDiagnosticMessage } from "../../domain/conversation-diagnostics";
 import { chatTracePresentationKey, createChatTracePresentationStore } from "../../stores/chat-trace-presentation.store";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatActivityGroup from "./ChatActivityGroup.vue";
@@ -84,6 +85,7 @@ watch([() => props.turn.identity, nativeLiveProgress], ([id, live]) => {
 const processExpanded = computed(() => choices.get(processChoiceKey.value, false));
 const summaryVisible = computed(() => !hasProcess.value || processExpanded.value);
 const currentStatus = computed(() => traceCurrentStatus(props.turn, props.hasDeliveredArtifact));
+const stopped = computed(() => props.turn.domainStatus === "failed" || props.turn.domainStatus === "interrupted");
 const plan = computed(() => props.turn.plan ? {...props.turn.plan, defaultExpanded: false} : null);
 const processControls = computed(() => [
   ...nodes.value.filter(isProcess).map(node => `${processId}-${encodeURIComponent(node.identity)}`),
@@ -211,9 +213,9 @@ function turnStateMessage(turn: ConversationTimelineTurnViewModel): string | nul
   }
   switch (turn.domainStatus) {
     case "interrupted":
-      return "本轮已中断，已确认的内容仍可阅读。";
+      return "这次回复已停止。";
     case "failed":
-      return "本轮未能完成，已确认的内容仍可阅读。";
+      return conversationDiagnosticMessage(turn.diagnostic === "session_budget_exceeded" ? turn.diagnostic : "answer_completion_failed");
     case "recovery_required":
       return "本轮状态需要核对，现有内容仍可阅读。";
     default:
@@ -236,7 +238,7 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
     :class="`chat-turn-group--${turn.phase}`"
     :aria-label="`对话 ${position}`"
   >
-    <header v-if="turn.diagnostic === 'native_format_unsupported' || (turn.domainStatus !== 'completed' && !nativeLiveProgress)" class="chat-turn-group__header">
+    <header v-if="!stopped && (turn.diagnostic === 'native_format_unsupported' || (turn.domainStatus !== 'completed' && !nativeLiveProgress))" class="chat-turn-group__header">
       <span class="chat-turn-group__status">
         <YjIcon
           :name="turnStatusIcon(turn)"
@@ -248,11 +250,6 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
         <span v-else-if="turn.source === 'native_rebuilt'"> · 历史恢复，内容可能不完整</span>
       </span>
     </header>
-
-    <p v-if="turnStateMessage(turn)" class="chat-turn-group__turn-state" role="note">
-      {{ turnStateMessage(turn) }}
-    </p>
-
 
     <ol v-if="nodes.length || timingObserved || plan || preloading" class="chat-turn-group__items" aria-label="本轮对话内容">
       <template v-for="node in entries" :key="node.identity">
@@ -299,9 +296,12 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
     </ol>
     <p v-if="currentStatus && !preloading" class="chat-turn-group__progress" role="status" aria-live="polite"><ChatThinkingIndicator :label="currentStatus" :active="nativeLiveProgress" /></p>
     <p v-else-if="turn.progress && turn.source === 'local_submission' && !['failed', 'cancelled'].includes(turn.submissionStatus ?? '')" class="chat-turn-group__progress" role="status">{{ progressLabel(turn.progress) }}</p>
-    <ChatTraceNotices v-if="turn.traceNotices" :notices="turn.traceNotices" />
-    <ul v-if="turn.notices.length" class="chat-turn-group__notices" aria-label="本轮通知">
-      <li v-for="notice in turn.notices" :key="notice.identity" class="chat-turn-group__notice"><div role="note">{{ noticeMessage(notice) }}<code>{{ notice.code }}</code></div></li>
+    <p v-if="turnStateMessage(turn)" class="chat-turn-group__turn-state" role="note">
+      {{ turnStateMessage(turn) }}
+    </p>
+    <ChatTraceNotices v-if="!stopped && turn.traceNotices" :notices="turn.traceNotices" />
+    <ul v-if="!stopped && turn.notices.length" class="chat-turn-group__notices" aria-label="本轮通知">
+      <li v-for="notice in turn.notices" :key="notice.identity" class="chat-turn-group__notice"><div role="note">{{ noticeMessage(notice) }}</div></li>
     </ul>
   </section>
 </template>
@@ -381,12 +381,9 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
 
 .chat-turn-group__turn-state {
   margin: var(--yj-space-0);
-  padding: var(--yj-space-2) var(--yj-space-3);
-  border-radius: var(--yj-radius-md);
-  color: var(--yj-color-text-body);
-  background: var(--yj-color-warning-soft);
-  font-size: var(--yj-font-size-caption);
-  line-height: var(--yj-line-height-caption);
+  color: var(--yj-color-text-secondary);
+  font-size: var(--yj-font-size-body);
+  line-height: var(--yj-line-height-body);
 }
 
 .chat-turn-group__items,
@@ -429,8 +426,7 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
   line-height: var(--yj-line-height-caption);
 }
 
-.chat-turn-group__unknown code,
-.chat-turn-group__notice code {
+.chat-turn-group__unknown code {
   width: fit-content;
   color: var(--yj-color-text-tertiary);
   font-size: var(--yj-font-size-caption);

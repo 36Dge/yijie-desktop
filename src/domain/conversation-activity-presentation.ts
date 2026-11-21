@@ -6,7 +6,8 @@ import { deepSearchEvidence, deepSearchReceipt, activityEntriesForItem, type Con
 import type { ConversationTimelineItemViewModel as Item, ConversationTimelineTurnViewModel as Turn } from "./conversation-timeline";
 
 export type ConversationActivityHeaderState =
-  | Readonly<{kind: "summary" | "thinking"; label?: string}>
+  | Readonly<{kind: "summary"}>
+  | Readonly<{kind: "thinking"; label?: string; entry?: ConversationActivityEntry}>
   | Readonly<{kind: "active"; entry: ConversationActivityEntry}>;
 export type ConversationActivityGroup = Readonly<{ identity: string; items: readonly Item[]; entries: readonly ConversationActivityEntry[]; state: ConversationActivityHeaderState }>;
 export type ConversationReadingNode =
@@ -82,7 +83,15 @@ export function conversationActivityPresentation(turn: Turn, attentionIds: Reado
     const active = [...latest.group.entries].reverse().find(entry => entry.item.busy);
     const retry = turn.traceNotices?.[turn.traceNotices.length - 1];
     const retrying = retry?.scope === "turn" && retry.method === "error" && retry.willRetry === true && retry.sequence === turn.traceSequence;
-    nodes[nodes.length - 1] = {...latest, group: {...latest.group, state: retrying ? {kind: "thinking", label: "运行时正在重试"} : active ? {kind: "active", entry: active} : reasoningSummaryIsCurrent(turn) ? {kind: "summary"} : {kind: "thinking"}}};
+    let state: ConversationActivityHeaderState;
+    if (retrying) {
+      state = {kind: "thinking", label: "正在重试…", entry: active};
+    } else if (active) {
+      state = {kind: "active", entry: active};
+    } else {
+      state = reasoningSummaryIsCurrent(turn) ? {kind: "summary"} : {kind: "thinking"};
+    }
+    nodes[nodes.length - 1] = {...latest, group: {...latest.group, state}};
   }
   if (commentaryMode === "latest") {
     const latestCommentary = [...nodes].reverse().find(node => node.kind === "message" && node.item.presentation === "commentary" && (node.item.busy || node.item.contentBlocks.some(block => (block.type === "text" || block.type === "code") && block.text.trim())));
@@ -107,7 +116,7 @@ export function traceCurrentStatus(turn: Turn, hasDeliveredArtifact = false): st
   const lastNode = nodes[nodes.length - 1];
   if (lastNode?.kind === "activity") return null;
   const retry = turn.traceNotices?.[turn.traceNotices.length - 1];
-  if (retry?.scope === "turn" && retry.method === "error" && retry.willRetry === true && retry.sequence === turn.traceSequence) return "运行时正在重试";
+  if (retry?.scope === "turn" && retry.method === "error" && retry.willRetry === true && retry.sequence === turn.traceSequence) return "正在重试…";
   const latest = turn.items[turn.items.length - 1];
   if (latest?.presentation === "context_update" && latest.contextUpdateState === "in_progress") return null;
   if (latest?.presentation === "commentary" && latest.busy && latest.contentBlocks.some(block => (block.type === "text" || block.type === "code") && block.text.trim())) return null;

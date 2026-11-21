@@ -1,3 +1,4 @@
+import type { YjIconName } from "../icons/registry";
 import type { ConversationTimelineItemViewModel as Item } from "./conversation-timeline";
 
 /** A reading row references a native fact; it is never another execution. */
@@ -12,6 +13,26 @@ export type ConversationActivityEntry = Readonly<{
 
 export function activityNativeItem(item: Item) {
   return item.execution && "native" in item.execution ? item.execution.native.item : null;
+}
+
+export function activityItemIcon(item: Item, mcp = activityNativeItem(item)?.mcp): YjIconName {
+  switch (item.presentation) {
+    case "user_message": return "user";
+    case "final_answer":
+    case "assistant_unclassified": return "assistant";
+    case "commentary":
+    case "reasoning": return "pending";
+    case "artifact": return "file";
+    case "command": return item.execution?.kind === "command" ? "terminal" : "workspace";
+    case "web_search": return "globe";
+    case "tool":
+      if (mcp?.server === "yijie_web") {
+        if (mcp.tool === "kimi_web_search_pro") return "scanSearch";
+        if (mcp.tool === "kimi_web_fetch") return "readPage";
+      }
+      return "skillOperations";
+    default: return "warning";
+  }
 }
 
 export function deepSearchReceipt(item: Item) {

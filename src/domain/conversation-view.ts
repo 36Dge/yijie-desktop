@@ -498,10 +498,15 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
       cache?.native.set(view, { turn: turns[key]!, items: turns[key]!.itemKeys.map(k => items[k]!) });
     }
     const thread = threads[view.sessionId];
-    const diagnostic = view.terminalObserved && view.status === "failed" && view.terminalErrorCode === "sessionBudgetExceeded" ? "session_budget_exceeded" : view.diagnostic ? safeConversationDiagnostic(view.diagnostic) : null;
+    const diagnostic = turns[key]?.diagnostic;
+    // A terminal outcome belongs to this turn, including when reopening it.
+    // Only independent availability/connection notices belong above the thread.
+    const stopped = view.status === "failed" || view.status === "interrupted";
+    const turnNotice = stopped && (diagnostic === "session_budget_exceeded" ||
+      diagnostic === "answer_completion_failed" || diagnostic === "runtime_notice" || diagnostic === "operation_guard_capacity");
     if (thread) threads[view.sessionId] = {...thread,
       turnKeys: thread.turnKeys.includes(key) ? thread.turnKeys : [...thread.turnKeys, key],
-      notices: diagnostic && !thread.notices.some(n => n.diagnostic === diagnostic)
+      notices: diagnostic && !turnNotice && !thread.notices.some(n => n.diagnostic === diagnostic)
         ? [...thread.notices, {severity: "warning", code: "conversation_warning", diagnostic}]
         : thread.notices,
     };

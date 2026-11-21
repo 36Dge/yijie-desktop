@@ -537,8 +537,8 @@ describe("ChatTurnGroup", () => {
 
     const terminalCases: readonly [ConversationTurnStatus, string | null][] = [
       ["completed", null],
-      ["interrupted", "本轮已中断"],
-      ["failed", "本轮未能完成"],
+      ["interrupted", "这次回复已停止"],
+      ["failed", "这次回复未能完成"],
       ["recovery_required", "本轮状态需要核对"],
     ];
     for (const [status, label] of terminalCases) {
@@ -561,8 +561,8 @@ describe("ChatTurnGroup", () => {
     });
     expect(noticed.findAll(".chat-turn-group__notice")).toHaveLength(2);
     expect(noticed.text()).toContain("共 2 次");
-    expect(noticed.text()).toContain("conversation_error");
-    expect(noticed.text()).toContain("conversation_warning");
+    expect(noticed.text()).not.toContain("conversation_error");
+    expect(noticed.text()).not.toContain("conversation_warning");
   });
 
   it("forwards reference and action authority without resolving it locally", () => {

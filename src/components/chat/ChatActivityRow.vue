@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, useTemplateRef } from "vue";
-import type { ConversationActivityEntry } from "../../domain/conversation-activity-entry";
+import { activityItemIcon, type ConversationActivityEntry } from "../../domain/conversation-activity-entry";
 import { hasReadableProcessContent } from "../../domain/conversation-process";
 import type {
   ConversationTimelineArtifactReferenceContentBlock,
@@ -8,7 +8,6 @@ import type {
   ConversationTimelineItemViewModel,
   ConversationTimelineTurnViewModel,
 } from "../../domain/conversation-timeline";
-import type { YjIconName } from "../../icons/registry";
 import ChatCommandItem, {
   type ChatApprovalDecisionChange,
   type ChatApprovalTransientState,
@@ -138,31 +137,6 @@ function itemLabel(item: ConversationTimelineItemViewModel): string {
     case "unknown":
     default:
       return "未知内容";
-  }
-}
-
-function itemIcon(item: ConversationTimelineItemViewModel): YjIconName {
-  switch (item.presentation) {
-    case "user_message":
-      return "user";
-    case "final_answer":
-    case "assistant_unclassified":
-      return "assistant";
-    case "commentary":
-      return "pending";
-    case "artifact":
-      return "file";
-    case "reasoning":
-      return "pending";
-    case "command":
-      return "workspace";
-    case "tool":
-      return "skillOperations";
-    case "web_search":
-      return "skillCrossBorderSelection";
-    case "unknown":
-    default:
-      return "warning";
   }
 }
 
@@ -302,7 +276,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange) { emit("app
             :label="answerCandidate ? '模型消息' : itemLabel(item)"
             :answer-candidate="answerCandidate"
             :status-label="itemStatusLabel(item)"
-            :icon="itemIcon(item)"
+            :icon="activityItemIcon(item)"
             :collapsible="fallbackActivity || (item.collapsible && !processPresentation && !answerCandidate)"
             :process-presentation="processPresentation"
             :default-expanded="!fallbackActivity && item.defaultExpanded"
