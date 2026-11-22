@@ -23,7 +23,7 @@ let resetTimer: ReturnType<typeof setTimeout> | undefined;
 function clearReset() { clearTimeout(resetTimer); resetTimer = undefined; }
 onBeforeUnmount(() => { operationEpoch++; clearReset(); });
 
-const actionLabel = computed(() => props.kind === "code" ? "复制代码" : "复制文本");
+const actionLabel = computed(() => props.kind === "code" ? "复制信息" : "复制文本");
 const feedback = computed(() => {
   switch (outcome.value) {
     case "pending":
@@ -45,7 +45,7 @@ const icon = computed(() => {
 const iconTone = computed(() => {
   if (outcome.value === "success") return "success" as const;
   if (outcome.value === "error") return "error" as const;
-  return "muted" as const;
+  return "subtle" as const;
 });
 const unavailable = computed(() => props.text.length === 0 || outcome.value === "pending");
 
@@ -71,13 +71,11 @@ async function copy(): Promise<void> {
     if (epoch !== operationEpoch) return;
     outcome.value = "success";
     announcement.value = props.kind === "code" ? "代码已复制。" : "文本已复制。";
-    if (props.kind === "user-message" || props.compact) {
-      resetTimer = setTimeout(() => {
-        if (operationEpoch !== epoch) return;
-        outcome.value = "idle";
-        announcement.value = "";
-      }, props.kind === "user-message" ? 1_500 : 2_000);
-    }
+    resetTimer = setTimeout(() => {
+      if (operationEpoch !== epoch) return;
+      outcome.value = "idle";
+      announcement.value = "";
+    }, 1_500);
   } catch {
     if (epoch !== operationEpoch) return;
     outcome.value = "error";

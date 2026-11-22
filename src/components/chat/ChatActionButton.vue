@@ -10,7 +10,6 @@ const button = ref<HTMLButtonElement | null>(null);
 const hovering = ref(false), keyboardFocused = ref(false), dismissed = ref(false);
 const show = computed(() => !props.tooltipDisabled && !dismissed.value && (hovering.value || keyboardFocused.value));
 const displayIcon = computed(() => {
-  if (props.icon === "copy") return "answerCopy";
   if (props.icon === "thumbsUp") return props.pressed ? "thumbsUpFilled" : "answerThumbsUp";
   if (props.icon === "thumbsDown") return props.pressed ? "thumbsDownFilled" : "answerThumbsDown";
   return props.icon;

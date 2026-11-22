@@ -7715,11 +7715,18 @@ pub async fn chat_renew_context_v1(
     if !ipc_runtime.binding_is_current(generation) {
         return Err(ChatIpcError::request_cancelled(Some(request.request_id)));
     }
+    // A turn prepared concurrently sees either the old deadline followed by
+    // this proof, or the already renewed context.
+    let _admission = manager.market_admission_lock().await;
     // Never extend a lease that expired while the provider or bind gate was awaited.
     let now = unix_seconds().map_err(|e| map_chat_error(e, Some(request.request_id)))?;
-    let context = manager
+    let (context, renewal) = manager
         .renew(request.context_id, projection, now)
         .map_err(|e| map_chat_error(e, Some(request.request_id)))?;
+    if let Some(renewal) = renewal {
+        renewal.deliver().await
+            .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request.request_id)))?;
+    }
     let allowed_actions = manager
         .allowed_actions(context.context_id, now)
         .map_err(|_| ChatIpcError::context_invalid(Some(request.request_id)))?;

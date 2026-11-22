@@ -30,19 +30,21 @@ afterEach(() => {
 });
 
 describe("ChatCopyAction", () => {
-  it("shows only the checkmark for 1.5 seconds after the latest successful user-message copy", async () => {
+  it.each(["user-message", "code", "text"] as const)("restores the %s copy icon 1.5 seconds after the latest successful write", async (kind) => {
     vi.useFakeTimers();
     const writeText = vi.fn<ChatClipboardAdapter["writeText"]>().mockResolvedValue();
-    const wrapper = mount(ChatCopyAction, { props: { adapter: adapter(writeText), text: "用户原文", kind: "user-message" } });
+    const wrapper = mount(ChatCopyAction, { props: { adapter: adapter(writeText), text: "复制样例", kind } });
     try {
       const button = wrapper.get("button");
       const original = button.get("svg").html();
+      expect(button.get("svg").classes()).toContain("lucide-answer-copy");
+      expect(button.get("svg").attributes("stroke-width")).toBe("1.5");
       await button.trigger("click");
       await flushPromises();
       const check = button.get("svg").html();
       expect(check).not.toBe(original);
-      expect(wrapper.find(".chat-copy-action__feedback").exists()).toBe(false);
-      expect(wrapper.get("[role=status]").text()).toBe("文本已复制。");
+      expect(wrapper.find(".chat-copy-action__feedback").exists()).toBe(kind !== "user-message");
+      expect(wrapper.get("[role=status]").text()).toBe(kind === "code" ? "代码已复制。" : "文本已复制。");
       await vi.advanceTimersByTimeAsync(900);
       await button.trigger("click");
       await flushPromises();
@@ -50,6 +52,8 @@ describe("ChatCopyAction", () => {
       expect(button.get("svg").html()).toBe(check);
       await vi.advanceTimersByTimeAsync(1);
       expect(button.get("svg").html()).toBe(original);
+      expect(wrapper.find(".chat-copy-action__feedback").exists()).toBe(false);
+      expect(wrapper.get("[role=status]").text()).toBe("");
       expect(writeText).toHaveBeenCalledTimes(2);
     } finally {
       wrapper.unmount();
@@ -58,7 +62,7 @@ describe("ChatCopyAction", () => {
   });
   it.each([
     ["text" as const, "  可复制文本\n第二行  ", "复制文本", "文本已复制。"],
-    ["code" as const, "const value = 1;\n", "复制代码", "代码已复制。"],
+    ["code" as const, "const value = 1;\n", "复制信息", "代码已复制。"],
   ])("copies exact %s content and announces the real success", async (
     kind,
     text,
@@ -72,6 +76,8 @@ describe("ChatCopyAction", () => {
     });
 
     const button = wrapper.get("button");
+    await button.trigger("mouseenter");
+    expect(document.getElementById(button.attributes("aria-describedby")!)?.textContent).toBe(label);
     await button.trigger("click");
     await flushPromises();
 

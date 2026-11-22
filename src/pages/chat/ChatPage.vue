@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import YjTooltip from "../../components/yijie/YjTooltip.vue";
 import { documentPreviewClient } from "../../api/chat-document-preview-client";
-import { messageFileWorkspaceKey, messageFileServicesKey, messageFileActionKey, type MessageFileLocation, type MessageLinkTarget } from "../../composables/useChatMessageLink";
-import type { MessageFileReference } from "../../domain/message-file-reference";
+import { messageFileWorkspaceKey, messageFileLocationKey, messageFileActionKey } from "../../composables/useChatMessageLink";
 import { provideWebSourceActions } from "../../composables/useWebSources";
 import { useChatTurnTimingDetails } from "../../composables/useChatTurnTiming";
 import { useChatTurnModels } from "../../composables/useChatTurnModels";
@@ -11,7 +10,7 @@ import { completedTurnAnswer } from "../../domain/conversation-process";
 import { traceIsLive } from "../../domain/conversation-activity-presentation";
 import ChatAnswerActions from "../../components/chat/ChatAnswerActions.vue";
 import { liveAnswerArrivalKey } from "../../composables/useChatTextReveal";
-import { computed, inject, provide, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
+import { computed, inject, provide, nextTick, onBeforeUnmount, onMounted, ref, shallowReactive, shallowRef, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { NCard, NModal } from "naive-ui";
@@ -34,7 +33,7 @@ import ChatModelControl from "../../components/chat/ChatModelControl.vue";
 import { useChatModels } from "../../composables/useChatModels";
 import ChatDeliveryControl from "../../components/chat/ChatDeliveryControl.vue";
 import { useChatDelivery } from "../../composables/useChatDelivery";
-import { chatModelsEnabled, kimiK31Candidate, defaultModelProfile } from "../../api/chat-model-client";
+import { chatModelsEnabled, kimiK31Candidate } from "../../api/chat-model-client";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
 import ChatScrollToBottomButton from "../../components/chat/ChatScrollToBottomButton.vue";
 import ChatAttachmentChip from "../../components/chat/ChatAttachmentChip.vue";
@@ -91,6 +90,7 @@ import type {
 } from "../../domain/chat-ipc";
 import { ChatClientError } from "../../domain/chat-ipc";
 import {
+  CHAT_COMPOSER_DEFAULT_PROFILE,
   chatComposerDraftKey,
   chatComposerDraftValue,
   clearChatComposerDraft,
@@ -135,7 +135,7 @@ import { browserChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
 
 import { CHAT_AUTHORITY_RETRY_KEY } from "../../authorization/chat-authority-recovery";
 import { locateChatTurn } from "../../domain/locate-chat-turn";
-import { prepareSkillText, compileSelectedSkillRefs, namedSkillIssue, nativeSkillInputEnabled, selectedSkillIssue, skillSelectionIssue, type ChatSkillChip, type ChatSkillSuggestionCatalog } from "../../domain/chat-skills";
+import { prepareSkillText, compileSelectedSkillRefs, namedSkillIssue, nativeSkillInputEnabled, selectedSkillIssue, skillInvocationToolNotice, skillSelectionIssue, type ChatSkillChip, type ChatSkillSuggestionCatalog } from "../../domain/chat-skills";
 import { insertDraftSkill, type SkillPosition, type SkillSelectionRange } from "../../domain/chat-skill-placement";
 import { rememberSubmittedSkillText } from "../../composables/chatSkillPositions";
 
@@ -179,35 +179,27 @@ const fileWorkspace = computed(() => {
   return value && value.context === chatStore.context?.contextId && value.session === chatStore.selectedSessionId && previewEnabled.value ? value.path : null;
 });
 provide(messageFileWorkspaceKey, fileWorkspace);
-provide(messageFileServicesKey, computed(() => {
+provide(messageFileLocationKey, computed(() => {
   const context = chatStore.context?.contextId;
   const session = chatStore.selectedSessionId;
   if (!context || !session || !previewEnabled.value) return undefined;
-  const pending = new Map<string, Promise<MessageFileLocation>>();
+  const pending = new Map<string, Promise<string>>();
   const active = () => previewEnabled.value && chatStore.context?.contextId === context && chatStore.selectedSessionId === session;
-  function sourceFor(target: MessageLinkTarget, file: MessageFileReference) {
+  return async (target, file) => {
     if (target.sessionId !== session || !active()) throw new Error("file_location_unavailable");
-    return {kind: "messageFile" as const, ...target, reference: file.path};
-  }
-  return {
-    async locate(target, file) {
-      const source = sourceFor(target, file);
-      const key = JSON.stringify(source);
-      const existing = pending.get(key);
-      if (existing) return existing;
-      const request = documentPreviewClient.run(context, {action: "locate", viewId: crypto.randomUUID(), source}).then(result => {
-        if (!result.path || !active()) throw new Error("file_location_unavailable");
-        if (!file.path.startsWith("/") && result.path.endsWith("/" + file.path)) {
-          locatedWorkspace.value = {context, session, path: result.path.slice(0, -file.path.length - 1)};
-        }
-        return {path: result.path, fileInfo: result.fileInfo};
-      }).finally(() => pending.delete(key));
-      pending.set(key, request);
-      return request;
-    },
-    async save(target, file) {
-      await documentPreviewClient.run(context, {action: "saveMessageFile", viewId: crypto.randomUUID(), source: sourceFor(target, file)});
-    },
+    const source = {kind: "messageFile" as const, ...target, reference: file.path};
+    const key = JSON.stringify(source);
+    const existing = pending.get(key);
+    if (existing) return existing;
+    const request = documentPreviewClient.run(context, {action: "locate", viewId: crypto.randomUUID(), source}).then(result => {
+      if (!result.path || !active()) throw new Error("file_location_unavailable");
+      if (!file.path.startsWith("/") && result.path.endsWith("/" + file.path)) {
+        locatedWorkspace.value = {context, session, path: result.path.slice(0, -file.path.length - 1)};
+      }
+      return result.path;
+    }).finally(() => pending.delete(key));
+    pending.set(key, request);
+    return request;
   };
 }));
 function openArtifactFile(artifact: ArtifactProjection) {
@@ -394,7 +386,6 @@ const shopPreview = useChatShopPreview(() => chatStore.context?.contextId ?? nul
 const availableProjectId = computed(() => chatStore.projects.find(project =>
   project.projectId === selectedProjectId.value && project.available,
 )?.projectId ?? null);
-const workspaceSelectionValid = computed(() => isDraftMode.value || !sharedComposerDraftsEnabled || routeSessionId.value !== null || selectedProjectId.value === null || availableProjectId.value !== null);
 const submitting = ref(false);
 const workspacePicker = useChatWorkspaces({
   context: () => chatStore.context?.contextId ?? null,
@@ -405,6 +396,7 @@ const workspacePicker = useChatWorkspaces({
   create: name => chatStore.createWorkspace(name),
 });
 const composer = ref<ChatComposerHandle | null>(null);
+const newChatPermissionControl = ref<InstanceType<typeof ChatPermissionControl> | null>(null);
 const homeOpening = ref<InstanceType<typeof ChatHomeOpening> | null>(null);
 const homeOpeningDone = ref(false);
 watch([() => route.query.focus, () => composer.value], async ([focus]) => {
@@ -446,6 +438,10 @@ const {
   preservePositionWhile,
 } = useChatScroll(conversationScroller, conversationColumn);
 const submittedTurnAnchor = ref<{ sessionId: string; turnId: string; contextId: string | undefined } | null>(null);
+// Capture confirmed catalog facts for the accepted turn. Rendering history
+// against today's catalog would change what the user was told at invocation.
+const skillToolNotices = shallowReactive(new Map<string, Readonly<Record<string, string>>>());
+watch(() => chatStore.context?.contextId, () => skillToolNotices.clear(), { flush: "sync" });
 
 const isSessionRoute = computed(() => routeSessionId.value !== null);
 const selectedSession = computed(() => chatStore.sessions.find((session) =>
@@ -606,7 +602,7 @@ const models = useChatModels(() => chatStore.context?.contextId ?? null, () => r
   set: profile => { if (isNewDraftMode.value) sharedDrafts.planProfile = profile; else sharedDrafts.newProfile = profile; },
 } : undefined);
 const composerSendReadiness = computed(() => {
-  const workspaceReady = isSessionRoute.value || (workspaceSelectionValid.value && !workspacePicker.creating.value);
+  const workspaceReady = isSessionRoute.value || !workspacePicker.creating.value;
   const canSubmit = isDraftMode.value ? draft.canSubmit.value
     : normalPurposeReady.value && chatStore.canSend && permissionCanSend.value && expertSendReady.value;
   return workspaceReady && canSubmit ? models.readiness.value : "unavailable";
@@ -628,7 +624,7 @@ const delivery = useChatDelivery(
 );
 watch(isNewDraftMode, (active, previous) => {
   // Match the existing new-draft discard lifecycle, including its model intent.
-  if (previous && !active) { if (sharedComposerDraftsEnabled) sharedDrafts.planProfile = defaultModelProfile; else models.resetNew(); }
+  if (previous && !active) { if (sharedComposerDraftsEnabled) sharedDrafts.planProfile = CHAT_COMPOSER_DEFAULT_PROFILE; else models.resetNew(); }
 }, { flush: "post" });
 
 const marketChat = useMarketChat(
@@ -822,12 +818,11 @@ function flushTimelineAfterSelection(): void {
 }
 
 watch(
-  () => chatStore.projects,
-  (projects) => {
-    if (sharedComposerDraftsEnabled) return;
-    if (!projects.some(project => project.projectId === selectedProjectId.value && project.available)) {
-      selectedProjectId.value = null;
-    }
+  // Binding loads the projects and local readiness together. The temporary
+  // empty list during a rebind must not discard a saved draft selection.
+  [() => chatStore.isReady && chatStore.localReadiness !== null, selectedProjectId, availableProjectId],
+  ([ready, selected, available]) => {
+    if (ready && selected !== null && available === null) selectedProjectId.value = null;
   },
   { immediate: true },
 );
@@ -871,13 +866,9 @@ watch(
     if (!request || sessionId !== null || selectedSessionId !== null || isDraftMode.value) return;
     sharedDrafts.newWorkspaceTask = null;
     if (request.contextId !== contextId || !chatStore.hasAction("create_session") || !chatStore.hasAction("use_project")) return;
-    if (!chatStore.projects.some(project => project.projectId === request.projectId && project.available)) {
-      transientNotice.value = "所选工作空间已不可用，请重新选择后发送。";
-      return;
-    }
     selectedProjectId.value = request.projectId;
     await nextTick();
-    if (routeSessionId.value === null && selectedProjectId.value === request.projectId) composer.value?.focusInput?.();
+    if (routeSessionId.value === null && availableProjectId.value === request.projectId) composer.value?.focusInput?.();
   },
   { immediate: true, flush: "post" },
 );
@@ -1049,7 +1040,6 @@ async function submit(recoverExpert = false): Promise<void> {
   if (!normalPurposeReady.value || (!recoverExpert && !permissionCanSend.value)) return;
   if (!recoverExpert && !expertSendReady.value) return;
   if (recoverExpert && !expertSubmission.value) return;
-  if (!recoverExpert && !workspaceSelectionValid.value) { transientNotice.value = "所选工作空间已不可用，请重新选择或取消工作空间后发送。"; return; }
   const draftTargetAtStart = composerDraftTargetKey.value;
   const draftTextAtStart = prompt.value;
   const contextAtStart = chatStore.context?.contextId;
@@ -1062,7 +1052,15 @@ async function submit(recoverExpert = false): Promise<void> {
   const currentDraft = () => route.fullPath === routeAtStart && composerDraftTargetKey.value === draftTargetAtStart &&
     chatStore.context?.contextId === contextAtStart && prompt.value === draftTextAtStart && skillSelection.value === pickedSkills &&
     models.profile.value === profileAtStart && availableProjectId.value === projectAtStart && attachmentIds() === attachmentsAtStart;
+  const permission = permissions.state.value;
+  if (!recoverExpert && !isSessionRoute.value && permission?.mode === "full" && !permission.fullAccessConfirmed) {
+    if (!prepareConnectorSubmit()) return;
+    if (!await newChatPermissionControl.value?.requestFullAccess() || !currentDraft() ||
+      !permissionCanSend.value || permissions.state.value?.mode !== "full") return;
+    if (!await permissions.setMode("full", true) || !currentDraft() || !permissionCanSend.value) return;
+  }
   const turnSkills = [...pickedSkills];
+  let toolNotice = "";
   let addressesSkill = false;
   transientNotice.value = null;
   if (!recoverExpert && skillMarketplaceUiEnabled) {
@@ -1092,6 +1090,8 @@ async function submit(recoverExpert = false): Promise<void> {
           const issue = skills.operations[skill.id] ? "技能正在更新，请稍后重试" : selectedSkillIssue(skill, skills.skills);
           if (issue) { skillFeedback.value = namedSkillIssue(skill.displayName, issue); return; }
         }
+        const requested = new Set([...turnSkills, ...named.nativeMentions].map(skill => skill.id));
+        toolNotice = skills.skills.filter(skill => requested.has(skill.id)).map(skillInvocationToolNotice).filter(Boolean).join("\n");
       } finally {
         resolvingResource = false;
       }
@@ -1127,7 +1127,7 @@ async function submit(recoverExpert = false): Promise<void> {
     }
   }
   if (!recoverExpert && (!currentDraft() || !normalPurposeReady.value ||
-    !workspaceSelectionValid.value || !permissionCanSend.value || !models.ready.value || !expertSendReady.value)) return;
+    !permissionCanSend.value || !models.ready.value || !expertSendReady.value)) return;
   if (!recoverExpert && !prepareConnectorSubmit()) return;
   const focusSnapshot: ChatComposerFocusSnapshot | null = composer.value?.captureInputFocus() ?? null;
   submitting.value = true;
@@ -1142,6 +1142,13 @@ async function submit(recoverExpert = false): Promise<void> {
   try {
     const legacyMentions = import.meta.env.VITE_YIJIE_FEAT174_NATIVE_SKILLS !== "true" || !nativeSkillInputEnabled();
     const submission = prepareSkillText(draftTextAtStart, recoverExpert ? [] : turnSkills, legacyMentions);
+    function rememberSkillUse(sessionId: string, turnId: string): void {
+      if (recoverExpert) return;
+      rememberSubmittedSkillText(sessionId, turnId, submission, pickedSkills.length);
+      if (toolNotice && contextAtStart && contextAtStart === chatStore.context?.contextId) {
+        skillToolNotices.set(sessionId, { ...skillToolNotices.get(sessionId), [turnId]: toolNotice });
+      }
+    }
     const input = submission.text;
     const selectedRefs = nativeSkillInputEnabled() && !recoverExpert ? compileSelectedSkillRefs(turnSkills) : undefined;
     if (isSessionRoute.value) {
@@ -1156,7 +1163,7 @@ async function submit(recoverExpert = false): Promise<void> {
         actionErrorCode.value = chatStore.lastErrorCode ?? "chat_host_not_ready";
         return;
       }
-      if (!recoverExpert) rememberSubmittedSkillText(result.sessionId, result.turnId, submission);
+      rememberSkillUse(result.sessionId, result.turnId);
       if (
         chatComposerDraftKeyFromTarget(result.draftTarget) !== draftTargetAtStart ||
         composerDraftTargetKey.value !== draftTargetAtStart
@@ -1179,7 +1186,7 @@ async function submit(recoverExpert = false): Promise<void> {
       actionErrorCode.value = chatStore.lastErrorCode ?? "chat_host_not_ready";
       return;
     }
-    if (!recoverExpert) rememberSubmittedSkillText(result.sessionId, result.turnId, submission);
+    rememberSkillUse(result.sessionId, result.turnId);
     if (
       chatComposerDraftKeyFromTarget(result.draftTarget) !== draftTargetAtStart ||
       composerDraftTargetKey.value !== draftTargetAtStart
@@ -1333,9 +1340,10 @@ function artifactsForTimelineReference(
   const context = chatStore.context;
   const selectedSessionId = chatStore.selectedSessionId;
   if (readingFromCache.value && context && item.threadId === selectedSessionId) {
-    return (readingHistory.value?.turns.find(turn => turn.turnId === item.turnId)?.artifacts ?? [])
-      .filter(artifact => artifact.artifactId === block.artifactId)
-      .map(artifact => createArtifactProjection(item.threadId, item.turnId, artifact));
+    const records = readingHistory.value?.turns.find(turn => turn.turnId === item.turnId)?.artifacts ?? [];
+    // The history adapter keeps the last snapshot for each registered item ID.
+    const record = [...records].reverse().find(artifact => artifact.artifactId === block.artifactId);
+    return record ? [createArtifactProjection(item.threadId, item.turnId, record)] : [];
   }
   if (
     authority === null ||
@@ -1345,8 +1353,9 @@ function artifactsForTimelineReference(
     authority.sessionId !== selectedSessionId ||
     item.threadId !== selectedSessionId
   ) return Object.freeze([]);
-  return artifactStore.artifactsForTurn(item.threadId, item.turnId)
-    .filter((artifact) => artifact.artifactId === block.artifactId);
+  const record = artifactStore.artifactsForTurn(item.threadId, item.turnId)
+    .find(artifact => artifact.artifactId === block.artifactId);
+  return record ? [record] : [];
 }
 
 async function installDragDropListener(): Promise<void> {
@@ -1426,7 +1435,6 @@ onBeforeUnmount(() => {
       <p v-if="transientNotice" class="chat-entry__unsupported" role="alert">{{ transientNotice }}</p>
 
       <p v-if="!isDraftMode && runtimePermissionsEnabled && permissions.error.value" class="chat-workspace__composer-error" role="alert">{{ permissions.error.value }} <button type="button" @click="permissions.refresh">重试</button></p>
-      <p v-if="!isDraftMode && !workspaceSelectionValid" class="chat-workspace__composer-error" role="alert">所选工作空间已不可用，请重新选择或取消工作空间后发送。</p>
       <ScheduledDraftPanel v-if="isDraftMode" ref="draftPanel" :model="draft" @accepted="openDraftConversation" @view-plan="viewDraftPlan" @recover="recoverDraft" />
       <p v-if="chatModelsEnabled && (models.error.value || models.notice.value)" class="chat-workspace__composer-note chat-workspace__model-notice" role="status">
         {{ models.error.value || models.notice.value }}
@@ -1504,7 +1512,7 @@ onBeforeUnmount(() => {
           <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked || models.selectionLocked.value" :disabled-reason="models.selectionLocked.value ? models.error.value : modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" @select="models.select" />
         </template>
         <template v-if="!isDraftMode && runtimePermissionsEnabled" #permission-control>
-          <ChatPermissionControl :state="permissions.state.value" :disabled="!permissions.ready.value || permissions.busy.value" :saving="permissions.saving.value" @select="permissions.setMode" />
+          <ChatPermissionControl ref="newChatPermissionControl" :state="permissions.state.value" :disabled="!permissions.ready.value || permissions.busy.value" :saving="permissions.saving.value" @select="permissions.setMode" />
         </template>
       </ChatComposer>
     </div>
@@ -1563,6 +1571,7 @@ onBeforeUnmount(() => {
             v-if="conversationTimeline"
             :timeline="conversationTimeline"
             :skill-catalog="skills.skills"
+            :skill-tool-notices="routeSessionId ? skillToolNotices.get(routeSessionId) : undefined"
             :turn-timing-labels="turnTimingLabels"
             :delivered-artifact-turn-ids="deliveredArtifactTurnIds"
             :connector-names-by-turn="connectorNamesByTurn"
@@ -1693,7 +1702,6 @@ onBeforeUnmount(() => {
       </p>
       <p v-if="transientNotice" class="chat-workspace__composer-error" role="alert">{{ transientNotice }}</p>
       <p v-if="!isDraftMode && runtimePermissionsEnabled && permissions.error.value" class="chat-workspace__composer-error" role="alert">{{ permissions.error.value }} <button type="button" @click="permissions.refresh">重试</button></p>
-      <p v-if="!isDraftMode && !workspaceSelectionValid" class="chat-workspace__composer-error" role="alert">所选工作空间已不可用，请重新选择或取消工作空间后发送。</p>
       <ScheduledDraftPanel v-if="isDraftMode" ref="draftPanel" :model="draft" @accepted="openDraftConversation" @view-plan="viewDraftPlan" @recover="recoverDraft" />
       <p v-if="chatModelsEnabled && (models.error.value || models.notice.value)" class="chat-workspace__composer-note chat-workspace__model-notice" role="status">
         {{ models.error.value || models.notice.value }}

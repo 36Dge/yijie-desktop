@@ -46,6 +46,7 @@ import {
 CHAT_NEW_DRAFT_TARGET,
 ChatClientError,
 chatSessionDraftTarget,
+type ChatArtifact,
 type ChatAttachment,
 type ChatAttachmentImportEvent,
 type ChatHistoryPage,
@@ -115,9 +116,10 @@ vi.mock("@tauri-apps/api/webview", () => ({
 const PROJECT_ID = "019c1a00-0000-7000-8000-000000000001";
 const SESSION_ID = "019c1a00-0000-7000-8000-000000000002";
 const TURN_ID = "019c1a00-0000-7000-8000-000000000003";
-const pageDefaultProfile = kimiK31Candidate ? "kimi-k3-1-pro-high-v1" : "kimi-k3-max-v1";
+const kimiProfile = kimiK31Candidate ? "kimi-k3-1-pro-high-v1" : "kimi-k3-max-v1";
+const newChatProfile = "minimax-m3-high-v1";
 const sessionModel = { profileId: "minimax-m3-high-v1", revision: 3, state: "ready" } as const;
-const newTaskModelArgs = chatModelsEnabled ? [{ profileId: pageDefaultProfile, expectedRevision: 0 }] : [];
+const newTaskModelArgs = chatModelsEnabled ? [{ profileId: newChatProfile, expectedRevision: 0 }] : [];
 const replyModelArgs = chatModelsEnabled ? [{ profileId: sessionModel.profileId, expectedRevision: sessionModel.revision }] : [];
 
 function acceptedSubmission(
@@ -326,7 +328,7 @@ beforeEach(() => {
   const profiles = kimiK31Candidate ? currentModelDefinitions : modelDefinitions;
   vi.spyOn(chatModelClient, "catalog").mockResolvedValue(parseModelCatalog({
     schema_version: kimiK31Candidate ? 2 : 1,
-    default_profile: pageDefaultProfile,
+    default_profile: kimiProfile,
     models: profiles.map(profile => ({ profile, available: true, reason: "ready" })),
   }));
   vi.spyOn(chatModelClient, "state").mockResolvedValue(sessionModel);
@@ -436,27 +438,77 @@ describe("FEAT-126 ChatPage", () => {
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(924);
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 336, 600));
     const native = vi.spyOn(documentPreviewClient, "run").mockImplementation(async (_context, action) => ({
-      status: action.action === "locate" ? "located" : action.action === "saveMessageFile" ? "cancelled" : action.action === "open" ? "ready" : "closed",
+      status: action.action === "locate" ? "located" : action.action === "open" ? "ready" : "closed",
       viewId: action.viewId, position: null,
-      ...(action.action === "locate" && {path: path.startsWith("/") ? path : "/work/" + path, fileInfo: {sizeBytes: 37817, saveSupported: true}}),
+      ...(action.action === "locate" && {path: path.startsWith("/") ? path : "/work/" + path}),
       document: action.action === "open" ? {kind:"text", revision:"a".repeat(64), expiresAt:Math.floor(Date.now()/1000)+600,
         sections:[],section:0,offset:0,nextOffset:null,previousOffset:null,partial:false,notice:null} : null,
     }));
     const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true, history);
-    const cards = wrapper.findAll(".chat-artifact-document-card");
-    expect(cards.map(card => card.get(".chat-artifact-document-card__name").text())).toEqual([name]);
-    expect(wrapper.find(".chat-file-link").exists()).toBe(false);
+    expect(wrapper.find(".chat-artifact-document-card").exists()).toBe(false);
+    const link = wrapper.get(".chat-file-link");
+    expect(link.text()).toBe(`《${name}》`);
     const source = {kind:"messageFile", sessionId:SESSION_ID,turnId:TURN_ID,itemId:`${TURN_ID}:assistant:0`,reference:path};
-    expect(cards[0]!.get(".chat-artifact-document-card__size").text()).toBe("36.9 KB");
-    expect(native).toHaveBeenCalledExactlyOnceWith(store.context!.contextId, expect.objectContaining({action:"locate", source}));
-    await cards[0]!.get('button[aria-label="另存为"]').trigger("click"); await flushPromises();
-    expect(native).toHaveBeenCalledWith(store.context!.contextId, expect.objectContaining({action:"saveMessageFile", source}));
+    expect(native).not.toHaveBeenCalled();
     expect(wrapper.find('[role="tab"][aria-selected="true"]').exists()).toBe(false);
-    await cards[0]!.get(`button[aria-label="预览 ${name}"]`).trigger("click"); await flushPromises();
+    await link.trigger("click"); await flushPromises();
     expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toBe(name);
     expect(native).toHaveBeenCalledWith(store.context!.contextId, expect.objectContaining({
       action:"open", source,
     }));
+  });
+
+  it.skipIf(!kimiK31Candidate)("shows one card per registered document ID alongside ordinary links, including cached history", async () => {
+    const title = "苏州与杭州简单对比";
+    const answer = `已生成文档。\n\n[打开文档](</work/易界 temp/${title}.html>)\n\n参考 [城市资料](./资料.pdf)。`;
+    const turn = HISTORY_WITHOUT_REASONING.turns[0]!;
+    const messages = turn.messages.map(message => message.role === "assistant" ? {...message, content: answer} : message);
+    const history = {turns: [{...turn, messages}], nextCursor: null};
+    const {wrapper, store, pinia} = await mountPage(`/chat/${SESSION_ID}`, true, history);
+    const titles = () => wrapper.findAll(".chat-artifact-document-card__name").map(card => card.text());
+    expect(titles()).toEqual([]);
+    expect(wrapper.findAll(".chat-file-link").map(link => link.text())).toEqual([`《${title}.html》`, "《资料.pdf》"]);
+
+    const file: ChatArtifact = {artifactId: "019c1a00-0000-7000-8000-000000000021", kind: "file", provenance: "provider",
+      status: "ready", ordinal: 0, displayName: title, mediaType: "text/html", sizeBytes: 6010,
+      localCommittedAt: 1000, expiresAt: 2_000_000_000, progressStage: null, progressPercent: null,
+      hasPoster: false, errorCode: null, retryable: null};
+    const artifacts = useArtifactStore(pinia);
+    artifacts.replaceAuthority({authorizationRevision: 7, contextId: store.context!.contextId, tenantId: PROJECT_ID, sessionId: SESSION_ID});
+    function deliver(records: ChatArtifact[]) {
+      const page = {turns: [{...turn, messages, artifacts: records}], nextCursor: null};
+      artifacts.ingestHistoryV3(artifacts.captureAuthority(), page);
+      setHistoryProjection(store, page);
+    }
+    const announced: ChatArtifact = {...file, status: "announced", mediaType: null, sizeBytes: null, localCommittedAt: null, expiresAt: null};
+    deliver([announced, file]);
+    await flushPromises();
+    expect(titles()).toEqual([title]);
+    const other = {...file, artifactId: "019c1a00-0000-7000-8000-000000000022", ordinal: 1};
+    deliver([file, {...announced, artifactId: other.artifactId, ordinal: other.ordinal}, other]);
+    await flushPromises();
+    expect(titles()).toEqual([title, title]);
+
+    vi.spyOn(chatClient, "listDraftAttachments").mockResolvedValue([]);
+    await store.clearSelectedSession();
+    let resume!: () => void;
+    vi.spyOn(chatClient, "getSessionPurpose").mockImplementationOnce(async () => {
+      await new Promise<void>(resolve => { resume = resolve; });
+      return {sessionId: SESSION_ID, purpose: "ordinary"};
+    });
+    const reopening = store.selectSession(SESSION_ID);
+    try {
+      await flushPromises();
+      expect(store.readingView.cached).toBe(true);
+      expect(titles()).toEqual([title, title]);
+      expect(wrapper.findAllComponents(ChatArtifactList).flatMap(list => list.props("artifacts").map(record => record.artifactId)))
+        .toEqual([file.artifactId, other.artifactId]);
+      expect(wrapper.findAll(".chat-file-link")).toHaveLength(2);
+    } finally {
+      await store.clearSelectedSession();
+      resume();
+      await reopening;
+    }
   });
 
   it.skipIf(!kimiK31Candidate)("hides the duplicate preview trigger while open and restores keyboard focus after collapsing", async () => {
@@ -678,19 +730,19 @@ describe("FEAT-126 ChatPage", () => {
     await flushPromises();
     expect(control.props("disabled")).toBe(true);
     expect(control.props("disabledReason")).toContain("仅可查看");
-    control.vm.$emit("select", pageDefaultProfile);
+    control.vm.$emit("select", kimiProfile);
     await flushPromises();
     expect(select).not.toHaveBeenCalled();
     store.selectedAccessMode = "live";
     store.context = {...store.context!, allowedActions:["read_sessions"]};
     await flushPromises();
     expect(control.props("disabled")).toBe(true);
-    control.vm.$emit("select", pageDefaultProfile);
+    control.vm.$emit("select", kimiProfile);
     await flushPromises();
     expect(select).not.toHaveBeenCalled();
   });
 
-  it.skipIf(!chatModelsEnabled || !kimiK31Candidate)("keeps the draft until the user selects an available model", async () => {
+  it.skipIf(!chatModelsEnabled || !kimiK31Candidate)("lists MiniMax first and sends a fresh draft with it while Kimi is paused", async () => {
     vi.mocked(chatModelClient.catalog).mockResolvedValue(parseModelCatalog({
       schema_version: 2,
       default_profile: "kimi-k3-1-pro-high-v1",
@@ -706,18 +758,17 @@ describe("FEAT-126 ChatPage", () => {
       const send = composer.get<HTMLButtonElement>(".chat-composer__send");
       const draft = "保留当前草稿";
       await input.setValue(draft);
-      expect(send.element.disabled).toBe(true);
-      await input.trigger("keydown", { key: "Enter" });
-      expect(create).not.toHaveBeenCalled();
-      await composer.get(".model-trigger").trigger("click");
+      const trigger = composer.get(".model-trigger");
+      expect(trigger.text()).toBe("MiniMax-M3");
+      await trigger.trigger("click");
       await flushPromises();
       const menu = new DOMWrapper(document.querySelector(".model-menu")!);
       const options = menu.findAll<HTMLButtonElement>('button[role="menuitemradio"]');
-      const kimiOptions = options.filter(option => option.text().includes("Kimi K3.1 Pro"));
-      expect(kimiOptions).toHaveLength(1);
-      expect(kimiOptions[0]!.get(".model-option-label").text()).toBe("Kimi K3.1 Pro");
-      expect(kimiOptions[0]!.element.disabled).toBe(true);
-      await options.find(option => option.text() === "MiniMax-M3")!.trigger("click");
+      expect(options.map(option => option.get(".model-option-label").text()))
+        .toEqual(["MiniMax-M3", "Kimi K3.1 Pro", "Deepseek-V4-Pro", "GLM-5.3"]);
+      expect(options[0]!.attributes("aria-checked")).toBe("true");
+      expect(options.map(option => option.element.disabled)).toEqual([false, true, true, true]);
+      await menu.trigger("keydown", { key: "Escape" });
       expect(input.element.value).toBe(draft);
       expect(send.element.disabled).toBe(false);
       await send.trigger("click");
@@ -726,8 +777,38 @@ describe("FEAT-126 ChatPage", () => {
     } finally { wrapper.unmount(); }
   });
 
+  it.skipIf(!chatModelsEnabled)("keeps the draft until an available model is selected when MiniMax is unavailable", async () => {
+    const profiles = kimiK31Candidate ? currentModelDefinitions : modelDefinitions;
+    vi.mocked(chatModelClient.catalog).mockResolvedValue(parseModelCatalog({
+      schema_version: kimiK31Candidate ? 2 : 1,
+      default_profile: kimiProfile,
+      models: profiles.map(profile => profile.provider === "minimax"
+        ? { profile, available: false, reason: "not_configured" }
+        : { profile, available: true, reason: "ready" }),
+    }));
+    const { wrapper, store } = await mountPage("/chat");
+    const create = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
+    const composer = wrapper.getComponent(ChatComposer);
+    const input = composer.get("textarea");
+    const send = composer.get<HTMLButtonElement>(".chat-composer__send");
+    await input.setValue("保留当前草稿");
+    expect(send.element.disabled).toBe(true);
+    await input.trigger("keydown", { key: "Enter" });
+    expect(create).not.toHaveBeenCalled();
+    await composer.get(".model-trigger").trigger("click");
+    await flushPromises();
+    const menu = new DOMWrapper(document.querySelector(".model-menu")!);
+    expect(menu.get('[aria-checked="true"]').get(".model-option-label").text()).toBe("MiniMax-M3");
+    await menu.get('button:not(:disabled)').trigger("click");
+    expect(input.element.value).toBe("保留当前草稿");
+    expect(send.element.disabled).toBe(false);
+    await send.trigger("click");
+    await flushPromises();
+    expect(create).toHaveBeenCalledExactlyOnceWith(null, "保留当前草稿", { profileId: kimiProfile, expectedRevision: 0 });
+  });
+
   it.skipIf(!chatModelsEnabled || !kimiK31Candidate)("holds the model label and send button through a pending model switch", async () => {
-    vi.spyOn(chatModelClient, "state").mockResolvedValue({ profileId: pageDefaultProfile, revision: 0, state: "ready" });
+    vi.spyOn(chatModelClient, "state").mockResolvedValue({ profileId: kimiProfile, revision: 0, state: "ready" });
     let confirm!: (result: ModelState) => void;
     vi.spyOn(chatModelClient, "select").mockImplementation(() => new Promise(resolve => { confirm = resolve; }));
     const { wrapper } = await mountPage(`/chat/${SESSION_ID}`, true);
@@ -741,6 +822,7 @@ describe("FEAT-126 ChatPage", () => {
       await trigger.trigger("click");
       await flushPromises();
       const menu = new DOMWrapper(document.querySelector(".model-menu")!);
+      expect(menu.get('[role="menuitemradio"]').text()).toBe("MiniMax-M3");
       expect(menu.get('[aria-checked="true"]').text()).toBe("Kimi K3.1 Pro");
       await menu.findAll('button[role="menuitemradio"]').find(option => option.text() === "MiniMax-M3")!.trigger("click");
       expect(trigger.text()).toBe("Kimi K3.1 Pro");
@@ -786,12 +868,12 @@ describe("FEAT-126 ChatPage", () => {
     const select = vi.spyOn(chatModelClient, "select");
     const {wrapper,router} = await mountPage("/chat?create=schedule", false, HISTORY, async () => false, false, {ScheduledDraftPanel: true});
     await flushPromises();
-    wrapper.getComponent(ChatModelControl).vm.$emit("select", "minimax-m3-high-v1");
+    wrapper.getComponent(ChatModelControl).vm.$emit("select", kimiProfile);
     await flushPromises();
-    expect(wrapper.getComponent(ChatModelControl).props("profile")).toBe("minimax-m3-high-v1");
+    expect(wrapper.getComponent(ChatModelControl).props("profile")).toBe(kimiProfile);
     await router.push("/chat");
     await flushPromises();
-    expect(wrapper.getComponent(ChatModelControl).props("profile")).toBe(pageDefaultProfile);
+    expect(wrapper.getComponent(ChatModelControl).props("profile")).toBe(newChatProfile);
     expect(select).not.toHaveBeenCalled();
     wrapper.unmount();
   });
@@ -801,15 +883,15 @@ describe("FEAT-126 ChatPage", () => {
     const select = vi.spyOn(chatModelClient, "select");
     const {wrapper,router,pinia} = await mountPage("/chat?create=schedule", false, HISTORY, async () => false, false, {ScheduledDraftPanel: true});
     const drafts = useChatComposerDraftStore(pinia);
-    drafts.newProfile = "minimax-m3-high-v1";
-    wrapper.getComponent(ChatModelControl).vm.$emit("select", "minimax-m3-high-v1");
+    drafts.newProfile = kimiProfile;
+    wrapper.getComponent(ChatModelControl).vm.$emit("select", kimiProfile);
     await flushPromises();
-    expect(drafts.planProfile).toBe("minimax-m3-high-v1");
+    expect(drafts.planProfile).toBe(kimiProfile);
     await router.push("/chat"); await flushPromises();
-    expect(drafts.planProfile).toBe(pageDefaultProfile);
-    expect(drafts.newProfile).toBe("minimax-m3-high-v1");
+    expect(drafts.planProfile).toBe(newChatProfile);
+    expect(drafts.newProfile).toBe(kimiProfile);
     await router.push("/chat?create=schedule"); await flushPromises();
-    expect(wrapper.getComponent(ChatModelControl).props("profile")).toBe(pageDefaultProfile);
+    expect(wrapper.getComponent(ChatModelControl).props("profile")).toBe(newChatProfile);
     expect(select).not.toHaveBeenCalled();
     wrapper.unmount();
   });
@@ -1220,7 +1302,7 @@ describe("FEAT-126 ChatPage", () => {
     const { wrapper } = await mountPage(`/chat/${SESSION_ID}`, true, codeHistory);
 
     expect(wrapper.findComponent(ChatTimeline).exists()).toBe(true);
-    const codeCopy = wrapper.get('[aria-label="复制代码"]');
+    const codeCopy = wrapper.get('[aria-label="复制信息"]');
     await codeCopy.trigger("click");
     await flushPromises();
 
@@ -1622,22 +1704,44 @@ describe("FEAT-126 ChatPage", () => {
     wrapper.unmount();
   });
 
-  it("clears an unavailable chosen directory without silently selecting another saved project", async () => {
-    vi.spyOn(chatWorkspaceClient, "catalog").mockResolvedValue({ rootPath: "/Users/example/Yijie/Workspaces", workspaces: [] });
-    const { wrapper, store } = await mountPage("/chat");
-    vi.spyOn(store, "pickProject").mockResolvedValue(PROJECT);
-    wrapper.getComponent(ChatWorkspaceControl).vm.$emit("open-local");
-    await flushPromises();
+  it.each([
+    { shared: false, state: "unavailable" }, { shared: true, state: "unavailable" },
+    { shared: false, state: "removed" }, { shared: true, state: "removed" },
+  ])("clears the selected workspace when it is $state and keeps the draft sendable (shared drafts=$shared)", async ({ shared, state }) => {
+    expertFlag.enabled = shared;
+    const { wrapper, store, pinia } = await mountPage("/chat");
+    const create = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
+    wrapper.getComponent(ChatWorkspaceControl).vm.$emit("select", PROJECT_ID);
+    await wrapper.get("textarea").setValue("无目录继续发送");
     expect(wrapper.get(".chat-composer__project").text()).toBe("Synthetic Workspace");
-    store.projects = [{ ...PROJECT, available: false }, SECOND_PROJECT];
+    store.projects = state === "removed" ? [SECOND_PROJECT] : [{ ...PROJECT, available: false }, SECOND_PROJECT];
     await flushPromises();
     expect(wrapper.get(".chat-composer__project").text()).toBe("选择工作空间");
-    const create = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
-    await wrapper.get("textarea").setValue("无目录继续发送");
+    expect(wrapper.text()).not.toContain("所选工作空间已不可用");
+    expect(useChatComposerDraftStore(pinia).workspaceId).toBeNull();
+    expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeUndefined();
     await wrapper.get('[aria-label="发送任务"]').trigger("click");
     await flushPromises();
     expect(create).toHaveBeenCalledWith(null, "无目录继续发送", ...newTaskModelArgs);
     wrapper.unmount();
+  });
+
+  it("keeps a valid shared workspace while the project list reloads", async () => {
+    expertFlag.enabled = true;
+    const { wrapper, store, pinia } = await mountPage("/chat");
+    wrapper.getComponent(ChatWorkspaceControl).vm.$emit("select", PROJECT_ID);
+    const readiness = store.localReadiness;
+    store.phase = "binding";
+    store.localReadiness = null;
+    store.projects = [];
+    await flushPromises();
+    expect(useChatComposerDraftStore(pinia).workspaceId).toBe(PROJECT_ID);
+    expect(wrapper.text()).not.toContain("所选工作空间已不可用");
+    store.projects = [PROJECT];
+    store.localReadiness = readiness;
+    store.phase = "ready";
+    await flushPromises();
+    expect(wrapper.get(".chat-composer__project").text()).toBe("Synthetic Workspace");
   });
 
   it("keeps input and displays stable recovery copy when create fails", async () => {
@@ -1835,6 +1939,94 @@ describe("FEAT-126 ChatPage", () => {
     wrapper.unmount();
   });
 
+  it.each([false, true])("submits a skill-only slash selection and reports confirmed tool conditions in the accepted turn (reply=%s)", async reply => {
+    skillFlag.enabled = true;
+    vi.stubEnv("VITE_YIJIE_NATIVE_SKILL_INPUT_ENABLED", "true");
+    vi.stubEnv("VITE_YIJIE_FEAT174_NATIVE_SKILLS", "true");
+    const entry = { ...installedSkill, requiredTools: ["orders"], dependencyState: "unknown" as const };
+    vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "", skills: [entry] });
+    const { wrapper, store, pinia } = await mountPage(reply ? `/chat/${SESSION_ID}` : "/chat", reply);
+    const catalog = useSkillStore(pinia);
+    catalog.skills = [entry]; catalog.phase = "ready";
+    const refresh = vi.spyOn(catalog, "open").mockResolvedValue();
+    const send = reply ? vi.spyOn(store, "submitTurnWithResult").mockResolvedValue(acceptedSubmission(SESSION_ID, chatSessionDraftTarget(SESSION_ID)))
+      : vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
+    const input = wrapper.get("textarea");
+    await input.setValue("/文案");
+    await input.trigger("keydown", { key: "Enter" });
+    await flushPromises();
+    expect(send).not.toHaveBeenCalled();
+    expect(wrapper.find(".chat-turn-group__skill-tools").exists()).toBe(false);
+    refresh.mockImplementation(async () => { catalog.skills = [{ ...entry, dependencyState: "needs_authorization" }]; });
+    const button = wrapper.get('[aria-label="发送任务"]');
+    expect(button.attributes("disabled")).toBeUndefined();
+    await button.trigger("click"); await flushPromises();
+    expect(send).toHaveBeenCalledOnce();
+    expect(send.mock.calls[0]?.[reply ? 0 : 1]).toBe("【技能1 $copywriting】");
+    expect(send.mock.calls[0]?.[reply ? 4 : 5]).toEqual([{ id: entry.id, version: entry.version }]);
+    if (reply) expect(wrapper.get(`[data-turn-id="${TURN_ID}"] .chat-turn-group__skill-tools`).text()).toContain("「orders」尚未授权");
+    wrapper.unmount();
+  });
+
+  it("keeps the first picker choice out of both ordinary and named follow-up bubbles in one conversation", async () => {
+    skillFlag.enabled = true;
+    vi.stubEnv("VITE_YIJIE_NATIVE_SKILL_INPUT_ENABLED", "true");
+    vi.stubEnv("VITE_YIJIE_FEAT174_NATIVE_SKILLS", "true");
+    vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "", skills: [installedSkill] });
+    const { wrapper, store, router, pinia } = await mountPage("/chat");
+    const skills = useSkillStore(pinia);
+    skills.skills = [installedSkill]; skills.phase = "ready";
+    vi.spyOn(skills, "open").mockResolvedValue();
+    const ids = ["first-pick", "plain-reply", "named-reply"];
+    const target = chatSessionDraftTarget(SESSION_ID);
+    const create = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission(SESSION_ID, CHAT_NEW_DRAFT_TARGET, ids[0]));
+    const reply = vi.spyOn(store, "submitTurnWithResult")
+      .mockResolvedValueOnce(acceptedSubmission(SESSION_ID, target, ids[1]))
+      .mockResolvedValueOnce(acceptedSubmission(SESSION_ID, target, ids[2]));
+
+    const input = wrapper.get("textarea");
+    input.element.focus();
+    await input.setValue("/文案");
+    await input.trigger("keydown", { key: "Enter" }); await flushPromises();
+    const editor = wrapper.get('[contenteditable="true"]');
+    editor.element.append(document.createTextNode("整理商品标题。"));
+    await editor.trigger("input");
+    await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();
+    expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
+    expect(useChatComposerDraftStore(pinia).skillSelection("new")).toEqual([]);
+    store.sessions = [SESSION]; store.selectedSessionId = SESSION_ID;
+    store.selectedSessionPurpose = "ordinary"; store.selectedAccessMode = "live";
+    store.draftTarget = target; store.draftTargetReady = true;
+    setHistoryProjection(store, { turns: [], nextCursor: null });
+    await flushPromises();
+
+    const followups = ["把上一版缩短到三句话。", `请使用${installedSkill.displayName}技能写标题。`];
+    for (const text of followups) {
+      expect(useChatComposerDraftStore(pinia).skillSelection(`session:${SESSION_ID}`)).toEqual([]);
+      await wrapper.get("textarea").setValue(text);
+      await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();
+    }
+    expect(create).toHaveBeenCalledOnce();
+    expect(reply).toHaveBeenCalledTimes(2);
+    const inputs = [create.mock.calls[0]![1], ...reply.mock.calls.map(call => call[0])];
+    const refs = [create.mock.calls[0]![5], ...reply.mock.calls.map(call => call[4])];
+    const identity = [{ id: installedSkill.id, version: installedSkill.version }];
+    expect(refs).toEqual([identity, undefined, identity]);
+    expect(inputs.slice(1)).toEqual(followups);
+    setHistoryProjection(store, { nextCursor: null, turns: inputs.map((text, i) => ({
+      ...HISTORY.turns[0]!, turnId: ids[i]!, messages: [{
+        messageId: ids[i]!, role: "user", status: "committed", createdAt: i + 1, ordinal: 0, content: text,
+        contentBlocks: [{ type: "text", text, ...(refs[i] && { skills: refs[i] }) }],
+      }],
+    })) });
+    await flushPromises();
+    for (const [i, turnId] of ids.entries()) {
+      const bubble = wrapper.get(`[data-turn-id="${turnId}"] .chat-timeline-item-shell--user`);
+      expect(bubble.findAll(".chat-skill-pill").map(pill => pill.text())).toEqual(i === 0 ? [installedSkill.displayName] : []);
+      if (i > 0) expect(bubble.get(".chat-safe-content__paragraph").text()).toBe(followups[i - 1]);
+    }
+  });
+
   it("inserts a picker skill at the saved caret and records its position only after acceptance", async () => {
     const storage = { getItem: () => null, setItem: vi.fn() };
     vi.stubGlobal("localStorage", storage);
@@ -1869,7 +2061,7 @@ describe("FEAT-126 ChatPage", () => {
       const body = "商品📦【技能1 $copywriting】请优化。";
       expect(submit.mock.calls[1]?.[0]).toBe(body);
       expect(submit.mock.calls[1]?.[4]).toEqual([{ id: installedSkill.id, version: installedSkill.version }]);
-      expect(storage.setItem).toHaveBeenCalledWith(key, JSON.stringify({ length: body.length, offsets: [4] }));
+      expect(storage.setItem).toHaveBeenCalledWith(key, JSON.stringify({ length: body.length, offsets: [4], pickedCount: 1 }));
     } finally { wrapper.unmount(); }
   });
 
@@ -2523,7 +2715,7 @@ describe("FEAT-126 ChatPage", () => {
     vi.stubEnv("VITE_YIJIE_ENV", "local");
     vi.stubEnv("VITE_YIJIE_LOCAL_PROFILE", "demo_fast");
     vi.stubEnv("VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED", "true");
-    const get = vi.spyOn(runtimePermissionClient, "get").mockResolvedValue({ mode: "ask", busy: false, fullAccessConfirmed: false });
+    const get = vi.spyOn(runtimePermissionClient, "get").mockResolvedValue({ mode: active ? "ask" : "full", busy: false, fullAccessConfirmed: false });
     vi.spyOn(runtimePermissionClient, "approvals").mockResolvedValue([]);
     const { wrapper, store } = await mountPage(active ? `/chat/${SESSION_ID}` : "/chat", active);
     try {
@@ -2534,8 +2726,50 @@ describe("FEAT-126 ChatPage", () => {
       await flushPromises();
       const options = [...document.querySelectorAll('[role="menuitemradio"]')];
       expect(options).toHaveLength(3);
-      expect(options.map((option) => option.getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
+      expect(options.map((option) => option.getAttribute("aria-checked"))).toEqual(active ? ["true", "false", "false"] : ["false", "false", "true"]);
       expect(options.map((option) => option.textContent).join(" ")).toContain("帮我批准");
+    } finally { wrapper.unmount(); }
+  });
+
+  it.each(["saved", "first-use", "save-failed"] as const)("submits a new full-access chat only with a native confirmation (%s)", async (scenario) => {
+    vi.stubEnv("VITE_YIJIE_ENV", "local");
+    vi.stubEnv("VITE_YIJIE_LOCAL_PROFILE", "demo_fast");
+    vi.stubEnv("VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED", "true");
+    const state = { mode: "full" as const, busy: false, fullAccessConfirmed: scenario === "saved" };
+    vi.spyOn(runtimePermissionClient, "get").mockImplementation(async () => ({ ...state }));
+    vi.spyOn(runtimePermissionClient, "approvals").mockResolvedValue([]);
+    const save = vi.spyOn(runtimePermissionClient, "set").mockImplementation(async () => {
+      if (scenario === "save-failed") throw new Error("permission save unavailable");
+      state.fullAccessConfirmed = true;
+      return { ...state };
+    });
+    const { wrapper, store } = await mountPage("/chat");
+    try {
+      const create = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
+      const input = wrapper.get("textarea");
+      await input.setValue("整理商品清单");
+      expect(wrapper.get(".permission-trigger").text()).toBe("完全访问");
+      const send = wrapper.get('[aria-label="发送任务"]');
+      await send.trigger("click"); await flushPromises();
+      if (scenario === "saved") {
+        expect(document.querySelector(".permission-confirm")).toBeNull();
+        expect(save).not.toHaveBeenCalled();
+      } else {
+        expect(create).not.toHaveBeenCalled();
+        expect(save).not.toHaveBeenCalled();
+        document.querySelector<HTMLButtonElement>(".permission-confirm-cancel")!.click();
+        await flushPromises();
+        expect(input.element.value).toBe("整理商品清单");
+        expect(create).not.toHaveBeenCalled();
+        await send.trigger("click"); await flushPromises();
+        const allow = document.querySelector<HTMLButtonElement>(".permission-confirm-primary")!;
+        expect(allow.disabled).toBe(true);
+        document.querySelector<HTMLElement>(".permission-confirm-acknowledgement")!.click();
+        await flushPromises();
+        allow.click(); await flushPromises();
+        expect(save).toHaveBeenCalledExactlyOnceWith(store.context!.contextId, null, "full", true);
+      }
+      expect(create).toHaveBeenCalledTimes(scenario === "save-failed" ? 0 : 1);
     } finally { wrapper.unmount(); }
   });
 

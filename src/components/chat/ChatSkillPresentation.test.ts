@@ -30,6 +30,34 @@ function timeline() {
 }
 
 describe("skill pills in sent messages", () => {
+  it.each([
+    { kind: "ordinary", text: "把上一版缩短到三句话。", invoked: false },
+    { kind: "named", text: `请使用${invoice.displayName}技能帮我核对金额。`, invoked: true },
+  ])("shows only the current picker choices around a $kind follow-up in the same conversation", ({ kind, text, invoked }) => {
+    const thread = `picker-turns-${kind}`;
+    const picked = [{ ...invoice, offset: 0 }];
+    const refs = compileSelectedSkillRefs(picked);
+    const steps = [
+      { text: prepareSkillText("核对第一份资料。", picked, false).text, refs },
+      { text, refs: invoked ? refs : [] },
+      { text: prepareSkillText("核对另一份资料。", picked, false).text, refs },
+    ];
+    const snapshot = historyPageToConversationSnapshot(thread, { nextCursor: null, turns: steps.map((step, i) => ({
+      turnId: `turn-${i}`, status: "completed", terminalAt: i + 1, reasoningStatus: "unavailable", reasoningReasonCode: null, reasoning: [],
+      messages: [{ messageId: `message-${i}`, role: "user", status: "committed", createdAt: i + 1, ordinal: 0,
+        content: step.text, contentBlocks: [{ type: "text", text: step.text, ...(step.refs.length && { skills: step.refs }) }] }],
+    })) });
+    const wrapper = mount(ChatTimeline, { props: {
+      timeline: selectConversationTimeline(viewFromLegacySnapshot(snapshot), thread)!, skillCatalog: [invoice],
+    } });
+    try {
+      const bubbles = wrapper.findAll(".chat-timeline-item-shell--user");
+      expect(bubbles).toHaveLength(3);
+      expect(bubbles.map(bubble => bubble.findAll(".chat-skill-pill").map(pill => pill.text()))).toEqual([[invoice.displayName], [], [invoice.displayName]]);
+      expect(bubbles[1]!.get(".chat-safe-content__paragraph").text()).toBe(text);
+    } finally { wrapper.unmount(); }
+  });
+
   it("rehydrates saved identities through both history read commands without submitting a turn", async () => {
     const sessionId = "10000000-0000-4000-8000-000000000001", turnId = "10000000-0000-4000-8000-000000000002";
     const contextId = "10000000-0000-4000-8000-000000000003", subscriptionId = "10000000-0000-4000-8000-000000000004";

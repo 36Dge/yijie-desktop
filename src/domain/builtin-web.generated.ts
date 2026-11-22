@@ -104,6 +104,7 @@ export type AppErrorCode =
   | "busy"
   | "upstream_unavailable"
   | "timeout"
+  | "url_blocked"
   | "no_content"
   | "response_too_large"
   | "invalid_response"

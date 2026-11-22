@@ -13,6 +13,7 @@ import { useSidebarStore } from "../../stores/sidebar.store";
 import { useChatReadingStore } from "../../stores/chat-reading.store";
 import { useChatComposerDraftStore } from "../../stores/chat-composer-drafts.store";
 import ChatSidebarTree from "./ChatSidebarTree.vue";
+import taskRunning from "../../icons/custom/task-running.svg?no-inline";
 
 const PROJECT_ID = "019c1a00-0000-7000-8000-000000000001";
 const SESSION_ID = "019c1a00-0000-7000-8000-000000000002";
@@ -155,7 +156,13 @@ describe("ChatSidebarTree", () => {
     for (const [index, status] of statuses.entries()) {
       const row = rows.find(entry => entry.text() === `Session ${index}`)!;
       const running = status === "streaming" || status === "inProgress";
-      expect(row.find(".chat-tree__session-running").exists()).toBe(running);
+      const indicator = row.find(".chat-tree__session-running");
+      expect(indicator.exists()).toBe(running);
+      if (running) {
+        expect(indicator.element.getAttribute("viewBox")).toBe("0 0 16 16");
+        expect(indicator.attributes("stroke-width")).toBe("0.5");
+        expect(indicator.get("use").attributes("href")).toBe(`${taskRunning}#mark`);
+      }
       expect(row.find(".chat-tree__session-completed").exists()).toBe(status === "completed");
       const description = row.attributes("aria-describedby");
       expect(Boolean(description)).toBe(running || status === "completed");

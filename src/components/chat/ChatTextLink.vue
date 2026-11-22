@@ -7,7 +7,7 @@ import type { MessageFileReference } from "../../domain/message-file-reference";
 import { useChatMessageLink } from "../../composables/useChatMessageLink";
 import ChatStreamText from "./ChatStreamText.vue";
 
-const props = defineProps<{ text: string; file?: MessageFileReference; destination: string | null; offset: number; streaming: boolean; userUrl?: boolean; standalone?: boolean }>();
+const props = defineProps<{ text: string; file?: MessageFileReference; destination: string | null; offset: number; streaming: boolean; userUrl?: boolean }>();
 const {href, pending, error, open} = useChatMessageLink(() => props.destination, () => !!props.userUrl);
 const reveal = inject(chatTextRevealKey, null);
 const shown = computed(() => !reveal || reveal.frame.value.cursor > props.offset);
@@ -32,7 +32,7 @@ watch(() => props.destination, dismiss);
 </script>
 
 <template>
-  <ChatFileLink v-if="shown && file" :file="file" :standalone="standalone" :streaming="streaming">
+  <ChatFileLink v-if="shown && file" :file="file">
     <ChatStreamText :text="text" :streaming="streaming" :offset="offset" />
   </ChatFileLink>
   <NTooltip arrow-point-to-center v-else-if="shown" :show="tooltipVisible" trigger="manual" placement="top">

@@ -151,7 +151,8 @@ const projectName = computed(() => props.mode === "new"
   : props.activeProjectName ?? "工作空间");
 const validationMessage = computed(() => {
   const message = inputValidationMessage(props.modelValue);
-  return message === "请输入任务需求" && props.attachments.length > 0 ? null : message;
+  const hasInput = props.attachments.length > 0 || (!props.textOnly && !compactLayout.value && props.skills.length > 0);
+  return message === "请输入任务需求" && hasInput ? null : message;
 });
 const visibleValidationMessage = computed(() => props.modelValue.length > 0 ? validationMessage.value : null);
 const attachmentConstraintMessage = computed(() => {

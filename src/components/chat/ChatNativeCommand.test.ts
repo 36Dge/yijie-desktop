@@ -75,7 +75,7 @@ describe("FEAT-136 native Command display", () => {
     await expand(wrapper);
     expect(wrapper.text()).toContain("命令已结束，没有输出内容。");
     expect(wrapper.text()).not.toContain("命令已完成，没有输出内容");
-    expect(wrapper.find('[aria-label="复制代码"]').exists()).toBe(false);
+    expect(wrapper.find('[aria-label="复制信息"]').exists()).toBe(false);
   });
 
   it.each([false, true])("shows the recorded output without a generic partial notice (processPresentation=%s)", async processPresentation => {

@@ -101,7 +101,15 @@ function selectAction(key: string | number): void {
     >
       <ChatSidebarSessionTitle class="chat-tree__session-title" :text="session.title" :active="(titleHovered || titleFocused) && !menuVisible && !actionPending" />
       <span class="chat-tree__session-status" aria-hidden="true">
-        <YjIcon v-if="status === 'running'" class="chat-tree__session-running" name="taskRunning" size="sm" :stroke-width="2.2" />
+        <!-- At 16px, the 1.2px filled spokes plus the 0.5px stroke are 1.7px wide. -->
+        <YjIcon
+          v-if="status === 'running'"
+          class="chat-tree__session-running"
+          name="taskRunning"
+          size="sm"
+          stroke="currentColor"
+          :stroke-width="0.5"
+        />
         <span v-else-if="status === 'completed'" class="chat-tree__session-completed" />
       </span>
     </button>
@@ -174,7 +182,10 @@ function selectAction(key: string | number): void {
 
 .chat-tree__session-status .chat-tree__session-running { color: inherit; }
 @media (prefers-reduced-motion: no-preference) {
-  .chat-tree__session-running { animation: chat-task-spin var(--yj-motion-chat-task-spin) linear infinite; }
+  .chat-tree__session-running {
+    transform-origin: center;
+    animation: chat-task-spin var(--yj-motion-chat-task-spin) linear infinite;
+  }
 }
 @keyframes chat-task-spin { to { transform: rotate(360deg); } }
 

@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import runpy
 import shlex
 import subprocess
 import uuid
@@ -167,12 +168,14 @@ def candidate_digest(files):
     return value.hexdigest()
 
 
-def recorded_revision(folder, hashes, expected):
+def recorded_revision(folder, hashes, expected, candidates=None):
     # Compare the immutable tree to the recorded complete candidate, including
     # worktree edits and untracked files. Read changed blobs in one Git batch.
     extra = set(git(folder, "ls-files", "--others", "--exclude-standard", "-z").decode().split("\0"))
     tracked = {name: value for name, value in hashes.items() if name not in extra}
-    for candidate in git(folder, "log", "-32", "--format=%H").decode().splitlines():
+    if candidates is None:
+        candidates = git(folder, "log", "-32", "--format=%H").decode().splitlines()
+    for candidate in candidates:
         old = tracked.copy()
         changed = [name for name in git(folder, "diff", "--no-renames", "--name-only", "-z", candidate, "--").decode().split("\0") if name]
         if changed:
@@ -222,6 +225,33 @@ def workflow_api_inputs(folder):
     return inputs
 
 
+def verify_workflow_editor(root, state, coze, hashes, current):
+    editor = state.get("editor")
+    require(editor and editor.get("coze_candidate"), "工作流编辑器缺少已登记的构建来源。")
+    owner = runpy.run_path(str(root.parent / "yijie-infra/scripts/workflow-session.py"))
+    ctl = owner["ctl"]
+    head = git(coze, "rev-parse", "HEAD").decode().strip()
+    try:
+        if current == editor["coze_candidate"] and head == editor["source_commit"]:
+            # Registration binds the complete worktree, including uncommitted
+            # sources. The canonical verifier checks the bundle and its locks.
+            ctl.verify_editor(state)
+            return
+        if current != editor["coze_candidate"]:
+            # A later unrelated change can reuse a build from a proven Git
+            # tree. A dirty registered build cannot be inferred from its base.
+            base = recorded_revision(coze, hashes, editor["coze_candidate"], [editor["source_commit"]])
+            inputs = ("frontend", "scripts/yijie", "common", "rush.json", "contracts/workflow-local.source-lock.json")
+            require(base and not git(coze, "diff", "--name-only", base, "--", *inputs) and
+                    not git(coze, "ls-files", "--others", "--exclude-standard", "--", *inputs),
+                    "工作流编辑器源码与已登记的构建不一致，请先完成标准构建及登记。")
+        # A commit advance with identical build inputs still uses the exact
+        # registered manifest and assets, as checked by the daily controller.
+        owner["review"].check_old_assets(ctl, editor)
+    except ctl.WorkflowError as error:
+        raise ValueError("已登记的工作流编辑器校验失败：" + str(error)) from error
+
+
 def workflow_sources_current(root):
     # The daily session deliberately reuses existing containers and never runs
     # migrations. Check their actual source identity too, including the editor,
@@ -242,10 +272,8 @@ def workflow_sources_current(root):
             untracked = git(folder, "ls-files", "--others", "--exclude-standard", "--", *inputs).decode().splitlines()
             require(not changed and not untracked, "工作流代码尚未进入固定镜像；请先完成标准工作流构建及数据兼容检查。")
         proof.append({"repository": repository, "image_id": built["image_id"], "source_digest": built["source_digest"], "equivalent_source_commit": revision, "code_current": True})
-    editor = state["editor"]
-    coze = root.parent / "yijie-coze"
-    changed = git(coze, "diff", "--name-only", editor["source_commit"], "--", "frontend", "scripts/yijie").decode().splitlines()
-    require(not changed, "工作流编辑器存在未打包更新，请先完成其标准构建。")
+        if repository == "yijie-coze":
+            verify_workflow_editor(root, state, folder, hashes, current)
     print("DAILY PREFLIGHT: workflow images and editor contain current code", flush=True)
     return proof
 

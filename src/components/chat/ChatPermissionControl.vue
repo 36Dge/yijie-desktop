@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useId, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from "vue";
 import { NCheckbox, NModal, NPopover } from "naive-ui";
 import type { ChatPermissionState, PermissionMode } from "../../api/runtime-permission-client";
 import type { YjIconName } from "../../icons/registry";
@@ -9,6 +9,7 @@ const props = defineProps<{ state: ChatPermissionState | null; disabled: boolean
 const emit = defineEmits<{ select: [mode: PermissionMode, confirmFullAccess: boolean] }>();
 const open = ref(false);
 const confirm = ref(false);
+let resolveConfirmation: ((approved: boolean) => void) | undefined;
 const riskAcknowledged = ref(false);
 const overlay = ref<HTMLElement | null>(null);
 const confirmationOverlay = ref<HTMLElement | null>(null);
@@ -47,22 +48,36 @@ watch(blocked, (value) => { if (value) { open.value = false; confirm.value = fal
 watch(confirm, (value) => {
   riskAcknowledged.value = false;
   if (value) void nextTick(focusConfirmation);
+  else finishConfirmation(false);
 }, { flush: "sync" });
+onBeforeUnmount(() => finishConfirmation(false));
 watch(open, async (value) => {
   await nextTick();
   if (value && open.value) menuElement.value?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus({ preventScroll: true });
   else if (!value && !blocked.value && !confirm.value) triggerElement.value?.focus({ preventScroll: true });
 });
-function choose(mode: PermissionMode): void {
+function requestFullAccess(): Promise<boolean> {
+  if (blocked.value || confirm.value) return Promise.resolve(false);
+  confirm.value = true;
+  return new Promise(resolve => { resolveConfirmation = resolve; });
+}
+defineExpose({ requestFullAccess });
+
+function finishConfirmation(approved: boolean): void {
+  resolveConfirmation?.(approved);
+  resolveConfirmation = undefined;
+}
+
+async function choose(mode: PermissionMode): Promise<void> {
   if (blocked.value) return;
   open.value = false;
-  if (mode === "full") { confirm.value = true; return; }
-  emit("select", mode, false);
+  if (mode === "full" && !await requestFullAccess()) return;
+  emit("select", mode, mode === "full");
 }
 function approveFull(): void {
   if (!canApproveFull.value) return;
+  finishConfirmation(true);
   confirm.value = false;
-  emit("select", "full", true);
 }
 function focusConfirmation(preserveExisting = false): void {
   if (!confirm.value || !cancelElement.value) return;

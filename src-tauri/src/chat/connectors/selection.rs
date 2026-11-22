@@ -362,17 +362,13 @@ impl ChatRepository {
                 true
             } else { false }
         } else { false };
-        let permission_mode = self.permission_state(session)?.mode;
+        let permission = self.permission_state(session)?;
         if !payload.selection.is_empty()
-            && permission_mode != crate::chat::runtime_permissions::PermissionMode::Ask
+            && permission.mode != crate::chat::runtime_permissions::PermissionMode::Ask
         {
             return Err(ChatError::OrchestrationUnavailable);
         }
-        let permission_mode = match permission_mode {
-            crate::chat::runtime_permissions::PermissionMode::Ask => "ask",
-            crate::chat::runtime_permissions::PermissionMode::Auto => "auto",
-            crate::chat::runtime_permissions::PermissionMode::Full => "full",
-        };
+        let permission_mode = permission.authorized_mode().as_str();
         // Reject known stale references before idempotent projectless workspace
         // provisioning, then check again within the message/outbox transaction.
         display_snapshot(&self.connection, &self.scope, &payload.selection)?;

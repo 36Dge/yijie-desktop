@@ -19,12 +19,14 @@ const props = defineProps<{
   canManage: boolean;
   operation?: SkillOperationKind | null;
   operationError?: string | null;
+  pendingToggleId?: string;
 }>();
 
 const emit = defineEmits<{
   install: [skillId: string];
   "enabled-change": [skillId: string, enabled: boolean];
   uninstall: [skillId: string, trigger: HTMLElement];
+  "cancel-operation": [operationId: string];
 }>();
 
 const titleId = useId();
@@ -47,6 +49,7 @@ const installActionLabel = computed(() =>
   failureMessage.value === null ? "安装" : "重试安装",
 );
 const pending = computed(() => (props.operation !== null && props.operation !== undefined) || props.skill.nativeFailureCode === "compatibility_mode");
+const toggling = computed(() => props.operation === "enable" || props.operation === "disable");
 const actionable = computed(() =>
   props.canManage && !pending.value && (installed.value || installable.value),
 );
@@ -60,9 +63,6 @@ const status = computed<{
   switch (props.operation) {
     case "install":
       return { label: "正在安装", type: "default" };
-    case "enable":
-    case "disable":
-      return { label: "正在同步", type: "default" };
     case "uninstall":
       return { label: "正在卸载", type: "default" };
   }
@@ -72,7 +72,6 @@ const status = computed<{
     if (props.skill.dependencyState === "missing") return { label: "工具未就绪", type: "warning" };
     if (props.skill.dependencyState === "needs_authorization") return { label: "工具需要授权", type: "warning" };
     if (installed.value && props.skill.enabled && !props.skill.runtimeVisible) return { label: "当前策略未开放", type: "warning" };
-    if (installed.value && props.skill.dependencyState === "unknown") return { label: "工具可用性待核对", type: "default" };
     return null;
   }
   if (props.skill.catalogStatus === "blocked") {
@@ -123,9 +122,10 @@ function requestUninstall(event: MouseEvent): void {
       <img class="skill-card__icon" :src="artworkSrc" alt="" aria-hidden="true" draggable="false" />
 
       <div class="skill-card__content">
-        <h3 :id="titleId" class="skill-card__title" >
-          {{ skill.displayName }}
-        </h3>
+        <div class="skill-card__heading">
+          <h3 :id="titleId" class="skill-card__title">{{ skill.displayName }}</h3>
+          <span v-if="toggling" class="skill-card__sync" role="status">正在同步</span>
+        </div>
         <p :id="descriptionId" class="skill-card__description" >{{ skill.description }}</p>
       </div>
 
@@ -133,22 +133,33 @@ function requestUninstall(event: MouseEvent): void {
         <template v-if="installed">
           <n-switch
             :value="skill.enabled"
-            :loading="operation === 'enable' || operation === 'disable'"
+            :loading="toggling"
             :disabled="!canManage || pending || (skill.nativeInstallation !== undefined && skill.nativeInstallation !== 'installed' && !skill.enabled) || (skill.nativeOrigin === 'unknown' && !skill.enabled)"
             :aria-label="enabledLabel"
             @update:value="emit('enabled-change', skill.id, $event)"
           />
-          <YjTooltip v-if="canManage" text="卸载"><button
-
-            class="skill-card__delete"
-            type="button"
-            :disabled="pending"
-            :aria-label="`卸载 ${skill.displayName}`"
-
-            @click="requestUninstall"
+          <n-button
+            v-if="canManage && pendingToggleId && toggling"
+            text size="small"
+            :aria-label="`取消${skill.displayName}的启停操作`"
+            @click="emit('cancel-operation', pendingToggleId)"
+          >取消</n-button>
+          <YjTooltip
+            v-else-if="canManage"
+            :text="pending ? null : '卸载'"
+            placement="left"
+            :keep-alive-on-hover="false"
           >
-            <YjIcon name="trash" size="lg" />
-          </button></YjTooltip>
+            <button
+              class="skill-card__delete"
+              type="button"
+              :disabled="pending"
+              :aria-label="`卸载 ${skill.displayName}`"
+              @click="requestUninstall"
+            >
+              <YjIcon name="trash" size="lg" />
+            </button>
+          </YjTooltip>
         </template>
         <n-tooltip arrow-point-to-center
           v-else-if="installable"
@@ -239,6 +250,20 @@ function requestUninstall(event: MouseEvent): void {
   display: grid;
   min-width: 0;
   gap: var(--yj-space-1);
+}
+
+.skill-card__heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--yj-space-2);
+}
+
+.skill-card__sync {
+  flex: none;
+  color: var(--yj-color-text-secondary);
+  font-size: var(--yj-font-size-caption);
+  line-height: var(--yj-line-height-caption);
 }
 
 .skill-card__title,

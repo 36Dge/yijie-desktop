@@ -11,6 +11,14 @@ pub enum PermissionMode {
 }
 
 impl PermissionMode {
+    pub(super) fn new_chat_default() -> Self {
+        if enabled() {
+            Self::Full
+        } else {
+            Self::Ask
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Ask => "ask",
@@ -34,6 +42,16 @@ pub struct PermissionState {
     pub mode: PermissionMode,
     pub full_access_confirmed: bool,
     pub busy: bool,
+}
+
+impl PermissionState {
+    pub(super) fn authorized_mode(&self) -> PermissionMode {
+        if self.mode == PermissionMode::Full && !self.full_access_confirmed {
+            PermissionMode::Ask
+        } else {
+            self.mode
+        }
+    }
 }
 
 // Same-source adapter for the dedicated Host Runtime permissions OpenAPI.

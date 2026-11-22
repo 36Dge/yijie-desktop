@@ -180,7 +180,7 @@ describe("FEAT-129 AC-009 automated acceptance", () => {
     expect(tooltip?.props("show")).toBe(false);
   });
 
-  it("announces initial loading, renders empty, and recovers from the empty action", async () => {
+  it("announces initial loading, renders empty, and recovers from the shared refresh action", async () => {
     let resolveInitialScan: ((value: SkillCatalogSnapshot) => void) | undefined;
     nativeMock.scan.mockImplementationOnce(() =>
       new Promise<SkillCatalogSnapshot>((resolve) => { resolveInitialScan = resolve; })
@@ -199,7 +199,7 @@ describe("FEAT-129 AC-009 automated acceptance", () => {
     expect(wrapper.get(".skill-marketplace__count").text()).toBe("0 个技能");
 
     nativeMock.scan.mockResolvedValueOnce(snapshot());
-    await wrapper.get(".yj-empty button").trigger("click");
+    await wrapper.get('button[aria-label="刷新数据"]').trigger("click");
     await flushPromises();
     expect(nativeMock.scan).toHaveBeenLastCalledWith("user_retry", expect.any(AbortSignal));
     expect(wrapper.get(`button[aria-label="安装 跨境营销文案"]`)).toBeDefined();

@@ -1,7 +1,7 @@
 import { ref, shallowRef, watch } from "vue";
 import { defineStore } from "pinia";
-import { defaultModelProfile, type ProfileId } from "../api/chat-model-client";
-import { createChatComposerDrafts, clearChatComposerDraft, updateChatComposerDraft, type ChatComposerDraftKey } from "../domain/chat-composer-draft";
+import type { ProfileId } from "../api/chat-model-client";
+import { CHAT_COMPOSER_DEFAULT_PROFILE, createChatComposerDrafts, clearChatComposerDraft, updateChatComposerDraft, type ChatComposerDraftKey } from "../domain/chat-composer-draft";
 import type { CatalogEntry, ExpertDisplay } from "../domain/experts-v2.generated";
 import { expertDefaultPrompt } from "../domain/expert-composer";
 import type { SelectionDisplay } from "../domain/market-connectors.generated";
@@ -45,14 +45,14 @@ export const useChatComposerDraftStore = defineStore("chat-composer-drafts", () 
   function setExpert(target: ChatComposerDraftKey, value: ExpertDisplay | null): void { const next = { ...experts.value }; if (value) next[target] = Object.freeze({ ...value }); else { delete next[target]; clearExpertPrompt(target); } experts.value = next; }
   const workspaceId = ref<string | null>(null);
   const newWorkspaceTask = shallowRef<{ contextId: string; projectId: string } | null>(null);
-  const newProfile = ref<ProfileId>(defaultModelProfile);
-  const planProfile = ref<ProfileId>(defaultModelProfile);
+  const newProfile = ref<ProfileId>(CHAT_COMPOSER_DEFAULT_PROFILE);
+  const planProfile = ref<ProfileId>(CHAT_COMPOSER_DEFAULT_PROFILE);
   let tenant: string | null = null;
 
   function clear(): void {
     expertPrompts.clear();
     texts.value = createChatComposerDrafts(); selections.value = {}; experts.value = {}; skills.value = {}; workspaceId.value = null; newWorkspaceTask.value = null;
-    newProfile.value = defaultModelProfile; planProfile.value = defaultModelProfile;
+    newProfile.value = CHAT_COMPOSER_DEFAULT_PROFILE; planProfile.value = CHAT_COMPOSER_DEFAULT_PROFILE;
   }
   function selection(target: ChatComposerDraftKey): readonly SelectionDisplay[] { return selections.value[target] ?? []; }
   function setSelection(target: ChatComposerDraftKey, values: readonly SelectionDisplay[]): void {

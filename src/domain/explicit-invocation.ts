@@ -25,11 +25,14 @@ function skillCommandTarget(input: string): string | undefined {
   return input.slice(command.index + command[0].length).trimStart();
 }
 
-function matchSkillName(target: string, catalog: readonly ManagedSkillProjection[]) {
+type SkillNameEntry = Pick<SelectedChatSkill, "id" | "displayName" | "runtimeName"> &
+  Partial<Pick<ManagedSkillProjection, "nativeOrigin" | "installationStatus" | "enabled">>;
+
+function matchSkillName<T extends SkillNameEntry>(target: string, catalog: readonly T[]) {
   const literal = target.replace(openingQuote, "").replace(/^\$/u, "");
   let length = 0;
   let rest = "";
-  let matches: ManagedSkillProjection[] = [];
+  let matches: T[] = [];
   for (const skill of catalog) {
     const aliases = [skill.displayName, skill.runtimeName];
     if (skill.nativeOrigin === "builtin") aliases.push(skill.id.slice(skill.id.lastIndexOf(".") + 1));
@@ -53,13 +56,13 @@ function matchSkillName(target: string, catalog: readonly ManagedSkillProjection
   return { matches, rest };
 }
 
-export function explicitSkillInvocation(text: string, catalog: readonly ManagedSkillProjection[], picked: readonly SelectedChatSkill[]) {
+export function explicitSkillInvocation<T extends SkillNameEntry>(text: string, catalog: readonly T[], picked: readonly SelectedChatSkill[]) {
   // Include the picked address when validating phrases such as “先用技能…”.
   const placed = picked.filter(skill => skill.offset !== undefined);
   if (placed.length) text = skillTextParts(text, placed, placed.map(skill => skillOffset(skill, text)))
     .map(part => "skill" in part ? `【${part.skill.runtimeName || part.skill.displayName}】` : part.text).join("");
-  const mentions: ManagedSkillProjection[] = [];
-  const nativeMentions: ManagedSkillProjection[] = [];
+  const mentions: T[] = [];
+  const nativeMentions: T[] = [];
   let directed = false;
   // Native $mentions remain text, including in a sentence. Only check a known,
   // unique managed name; linked tools carry their own identity.

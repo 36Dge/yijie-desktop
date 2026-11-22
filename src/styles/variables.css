@@ -43,7 +43,7 @@
   --yj-color-chat-timing: #858585;
   --yj-color-chat-link: #6b980b;
   --yj-color-chat-task-indicator: #8ac20f;
-  --yj-color-chat-completion-dot: #8ac20f;
+  --yj-color-chat-completion-dot: var(--yj-color-chat-task-indicator);
   --yj-color-chat-file-link: var(--yj-color-connector-composer-mention);
   --yj-color-chat-artifact-bg: #f2f2f2;
   --yj-color-chat-artifact-hover: #eceef0;
@@ -232,7 +232,7 @@
   --yj-motion-base: 180ms;
   --yj-motion-slow: 240ms;
   --yj-motion-sidebar-title-delay: 500ms;
-  --yj-motion-chat-task-spin: 1.25s;
+  --yj-motion-chat-task-spin: 1.2s;
   --yj-sidebar-title-speed: 32;
   --yj-sidebar-title-gap: var(--yj-space-8);
   --yj-motion-chat-thinking: 1800ms;

@@ -1,8 +1,9 @@
 import { computed, ref, watch } from "vue";
 import {
-  chatModelClient, chatModelsEnabled, defaultModelProfile, kimiK31Candidate,
+  chatModelClient, chatModelsEnabled, kimiK31Candidate,
   type Catalog, type ModelIntent, type ModelState, type ProfileId,
 } from "../api/chat-model-client";
+import { CHAT_COMPOSER_DEFAULT_PROFILE } from "../domain/chat-composer-draft";
 
 type PendingSwitch = { target: string; intent: ModelIntent; operationId: string; recoveryAvailable?: boolean };
 
@@ -15,7 +16,7 @@ export function useChatModels(
   const catalog = ref<Catalog | null>(null);
   const state = ref<ModelState | null>(null);
   const loading = ref(false), saving = ref(false), error = ref(""), notice = ref("");
-  const localNewProfile = ref<ProfileId>(defaultModelProfile);
+  const localNewProfile = ref<ProfileId>(CHAT_COMPOSER_DEFAULT_PROFILE);
   const newProfile = computed({
     get: () => newDraft?.get() ?? localNewProfile.value,
     set: (id: ProfileId) => { if (newDraft) newDraft.set(id); else localNewProfile.value = id; },
@@ -136,10 +137,10 @@ export function useChatModels(
 
   watch([context, target], ([ctx], [oldCtx]) => {
     epoch++; state.value = null; saving.value = false; loading.value = false; pending = null;
-    if (ctx !== oldCtx && !newDraft) newProfile.value = defaultModelProfile;
+    if (ctx !== oldCtx && !newDraft) newProfile.value = CHAT_COMPOSER_DEFAULT_PROFILE;
     void refresh();
   }, { immediate: true });
   watch(busy, (value, previous) => { if (previous && !value) void refresh(); });
   return { catalog, state, profile, loading, saving, error, notice, selectionLocked, readiness, ready, intent, refresh, select, retry, retryLabel,
-    resetNew: () => { newProfile.value = defaultModelProfile; } };
+    resetNew: () => { newProfile.value = CHAT_COMPOSER_DEFAULT_PROFILE; } };
 }

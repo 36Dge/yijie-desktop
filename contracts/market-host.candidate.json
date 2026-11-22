@@ -28,7 +28,7 @@
     },
     {
       "path": "compatibility/market-broker-control/wire.schema.json",
-      "sha256": "8e8cccb5ff5569f308205f01e56abd37a8ae582093652efafc1ad981123c5882"
+      "sha256": "13c913883d274c316c14fe023e9b481801a845c3cbc02f70f07082529cdd23d9"
     },
     {
       "path": "openapi/runtime-permissions-v2/runtime-permissions-v2.yaml",
@@ -111,7 +111,7 @@
     {
       "source": "sdks/rust/market-broker-control/types.gen.rs",
       "path": "src-tauri/src/chat/connectors/broker_generated.rs",
-      "sha256": "1f566a7029b01c63ab307ab4321256128d07ec32973a2f248103dcc021b5e0c4"
+      "sha256": "05d36480153ea1c19f371e77ded131b15bdb361681a1702fe475393bd3ea22e3"
     },
     {
       "source": "sdks/jsonschema/market-host.schema.json",

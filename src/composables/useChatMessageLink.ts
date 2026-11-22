@@ -1,18 +1,13 @@
 import { computed, inject, onBeforeUnmount, ref, watch, type ComputedRef, type InjectionKey } from "vue";
 import type { MessageFileReference } from "../domain/message-file-reference";
-import type { MessageFileInfo } from "../domain/document-preview.generated";
 import type { WebSourceTarget } from "../domain/web-source.generated";
 import { sourceHref, webSourceActionsKey } from "./useWebSources";
 
 export type MessageLinkTarget = Omit<WebSourceTarget, "url">;
 export const messageFileActionKey: InjectionKey<ComputedRef<((target: MessageLinkTarget, file: MessageFileReference) => void) | undefined>> = Symbol("message-file-action");
 export const messageFileWorkspaceKey: InjectionKey<ComputedRef<string | null>> = Symbol("message-file-workspace");
-export type MessageFileLocation = Readonly<{ path: string; fileInfo?: MessageFileInfo }>;
-export type MessageFileServices = {
-  locate(target: MessageLinkTarget, file: MessageFileReference): Promise<MessageFileLocation>;
-  save(target: MessageLinkTarget, file: MessageFileReference): Promise<void>;
-};
-export const messageFileServicesKey: InjectionKey<ComputedRef<MessageFileServices | undefined>> = Symbol("message-file-services");
+export type LocateMessageFile = (target: MessageLinkTarget, file: MessageFileReference) => Promise<string>;
+export const messageFileLocationKey: InjectionKey<ComputedRef<LocateMessageFile | undefined>> = Symbol("message-file-location");
 export const messageLinkTargetKey: InjectionKey<() => MessageLinkTarget | undefined> = Symbol("message-link-target");
 
 export function useChatMessageLink(destination: () => string | null, userUrl = () => false) {

@@ -1441,7 +1441,7 @@ mod tests {
             .await
             .expect("local chat projection");
         assert_eq!(projection.authorization_revision, 1);
-        assert_eq!(projection.expires_at, 1_800_000_240);
+        assert_eq!(projection.expires_at, 1_800_000_300);
 
         let owner = uuid::Uuid::parse_str(DEMO_FAST_OWNER_USER_ID).unwrap();
         let tenant = uuid::Uuid::parse_str(DEMO_FAST_TENANT_ID).unwrap();

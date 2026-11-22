@@ -51,15 +51,17 @@ export function useRuntimePermissions(context: () => string | null, session: () 
     void poll(generation);
   }, { immediate: true, flush: "sync" });
 
-  async function setMode(mode: PermissionMode, confirmFullAccess = false): Promise<void> {
-    const id = context(); if (!id || !ready.value || busy.value) return;
+  async function setMode(mode: PermissionMode, confirmFullAccess = false): Promise<boolean> {
+    const id = context(); if (!id || !ready.value || busy.value) return false;
     const epoch = generation; const sessionId = session();
     mutation += 1;
     saving.value = true; error.value = null;
     try {
       const result = await runtimePermissionClient.set(id, sessionId, mode, confirmFullAccess);
-      if (generation === epoch) state.value = result;
-    } catch { if (generation === epoch) { state.value = null; error.value = "权限保存结果尚未确认，正在重新读取。"; } }
+      if (disposed || generation !== epoch) return false;
+      state.value = result;
+      return result.mode === mode && (mode !== "full" || result.fullAccessConfirmed);
+    } catch { if (generation === epoch) { state.value = null; error.value = "权限保存结果尚未确认，正在重新读取。"; } return false; }
     finally { if (generation === epoch) { mutation += 1; saving.value = false; void refresh(epoch); } }
   }
 

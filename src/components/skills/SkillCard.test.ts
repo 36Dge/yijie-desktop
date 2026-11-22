@@ -11,6 +11,8 @@ import {
 import { skillCardArtwork, skillCategoryArtwork } from "../../icons/skill-artwork";
 import personalSkillManual from "../../assets/skills/generated/personal-skill-manual.png";
 import SkillCard from "./SkillCard.vue";
+import { nativeSkillFixture, nativeCatalogFixture } from "../../test/native-skill-fixture";
+import { parseNativeSkillCatalog } from "../../domain/native-skill-marketplace";
 
 const SKILL_ID = "yijie.content-marketing.copywriting";
 
@@ -63,6 +65,16 @@ afterEach(() => {
 });
 
 describe("SkillCard", () => {
+  it.each(["builtin", "user"] as const)("keeps an enabled %s card quiet when only tool availability is unknown", async origin => {
+    const entry = parseNativeSkillCatalog(nativeCatalogFixture({ ...nativeSkillFixture, origin })).skills[0]!;
+    const card = mountCard(entry);
+    expect(card.getComponent(NSwitch).props("value")).toBe(true);
+    expect(card.find(".skill-card__status").exists()).toBe(false);
+    await card.setProps({ skill: { ...entry, dependencyState: "needs_authorization" } });
+    expect(card.get(".skill-card__status").text()).toBe("工具需要授权");
+    card.unmount();
+  });
+
   it("offers one labelled install control with a hover and keyboard-focus tooltip", async () => {
     const wrapper = mountCard();
     const install = wrapper.get(`button[aria-label="安装 跨境营销文案"]`);
@@ -113,6 +125,14 @@ describe("SkillCard", () => {
     expect(wrapper.find(`button[aria-label="安装 跨境营销文案"]`).exists()).toBe(false);
     expect(deleteButton.classes()).toContain("skill-card__delete");
     expect(switchControl.attributes("aria-label")).toBe("停用 跨境营销文案");
+    const tooltip = wrapper.getComponent(NTooltip);
+    expect(tooltip.props("placement")).toBe("left");
+    expect(tooltip.props("keepAliveOnHover")).toBe(false);
+    await deleteButton.trigger("mouseenter");
+    expect(tooltip.props("show")).toBe(true);
+    await deleteButton.trigger("mouseleave");
+    await switchControl.trigger("mouseenter");
+    expect(tooltip.props("show")).toBe(false);
 
     await switchControl.vm.$emit("update:value", false);
     await deleteButton.trigger("click");

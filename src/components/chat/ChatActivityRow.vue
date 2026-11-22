@@ -13,7 +13,7 @@ import ChatCommandItem, {
   type ChatApprovalTransientState,
 } from "./ChatCommandItem.vue";
 import { presentSkillMessage, type SelectedChatSkill } from "../../domain/chat-skills";
-import { readSkillPositions, readSubmittedSkillMarkers } from "../../composables/chatSkillPositions";
+import { readSkillPositions, readSubmittedSkillPlacement } from "../../composables/chatSkillPositions";
 import ChatSkillPill from "./ChatSkillPill.vue";
 import ChatSafeContent from "./ChatSafeContent.vue";
 import ChatDeepThinking from "./ChatDeepThinking.vue";
@@ -52,10 +52,11 @@ const skillMessage = computed(() => {
   const item = props.item;
   if (item.presentation !== "user_message") return null;
   const first = item.contentBlocks.find(block => block.type === "text");
-  if (first?.type === "text" && first.text.includes("【技能") && item.identity === firstUserMessage.value) {
-    const markers = readSubmittedSkillMarkers(item.threadId, item.turnId, first.text.length);
-    const legacy = !markers && first.skills && readSkillPositions(item.threadId, item.turnId, first.text.length, first.skills.length);
-    return presentSkillMessage(item.contentBlocks, props.skillCatalog, markers ?? (legacy ? [] : undefined));
+  if (first?.type === "text" && item.identity === firstUserMessage.value &&
+    (first.skills?.length || first.text.includes("【技能") || first.text.startsWith("$"))) {
+    const placement = readSubmittedSkillPlacement(item.threadId, item.turnId, first.text.length);
+    const legacy = !placement && first.skills ? readSkillPositions(item.threadId, item.turnId, first.text.length, first.skills.length) : undefined;
+    return presentSkillMessage(item.contentBlocks, props.skillCatalog, placement ?? (legacy ? { offsets: [], pickedCount: legacy.length } : undefined));
   }
   return presentSkillMessage(item.contentBlocks, props.skillCatalog);
 });

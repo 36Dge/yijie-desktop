@@ -12,6 +12,7 @@ import {
   type SkillCatalogSnapshot,
 } from "../../domain/skill-marketplace";
 import SkillMarketplacePage from "./SkillMarketplacePage.vue";
+import { useSkillStore } from "../../stores/skill.store";
 
 const SKILL_ID = "yijie.content-marketing.copywriting";
 const permissionState = vi.hoisted(() => ({ canManage: true }));
@@ -24,6 +25,7 @@ const nativeMock = vi.hoisted(() => ({
   scan: vi.fn(),
   install: vi.fn(),
   setEnabled: vi.fn(),
+  cancelOperation: vi.fn(),
   uninstall: vi.fn(),
   subscribeDirectoryChanged: vi.fn(),
   importDialog: { open: vi.fn(), prepare: vi.fn(), close: vi.fn() },
@@ -317,6 +319,47 @@ describe("SkillMarketplacePage", () => {
     expect(wrapper.get('[aria-label="停用 跨境营销文案"]')).toBeDefined();
     expect(wrapper.get('[role="switch"]').attributes("aria-checked")).toBe("true");
     expect(wrapper.find(".skill-card .n-tag").exists()).toBe(false);
+  });
+
+  it("keeps an active toggle and its cancel action on the card until the native result arrives", async () => {
+    const original = snapshot({ installationStatus: "installed", enabled: true, runtimeVisible: true });
+    nativeMock.scan.mockResolvedValue(original);
+    nativeMock.cancelOperation.mockResolvedValueOnce(original);
+    let finish!: (value: SkillCatalogSnapshot) => void;
+    nativeMock.setEnabled.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const wrapper = mountPage();
+    await flushPromises();
+    const store = useSkillStore();
+    const card = wrapper.get(".skill-card");
+    await card.get('[role="switch"]').trigger("click");
+    expect(nativeMock.setEnabled).toHaveBeenCalledWith(SKILL_ID, false);
+    const pending = { operation_id: "8a194292-2f25-4a6b-857f-b71427b8c8d0", skill_id: SKILL_ID, state: "pending" as const, epoch: 2, error_code: "" };
+    store.pendingOperations = [pending];
+    await flushPromises();
+    expect(card.get(".skill-card__heading [role=status]").text()).toBe("正在同步");
+    expect(card.find(".skill-card__status").exists()).toBe(false);
+    expect(wrapper.find(".n-alert").exists()).toBe(false);
+    await card.get('[aria-label="取消跨境营销文案的启停操作"]').trigger("click");
+    expect(nativeMock.cancelOperation).toHaveBeenCalledWith(pending.operation_id);
+    finish(original);
+    await flushPromises();
+    expect(card.get('[role="switch"]').attributes("aria-checked")).toBe("true");
+    expect(document.body.textContent).not.toContain("Skill 已停用。");
+    expect(nativeMock.uninstall).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it.each(["pending", "needs_attention"] as const)("retains the page notice and cancel action for a recovered %s operation", async state => {
+    const original = snapshot({ installationStatus: "installed", enabled: true, runtimeVisible: true });
+    const pending = { operation_id: "a59111e4-4be0-4a8b-8bf0-1c8f88bcad63", skill_id: SKILL_ID, state, epoch: 2, error_code: "" };
+    nativeMock.scan.mockResolvedValue({ ...original, pendingOperations: [pending] });
+    nativeMock.cancelOperation.mockResolvedValueOnce(original);
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(wrapper.get(".n-alert").text()).toContain(state === "needs_attention" ? "需要检查" : "正在确认技能操作");
+    await buttonByText(wrapper, "取消操作").trigger("click");
+    expect(nativeMock.cancelOperation).toHaveBeenCalledWith(pending.operation_id);
+    wrapper.unmount();
   });
 
   it("requires the exact uninstall confirmation and leaves cancel side-effect free", async () => {

@@ -324,6 +324,71 @@ fn feat157_same_operation_different_normal_intent_conflicts() {
     );
 }
 
+#[tokio::test]
+async fn market_scope_renewal_uses_the_verified_native_context_and_private_pipe() {
+    use crate::chat::{AuthoritativeChatProjection, ChatAuthorizationManager};
+    use tokio::io::{duplex, split, AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    let owner = scope();
+    let manager = ChatAuthorizationManager::new(&owner).unwrap();
+    let tenant = owner.tenant_uuid().unwrap();
+    let projection = |expiry, can_use| {
+        let mut permissions = vec!["task.read".to_owned(), "task.create".to_owned()];
+        if can_use {
+            permissions.push("connector.use".to_owned());
+        }
+        AuthoritativeChatProjection::from_trusted_native_projection(tenant, 1, expiry, permissions)
+            .unwrap()
+    };
+    let (native, host) = duplex(4096);
+    let (read, write) = split(native);
+    let host_id = Uuid::now_v7().to_string();
+    let pipe = control::MarketControl::from_test_io(Box::new(write), Box::new(read));
+    manager.bind_market_control(host_id.clone(), pipe).unwrap();
+    let bound = manager.bind(projection(400, true), 100).unwrap();
+    let (context, proof) = manager
+        .renew(bound.context_id, projection(670, true), 370)
+        .unwrap();
+    assert_eq!(context.expires_at, 670);
+    let (peer_read, mut peer_write) = split(host);
+    let peer = async {
+        let mut line = String::new();
+        BufReader::new(peer_read)
+            .read_line(&mut line)
+            .await
+            .unwrap();
+        let received: broker_generated::RenewScopeRequest = serde_json::from_str(&line).unwrap();
+        assert_eq!(received.payload.host_instance_id, host_id);
+        assert_eq!(received.payload.scope.owner_user_id, owner.owner_user_id);
+        assert_eq!(
+            received.payload.scope.authorization_expires_at_unix_ms,
+            670_000
+        );
+        assert_eq!(received.payload.sequence, 1);
+        let reply = broker_generated::RenewScopeResponse {
+            schema_version: 1,
+            request_id: received.request_id,
+            data: received.payload,
+        };
+        let mut bytes = serde_json::to_vec(&reply).unwrap();
+        bytes.push(b'\n');
+        peer_write.write_all(&bytes).await.unwrap();
+    };
+    let (sent, ()) = tokio::join!(proof.unwrap().deliver(), peer);
+    assert!(sent.is_ok());
+    assert!(manager
+        .renew(bound.context_id, projection(900, false), 600)
+        .is_err());
+
+    let readonly = ChatAuthorizationManager::new(&owner).unwrap();
+    let bound = readonly.bind(projection(400, false), 100).unwrap();
+    assert!(readonly
+        .renew(bound.context_id, projection(670, false), 370)
+        .unwrap()
+        .1
+        .is_none());
+}
+
 #[test]
 fn feat157_connector_permission_lease_fences_context_and_keeps_read_only_scope() {
     let owner = scope();

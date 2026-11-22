@@ -39,9 +39,11 @@
 ## 对话正文文本超链（2026-11-02）
 
 用户要求正文中的引用标签使用易界主题色，覆盖下方普通中性链接规则，仅适用于对话 Markdown 文本超链。
-正文超链使用 `--yj-color-chat-link`（`#6B980B`）。侧栏执行中图标使用 `--yj-color-chat-task-indicator`，未查看的完成圆点使用 `--yj-color-chat-completion-dot`，两者均为 `#8AC20F`。这些色值在亮暗主题下相同。
+正文超链使用 `--yj-color-chat-link`（`#6B980B`）。
 默认无下划线，hover/键盘焦点显示下划线并保留中性焦点环；完整地址放在统一 tooltip，支持 hover、focus 和 Esc。
 原始 Markdown、复制及目标地址保持，不将普通正文、搜索来源列表或导航整体改为绿色。
+
+侧栏执行中图标使用 `--yj-color-chat-task-indicator`，未查看的完成圆点通过 `--yj-color-chat-completion-dot` 复用同色。亮暗主题均使用青柠色 `#8AC20F`。
 
 正文中的文件链接及图标使用 `--yj-color-chat-file-link`。2026-11-10 按用户要求复用输入框已选技能的 `--yj-color-connector-composer-mention`，亮色为 `#668000`，暗色为 `#D0F780`。悬停或键盘聚焦时，文件名显示点状下划线，完整路径显示在统一 tooltip 中。
 

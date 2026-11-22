@@ -98,6 +98,7 @@ describe("turn output stays inside the response", () => {
   });
 
   it("keeps live cards mounted when text arrives and completes", async () => {
+    const text = "[打开文档](./杭州样本.pdf)";
     const before = timeline({count: 1, text: "", live: true, artifactStatus: "announced"});
     let artifacts = before.artifacts;
     const callbacks = slotsFor(() => artifacts);
@@ -105,18 +106,20 @@ describe("turn output stays inside the response", () => {
     const instance = wrapper.getComponent(ChatArtifactList).vm.$;
     const container = wrapper.get(".chat-turn-output__artifacts").element;
     expect(wrapper.find(".answer-action").exists()).toBe(false);
-    const streaming = timeline({count: 1, live: true});
+    const streaming = timeline({count: 1, text, live: true});
     artifacts = streaming.artifacts;
     await wrapper.setProps({turn: streaming.timeline.turns[0]!});
     expect(wrapper.getComponent(ChatArtifactList).vm.$).toBe(instance);
     expect(wrapper.get(".chat-turn-output__artifacts").element).toBe(container);
     expect(wrapper.findAll(".chat-artifact-document-card")).toHaveLength(1);
     expect(wrapper.find(".answer-action").exists()).toBe(false);
-    await wrapper.setProps({turn: timeline({count: 1}).timeline.turns[0]!});
+    await wrapper.setProps({turn: timeline({count: 1, text}).timeline.turns[0]!});
     expect(wrapper.getComponent(ChatArtifactList).vm.$).toBe(instance);
     expect(wrapper.find(".chat-turn-output__actions").exists()).toBe(false);
     await vi.waitFor(() => expect(wrapper.find(".chat-turn-output__actions").exists()).toBe(true), {timeout: 3_000});
     expect(wrapper.get(".chat-turn-output__actions").text()).toBe("复制回答");
+    expect(wrapper.get(".chat-file-link").text()).toBe("《杭州样本.pdf》");
+    expect(wrapper.findAll(".chat-artifact-document-card")).toHaveLength(1);
   });
 
   it("adds late artifacts once and reconstructs the same layout on history remount", async () => {

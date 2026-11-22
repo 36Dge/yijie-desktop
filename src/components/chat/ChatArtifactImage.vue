@@ -307,7 +307,7 @@ defineExpose({ openLightbox: openViewer });
             <YjIcon name="quote" size="sm" />引用到对话
           </button>
           <button class="chat-control-option" type="button" role="menuitem" data-testid="artifact-image-copy" :disabled="Boolean(action)" @click="selectAction('copy')">
-            <YjIcon name="copy" size="sm" />{{ action === 'copy' ? '复制中…' : '复制图片' }}
+            <YjIcon name="copy" size="sm" tone="subtle" />{{ action === 'copy' ? '复制中…' : '复制图片' }}
           </button>
           <button class="chat-control-option" type="button" role="menuitem" data-testid="artifact-image-save" :disabled="Boolean(action)" @click="selectAction('save')">
             <YjIcon name="download" size="sm" />{{ action === 'save' ? '下载中…' : '下载图片' }}

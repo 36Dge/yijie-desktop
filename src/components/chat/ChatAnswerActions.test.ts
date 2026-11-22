@@ -25,7 +25,7 @@ describe("local answer actions",()=>{
     expect(wrapper.get('[aria-label="本轮使用的模型"]').text()).toBe('Kimi K3.1 Pro');
     expect(wrapper.get('time').attributes('datetime')).toBe(new Date(2026,10,2,11,39).toISOString());
     expect(wrapper.findAll('.chat-answer-action svg').every(icon=>icon.attributes('stroke-width')==='1.5')).toBe(true);
-    await vi.advanceTimersByTimeAsync(2001);
+    await vi.advanceTimersByTimeAsync(1500);
     expect(wrapper.get('.chat-copy-action').classes()).toContain('chat-copy-action--idle');
   });
   it("toggles likes, cancels a draft without changing the vote, and confirms only selected reasons",async()=>{

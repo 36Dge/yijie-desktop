@@ -1,4 +1,5 @@
 export const CHAT_COMPOSER_NEW_DRAFT_KEY = "new" as const;
+export const CHAT_COMPOSER_DEFAULT_PROFILE = "minimax-m3-high-v1";
 
 export type ChatComposerDraftKey =
   | typeof CHAT_COMPOSER_NEW_DRAFT_KEY

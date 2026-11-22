@@ -56,6 +56,23 @@ const visibleSkillCount = computed(() => {
   if (skillStore.phase !== "ready" && skillStore.phase !== "empty") return null;
   return visibleCategories.value.reduce((total, category) => total + category.skills.length, 0);
 });
+// A toggle already has a progress indicator on its card. Keep the cancel
+// action there too, so a routine receipt doesn't move the switch under the pointer.
+const pendingCardToggles = computed(() => {
+  const ids = new Map<string, string>();
+  if (skillStore.phase !== "ready" || !canManage.value) return ids;
+  for (const operation of skillStore.pendingOperations) {
+    const action = skillStore.operations[operation.skill_id];
+    if (operation.state !== "pending" || operation.error_code || (action !== "enable" && action !== "disable")) continue;
+    if (visibleCategories.value.some(category => category.skills.some(skill => skill.id === operation.skill_id && skill.installationStatus === "installed"))) {
+      ids.set(operation.skill_id, operation.operation_id);
+    }
+  }
+  return ids;
+});
+const pendingNotices = computed(() => skillStore.pendingOperations.filter(
+  operation => pendingCardToggles.value.get(operation.skill_id) !== operation.operation_id,
+));
 const uninstallTarget = computed(() =>
   skillStore.skills.find((skill) => skill.id === uninstallTargetId.value) ?? null,
 );
@@ -111,8 +128,10 @@ async function handleInstall(skillId: string): Promise<void> {
 async function handleEnabledChange(skillId: string, enabled: boolean): Promise<void> {
   if (!props.active || !canManage.value) return;
   const updated = await skillStore.setEnabled(skillId, enabled);
-  if (updated) message.success(enabled ? "Skill 已启用。" : "Skill 已停用。");
-  else message.error(skillStore.operationErrors[skillId] ?? "Skill 状态更新失败，请稍后重试。");
+  if (!updated) message.error(skillStore.operationErrors[skillId] ?? "Skill 状态更新失败，请稍后重试。");
+  else if (skillStore.skills.find(skill => skill.id === skillId)?.enabled === enabled) {
+    message.success(enabled ? "Skill 已启用。" : "Skill 已停用。");
+  }
 }
 
 function requestUninstall(skillId: string, trigger: HTMLElement): void {
@@ -222,7 +241,7 @@ onBeforeUnmount(() => {
     </div>
     <n-alert v-if="skillStore.notice" type="info" :bordered="false">{{ skillStore.notice }}</n-alert>
     <n-alert v-if="skillStore.importError && !importDialogOpen" type="warning" :bordered="false" role="alert">{{ skillStore.importError }}</n-alert>
-    <n-alert v-for="operation in skillStore.pendingOperations" :key="operation.operation_id" type="info" :bordered="false" role="status">
+    <n-alert v-for="operation in pendingNotices" :key="operation.operation_id" type="info" :bordered="false" role="status">
       {{ operation.error_code ? nativeSkillFailureMessage(operation.error_code) : operation.state === 'needs_attention' ? '技能操作需要检查，来源和旧数据已保留。' : '正在确认技能操作。已有任务结束后会继续处理。' }}
       <n-button v-if="canManage" size="small" @click="skillStore.cancelOperation(operation.operation_id)">取消操作</n-button>
     </n-alert>
@@ -305,9 +324,11 @@ onBeforeUnmount(() => {
               :can-manage="canManage"
               :operation="skillStore.operations[skill.id]"
               :operation-error="skillStore.operationErrors[skill.id]"
+              :pending-toggle-id="pendingCardToggles.get(skill.id)"
               @install="handleInstall"
               @enabled-change="handleEnabledChange"
               @uninstall="requestUninstall"
+              @cancel-operation="skillStore.cancelOperation"
             />
           </li>
         </ul>

@@ -24,6 +24,7 @@ const props = withDefaults(defineProps<{
   turnTimingLabels?: Readonly<Record<string, string | null>>;
   deliveredArtifactTurnIds?: ReadonlySet<string>;
   skillCatalog?: readonly SelectedChatSkill[];
+  skillToolNotices?: Readonly<Record<string, string>>;
   connectorNamesByTurn?: Readonly<Record<string, readonly string[]>>;
   canDecideApprovals?: boolean;
   approvalAuthorityRevision?: number;
@@ -166,6 +167,7 @@ function threadErrorMessage(notice: ConversationTimelineNoticeViewModel): string
         <ChatTurnGroup
           :turn="turn"
           :skill-catalog="skillCatalog"
+          :skill-tool-notice="skillToolNotices?.[turn.turnId]"
           :position="index + 1"
           :timing-label="turnTimingLabels[turn.turnId] ?? null"
           :has-delivered-artifact="deliveredArtifactTurnIds.has(turn.turnId)"

@@ -74,6 +74,12 @@ describe("design 2.1 resolved component colors", () => {
     expect(read("--yj-color-text-on-accent")).toBe(graphite);
   });
 
+  it.each(["light", "dark"] as const)("uses the same lime for running and completed sidebar tasks in %s", (theme) => {
+    const read = themeReader(theme);
+    expect(read("--yj-color-chat-task-indicator")).toBe("#8ac20f");
+    expect(read("--yj-color-chat-completion-dot")).toBe("#8ac20f");
+  });
+
   it.each(["light", "dark"] as const)("keeps chart lines and tooltip readable in %s", (theme) => {
     const read = themeReader(theme);
     const chart = createArtifactReportEChartsTheme(read);

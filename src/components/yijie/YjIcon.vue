@@ -14,7 +14,7 @@ const props = withDefaults(
   defineProps<{
     name: YjIconName;
     size?: keyof typeof sizeMap;
-    tone?: "default" | "muted" | "primary" | "success" | "warning" | "error";
+    tone?: "default" | "muted" | "subtle" | "primary" | "success" | "warning" | "error";
     strokeWidth?: number;
     label?: string;
   }>(),
@@ -55,6 +55,14 @@ const toneClass = computed(() => `yj-icon--${props.tone}`);
 }
 
 .yj-icon--muted {
+  color: var(--yj-color-icon-muted);
+}
+
+.yj-icon--subtle {
+  color: var(--yj-color-icon-subtle);
+}
+
+button:enabled:hover:not([aria-disabled="true"]) .yj-icon--subtle {
   color: var(--yj-color-icon-muted);
 }
 

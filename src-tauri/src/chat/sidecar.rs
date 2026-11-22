@@ -1198,7 +1198,7 @@ impl SidecarSupervisor {
                             retain_unknown_child(state, "market_control_handshake_unavailable");
                             return Err(ChatError::CleanupIncomplete);
                         }
-                        authority.bind_market_control(pipe)?;
+                        authority.bind_market_control(instance_nonce.to_owned(), pipe)?;
                         state.market_hello = true;
                     }
                 }

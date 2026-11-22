@@ -26,6 +26,7 @@ const props = withDefaults(defineProps<{
   timingLabel?: string | null;
   hasDeliveredArtifact?: boolean;
   skillCatalog?: readonly SelectedChatSkill[];
+  skillToolNotice?: string;
   connectorNames?: readonly string[];
   canDecideApprovals?: boolean;
   approvalAuthorityRevision?: number;
@@ -253,6 +254,9 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
 
     <ol v-if="nodes.length || timingObserved || plan || preloading" class="chat-turn-group__items" aria-label="本轮对话内容">
       <template v-for="node in entries" :key="node.identity">
+        <li v-if="node.kind === 'timing' && skillToolNotice" class="chat-turn-group__skill-tools">
+          <span role="status" aria-label="技能使用条件">{{ skillToolNotice }}</span>
+        </li>
         <li v-if="node.kind === 'timing' && (hasProcess || timingObserved || preloading)" class="chat-turn-group__timing">
           <span v-if="preloading" class="chat-turn-group__thinking" role="status" aria-live="polite"><ChatThinkingIndicator /></span>
           <button v-else-if="hasProcess" class="chat-turn-group__process-toggle chat-activity-disclosure" type="button" :aria-expanded="processExpanded" :aria-controls="processControls" @click="toggleProcess">
@@ -379,11 +383,17 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
   line-height: var(--yj-line-height-body);
 }
 
+.chat-turn-group__skill-tools,
 .chat-turn-group__turn-state {
   margin: var(--yj-space-0);
   color: var(--yj-color-text-secondary);
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
+}
+
+.chat-turn-group__skill-tools {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 
 .chat-turn-group__items,

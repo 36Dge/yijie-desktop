@@ -285,7 +285,7 @@ describe("ChatCommandItem", () => {
     expect(wrapper.text()).not.toContain(RAW_COMMAND_CANARY);
     expect(wrapper.html()).not.toContain("rawCommand");
 
-    await wrapper.get("button[aria-label='复制代码']").trigger("click");
+    await wrapper.get("button[aria-label='复制信息']").trigger("click");
     await flushPromises();
     expect(writeText).toHaveBeenCalledOnce();
     expect(writeText).toHaveBeenCalledWith("只包含安全投影的输出");

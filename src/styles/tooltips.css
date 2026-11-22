@@ -30,6 +30,12 @@ body > .v-binder-follower-container:has(> .v-binder-follower-content > .n-toolti
   box-shadow: none;
 }
 
+/* The popup and its arrow both have pointer hit targets in Naive UI. */
+.n-tooltip.yj-tooltip--trigger-only,
+.n-tooltip.yj-tooltip--trigger-only .n-popover-arrow-wrapper .n-popover-arrow {
+  pointer-events: none;
+}
+
 [v-placement^="top"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow,
 [v-placement^="bottom"] > .n-popover.n-tooltip > .n-popover-arrow-wrapper .n-popover-arrow {
   width: var(--yj-tooltip-arrow-width);

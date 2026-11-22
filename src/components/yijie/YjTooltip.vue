@@ -14,6 +14,7 @@ export default defineComponent({
     text: String as PropType<string | null>,
     placement: { type: String as PropType<PopoverPlacement>, default: "top" },
     showArrow: { type: Boolean, default: true },
+    keepAliveOnHover: { type: Boolean, default: true },
     to: { type: [String, Object, Boolean] as PropType<string | HTMLElement | false>, default: undefined },
   },
   emits: ["show"],
@@ -43,8 +44,10 @@ export default defineComponent({
     onBeforeUnmount(() => { if (activeTooltip.value === owner) activeTooltip.value = null; });
     return () => h(NTooltip, {
       trigger: "manual", show: show.value, placement: props.placement, showArrow: props.showArrow, arrowPointToCenter: true, to: props.to,
-      onMouseenter: () => { hovered.value = true; resume(); },
-      onMouseleave: () => { hovered.value = false; leave(); },
+      keepAliveOnHover: props.keepAliveOnHover,
+      class: { "yj-tooltip--trigger-only": !props.keepAliveOnHover },
+      onMouseenter: props.keepAliveOnHover ? () => { hovered.value = true; resume(); } : undefined,
+      onMouseleave: props.keepAliveOnHover ? () => { hovered.value = false; leave(); } : undefined,
     }, {
       trigger: () => {
         const child = slots.default?.().find(node => node.type !== Comment);

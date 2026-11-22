@@ -41,6 +41,25 @@ it("supports keyboard focus and dismisses when the hint is removed", async () =>
   expect(button.attributes("aria-describedby")).toBeUndefined();
 });
 
+it("keeps a trigger-only hint closed when its fading surface receives a hover event", async () => {
+  const wrapper = mount(YjTooltip, {
+    props: { text: "卸载", keepAliveOnHover: false },
+    slots: { default: () => h("button", "操作") },
+    attachTo: document.body,
+  });
+  wrappers.push(wrapper);
+  const button = wrapper.get("button");
+  await button.trigger("mouseenter");
+  await flushPromises();
+  const popup = document.getElementById(button.attributes("aria-describedby")!)!.closest(".n-tooltip")!;
+  expect(popup.classList.contains("yj-tooltip--trigger-only")).toBe(true);
+  await button.trigger("mouseleave");
+  popup.dispatchEvent(new MouseEvent("mouseenter"));
+  await flushPromises();
+  expect(wrapper.getComponent(NTooltip).props("show")).toBe(false);
+  expect(button.attributes("aria-describedby")).toBeUndefined();
+});
+
 it("shows only the closest hint for nested controls and restores its parent on leave", async () => {
   const wrapper = mount({ render: () => h(YjTooltip, { text: "专家说明" }, () => h("button", [h(YjTooltip, { text: "专家完整名称" }, () => h("span", "专家"))])) }, { attachTo: document.body });
   wrappers.push(wrapper);

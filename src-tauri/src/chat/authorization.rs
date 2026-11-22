@@ -1,3 +1,4 @@
+use super::connectors::{broker_generated as broker, control::MarketControl};
 use super::database::ChatScope;
 use super::error::ChatError;
 use std::collections::{HashMap, HashSet};
@@ -146,6 +147,43 @@ impl Debug for ChatAuthorizationContext {
     }
 }
 
+pub(crate) struct MarketRenewal {
+    pipe: MarketControl,
+    request: broker::RenewScopeRequest,
+    shortening: bool,
+}
+
+impl MarketRenewal {
+    pub(crate) async fn deliver(self) -> Result<(), ()> {
+        use super::connectors::{control::ControlError, host_generated::ErrorCode};
+        let reply = self
+            .pipe
+            .request::<_, broker::RenewScopeResponse>(&self.request.request_id, &self.request)
+            .await;
+        if matches!(&reply, Ok(response) if response.data == self.request.payload) {
+            return Ok(());
+        }
+        // A shorter permission must take effect even if its acknowledgement
+        // was lost. Normal EOF retires every permit on this owner generation.
+        let authority_lost = matches!(&reply, Err(ControlError::Rejected(error)) if matches!(
+            error.code, ErrorCode::AuthorityMismatch | ErrorCode::ScopeExpired | ErrorCode::PermissionDenied
+        ));
+        if self.shortening || reply.is_ok() || authority_lost {
+            self.pipe.retire();
+        }
+        match reply {
+            Err(ControlError::Busy) => Err(()),
+            Err(ControlError::Rejected(error))
+                if error.code == ErrorCode::TemporarilyUnavailable =>
+            {
+                Err(())
+            }
+            // No live worker/older peer: the old lease keeps its own deadline.
+            _ => Ok(()),
+        }
+    }
+}
+
 struct ContextRecord {
     process_epoch: Uuid,
     authorization_revision: u64,
@@ -157,7 +195,8 @@ struct AuthorizationState {
     highest_revision: u64,
     highest_capabilities: Option<HashSet<String>>,
     contexts: HashMap<Uuid, ContextRecord>,
-    market_control: Option<super::connectors::control::MarketControl>,
+    market_control: Option<(String, MarketControl)>,
+    market_renewal_sequence: i64,
 }
 
 struct AuthorizationInner {
@@ -196,6 +235,7 @@ impl ChatAuthorizationManager {
                     highest_capabilities: None,
                     contexts: HashMap::new(),
                     market_control: None,
+                    market_renewal_sequence: 0,
                 }),
             }),
         })
@@ -358,7 +398,7 @@ impl ChatAuthorizationManager {
         }
         if projection.authorization_revision > state.highest_revision {
             if state.highest_revision > 0 {
-                if let Some(control) = state.market_control.take() {
+                if let Some((_, control)) = state.market_control.take() {
                     control.retire();
                 }
             }
@@ -399,7 +439,7 @@ impl ChatAuthorizationManager {
         context_id: Uuid,
         projection: AuthoritativeChatProjection,
         now: i64,
-    ) -> Result<ChatAuthorizationContext, ChatError> {
+    ) -> Result<(ChatAuthorizationContext, Option<MarketRenewal>), ChatError> {
         if now < 0 || projection.tenant_id != self.inner.tenant_id {
             return Err(ChatError::ScopeDenied);
         }
@@ -424,7 +464,7 @@ impl ChatAuthorizationManager {
                 state.highest_revision = projection.authorization_revision;
                 state.highest_capabilities = Some(projection.capabilities);
             }
-            if let Some(control) = state.market_control.take() {
+            if let Some((_, control)) = state.market_control.take() {
                 control.retire();
             }
             return Err(ChatError::ScopeDenied);
@@ -433,15 +473,55 @@ impl ChatAuthorizationManager {
             now.checked_add(MAX_CONTEXT_LIFETIME_SECONDS)
                 .ok_or(ChatError::ScopeDenied)?,
         );
+        let shortening = expires_at < record.expires_at;
+        let market = if ["task.read", "task.create", "connector.use"]
+            .iter()
+            .all(|capability| record.capabilities.contains(*capability))
+        {
+            state
+                .market_control
+                .clone()
+                .filter(|(_, pipe)| pipe.is_open())
+        } else {
+            None
+        };
+        let proof = if let Some((host_instance_id, pipe)) = market {
+            let scope = self
+                .market_scope(record.authorization_revision, expires_at)
+                .map_err(|_| ChatError::ScopeDenied)?;
+            state.market_renewal_sequence = state
+                .market_renewal_sequence
+                .checked_add(1)
+                .ok_or(ChatError::ScopeDenied)?;
+            Some(MarketRenewal {
+                pipe,
+                shortening,
+                request: broker::RenewScopeRequest {
+                    schema_version: 1,
+                    request_id: Uuid::now_v7().to_string(),
+                    method: "renew_market_scope".into(),
+                    payload: broker::RenewScopePayload {
+                        host_instance_id,
+                        scope,
+                        sequence: state.market_renewal_sequence,
+                    },
+                },
+            })
+        } else {
+            None
+        };
         state
             .contexts
             .get_mut(&context_id)
             .ok_or(ChatError::ScopeDenied)?
             .expires_at = expires_at;
-        Ok(ChatAuthorizationContext {
-            context_id,
-            expires_at,
-        })
+        Ok((
+            ChatAuthorizationContext {
+                context_id,
+                expires_at,
+            },
+            proof,
+        ))
     }
 
     pub(crate) fn revoke_context(&self, context_id: Uuid) -> Result<(), ChatError> {
@@ -451,7 +531,7 @@ impl ChatAuthorizationManager {
             .lock()
             .map_err(|_| ChatError::ScopeDenied)?;
         if state.contexts.remove(&context_id).is_some() {
-            if let Some(control) = state.market_control.take() {
+            if let Some((_, control)) = state.market_control.take() {
                 control.retire();
             }
         }
@@ -574,7 +654,7 @@ impl ChatAuthorizationManager {
             .lock()
             .map_err(|_| ChatError::ScopeDenied)?;
         state.contexts.clear();
-        if let Some(control) = state.market_control.take() {
+        if let Some((_, control)) = state.market_control.take() {
             control.retire();
         }
         Ok(())
@@ -582,14 +662,15 @@ impl ChatAuthorizationManager {
 
     pub(crate) fn bind_market_control(
         &self,
-        control: super::connectors::control::MarketControl,
+        host_instance: String,
+        control: MarketControl,
     ) -> Result<(), ChatError> {
         let mut state = self
             .inner
             .state
             .lock()
             .map_err(|_| ChatError::ScopeDenied)?;
-        state.market_control = Some(control);
+        state.market_control = Some((host_instance, control));
         Ok(())
     }
 
@@ -773,7 +854,7 @@ mod tests {
         let tenant = Uuid::now_v7();
         let manager = ChatAuthorizationManager::new(&scope(tenant)).unwrap();
         let bound = manager.bind(projection(tenant, 7, 310), 10).unwrap();
-        let renewed = manager
+        let (renewed, _) = manager
             .renew(bound.context_id, projection(tenant, 7, 900), 280)
             .unwrap();
         assert_eq!(renewed.context_id, bound.context_id);
@@ -781,7 +862,7 @@ mod tests {
         manager
             .authorize(bound.context_id, ChatAction::SubmitTurn, 311)
             .unwrap();
-        let limited = manager
+        let (limited, _) = manager
             .renew(bound.context_id, projection(tenant, 7, 550), 300)
             .unwrap();
         assert_eq!(limited.expires_at, 550);

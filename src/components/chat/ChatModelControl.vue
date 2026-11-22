@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { NPopover } from "naive-ui";
 import type { Catalog, ProfileId } from "../../api/chat-model-client";
+import { CHAT_COMPOSER_DEFAULT_PROFILE } from "../../domain/chat-composer-draft";
 import type { YjIconName } from "../../icons/registry";
 import YjIcon from "../yijie/YjIcon.vue";
 
@@ -34,9 +35,14 @@ const busyLabel = computed(() => props.saving ? "正在切换模型…" : props.
 const label = computed(() => selected.value?.triggerLabel ?? selected.value?.label ?? (busyLabel.value || "模型待识别"));
 const retired = computed(() => props.catalog?.schema_version === 2 && props.profile === "kimi-k3-max-v1");
 // The max profile stays visible on a conversation that was opened with it.
-const modelOptions = computed(() => props.catalog?.models.filter(
-  entry => entry.profile.profile_id !== "kimi-k3-1-pro-max-v1" || entry.profile.profile_id === props.profile,
-) ?? []);
+const modelOptions = computed(() => {
+  const visible = props.catalog?.models.filter(
+    entry => entry.profile.profile_id !== "kimi-k3-1-pro-max-v1" || entry.profile.profile_id === props.profile,
+  ) ?? [];
+  return visible.sort((left, right) =>
+    Number(right.profile.profile_id === CHAT_COMPOSER_DEFAULT_PROFILE) -
+    Number(left.profile.profile_id === CHAT_COMPOSER_DEFAULT_PROFILE));
+});
 const selectedAvailability = computed(() => props.catalog?.models.find((entry) => entry.profile.profile_id === props.profile));
 const unavailable = computed(() => selectedAvailability.value?.available === false);
 function unavailableLabel(reason?: string): string {

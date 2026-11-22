@@ -6,7 +6,7 @@ const DEMO_FAST_PROFILE: &str = "demo_fast";
 pub(crate) const DEMO_FAST_OWNER_USER_ID: &str = "12500000-0000-4000-8000-000000000001";
 pub(crate) const DEMO_FAST_TENANT_ID: &str = "12500000-0000-4000-8000-100000000001";
 pub(crate) const DEMO_FAST_AUTHORIZATION_REVISION: u64 = 1;
-pub(crate) const DEMO_FAST_PROJECTION_TTL_SECONDS: u64 = 240;
+pub(crate) const DEMO_FAST_PROJECTION_TTL_SECONDS: u64 = 300;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum LocalRuntimeProfile {

@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, provide, ref, watch } from "vue";
 import type { ConversationTimelineArtifactReferenceContentBlock, ConversationTimelineAttachmentReferenceContentBlock, ConversationTimelineContentBlock } from "../../domain/conversation-timeline";
-import { createChatMarkdownParser, type ChatMarkdownDocument, type ChatContentNode, type ChatInlineNode } from "../../domain/chat-markdown";
-import { isSidebarFile } from "../../domain/conversation-file-preview";
+import { createChatMarkdownParser, type ChatMarkdownDocument, type ChatContentNode } from "../../domain/chat-markdown";
 import { measureChatRender } from "../../domain/chat-render-performance";
 import { chatTextRevealKey, liveAnswerArrivalKey, useChatTextReveal } from "../../composables/useChatTextReveal";
 import YjIcon from "../yijie/YjIcon.vue";
@@ -10,7 +9,7 @@ import ChatStreamText from "./ChatStreamText.vue";
 import ChatTextLink from "./ChatTextLink.vue";
 import ChatUserText from "./ChatUserText.vue";
 import type { PositionedChatSkill } from "../../domain/chat-skills";
-import { messageFileWorkspaceKey, messageFileServicesKey, messageLinkTargetKey, type MessageLinkTarget } from "../../composables/useChatMessageLink";
+import { messageFileWorkspaceKey, messageFileLocationKey, messageLinkTargetKey, type MessageLinkTarget } from "../../composables/useChatMessageLink";
 
 const props = withDefaults(defineProps<{
   blocks?: readonly ConversationTimelineContentBlock[];
@@ -33,15 +32,15 @@ defineSlots<{
 }>();
 const root = ref<HTMLElement | null>(null);
 const workspace = inject(messageFileWorkspaceKey, null);
-const fileServices = inject(messageFileServicesKey, null);
+const locateFile = inject(messageFileLocationKey, null);
 const parse = computed(() => createChatMarkdownParser(Boolean(props.fileLinks && props.linkTarget), workspace?.value));
 const documentView = computed<ChatMarkdownDocument>(() => props.parsedNodes ? { nodes: props.parsedNodes, text: "" }
   : measureChatRender("markdown", () => parse.value(props.blocks, props.mode, props.streaming)));
 // A relative link and an absolute path line may denote different files. Fold
 // them only after Native supplies this session's authoritative workspace.
-watch([() => documentView.value.relativeHint?.path, () => props.linkTarget?.itemId, () => fileServices?.value], () => {
+watch([() => documentView.value.relativeHint?.path, () => props.linkTarget?.itemId, () => locateFile?.value], () => {
   const file = documentView.value.relativeHint;
-  if (file && props.linkTarget) void fileServices?.value?.locate(props.linkTarget, file).catch(() => {});
+  if (file && props.linkTarget) void locateFile?.value?.(props.linkTarget, file).catch(() => {});
 }, { immediate: true });
 const inherited = inject(chatTextRevealKey, null);
 const takeArrival = inject(liveAnswerArrivalKey, null);
@@ -64,10 +63,6 @@ const displayNodes = computed<readonly ChatContentNode[]>((previous) => {
 });
 const hasAttachments = computed(() => props.mode === "plain" && nodes.value.some(node => node.kind === "attachment_reference"));
 const firstParagraphKey = computed(() => nodes.value.find(node => node.kind === "paragraph")?.key);
-function isDocumentDelivery(inlines: readonly ChatInlineNode[]) {
-  return props.typography === "answer" && inlines.every(part => part.file || !part.text.trim()) &&
-    inlines.some(part => part.file && isSidebarFile("", part.file.name));
-}
 function visibleItems<T extends { startOffset: number; endOffset: number }>(items: readonly T[]) { return items.filter(item => item.startOffset < reveal.frame.value.cursor || item.startOffset === item.endOffset && item.startOffset <= reveal.frame.value.cursor); }
 function visibleRows<T extends readonly { startOffset: number }[]>(rows: readonly T[]) { return rows.filter(row => (row[0]?.startOffset ?? Infinity) <= reveal.frame.value.cursor); }
 </script>
@@ -86,11 +81,7 @@ function visibleRows<T extends readonly { startOffset: number }[]>(rows: readonl
     </div>
     <p v-if="$slots['text-prefix'] && !firstParagraphKey" class="chat-safe-content__paragraph"><slot name="text-prefix" /></p>
     <template v-for="node in displayNodes" :key="node.key">
-      <div v-if="node.kind === 'paragraph' && isDocumentDelivery(node.inlines)" class="chat-safe-content__file-delivery">
-        <ChatTextLink v-for="inline in node.inlines.filter(part => part.file)" :key="inline.key" standalone
-          :file="inline.file" :text="inline.text" :destination="inline.destination" :streaming="streaming" :offset="inline.startOffset" />
-      </div>
-      <p v-else-if="node.kind === 'paragraph'" class="chat-safe-content__paragraph">
+      <p v-if="node.kind === 'paragraph'" class="chat-safe-content__paragraph">
         <slot v-if="node.key === firstParagraphKey" name="text-prefix" />
         <template v-for="inline in node.inlines" :key="inline.key">
           <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></code>
@@ -254,9 +245,6 @@ function visibleRows<T extends readonly { startOffset: number }[]>(rows: readonl
 .chat-safe-content__paragraph {
   white-space: pre-wrap;
 }
-
-.chat-safe-content__file-delivery { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--yj-space-3); }
-.chat-safe-content__file-delivery :deep(.chat-file-link) { justify-self: start; }
 
 .chat-safe-content__heading {
   margin: var(--yj-space-0);

@@ -1,4 +1,6 @@
 import type { Component } from "vue";
+import { svgIcon } from "./svg-icon";
+import taskRunning from "./custom/task-running.svg?no-inline";
 import { AnswerCopy, AnswerThumbsDown, AnswerThumbsUp, ThumbsDownFilled, ThumbsUpFilled } from "./answer-feedback-icons";
 import { ModelDeepSeek, ModelGlm, ModelKimi, ModelMiniMax } from "./model-icons";
 import { DocumentCode, DocumentGeneric, DocumentMarkdown, DocumentPdf, DocumentPresentation, DocumentSpreadsheet, DocumentText, DocumentWord } from "./document-icons";
@@ -11,7 +13,6 @@ import {
 } from "./skill-category-icons";
 import { Hand as PermissionHand, ShieldAlert as PermissionAlert, Check as PermissionCheck } from "@lucide/vue";
 import {
-  createLucideIcon,
   ArrowDown,
   ArrowRight,
   ArrowUp,
@@ -33,7 +34,6 @@ import {
   ChevronRight,
   CircleStop,
   Clock3,
-  Copy,
   Quote,
   Ellipsis,
   Download,
@@ -136,13 +136,6 @@ import {
   ZoomOut,
 } from "@lucide/vue";
 
-const horizontalSpokes = "M2 12h5 M17 12h5";
-const TaskRunning = createLucideIcon("task-running", [
-  ["path", { d: horizontalSpokes }],
-  ["path", { d: horizontalSpokes, transform: "rotate(60 12 12)" }],
-  ["path", { d: horizontalSpokes, transform: "rotate(120 12 12)" }],
-]);
-
 export const iconRegistry = {
   contextUpdate: ListCollapse,
   modelDeepSeek: ModelDeepSeek,
@@ -166,7 +159,7 @@ export const iconRegistry = {
   previewSidebar: PanelRight,
   enterFullscreen: Maximize2,
   exitFullscreen: Minimize2,
-  copy: Copy,
+  copy: AnswerCopy,
   answerCopy: AnswerCopy,
   answerThumbsUp: AnswerThumbsUp,
   answerThumbsDown: AnswerThumbsDown,
@@ -213,7 +206,7 @@ export const iconRegistry = {
   listView: List,
   lightbulb: Lightbulb,
   loading: LoaderCircle,
-  taskRunning: TaskRunning,
+  taskRunning: svgIcon(taskRunning, "0 0 16 16"),
   search: Search,
   shoppingBag: ShoppingBag,
   image: Image,
@@ -317,6 +310,8 @@ export type YjIconName = keyof typeof iconRegistry;
 // Shared navigation/resource symbols match the composer's fine-line controls
 // everywhere they appear. Explicit component overrides still take precedence.
 export const iconStrokeWidths: Partial<Record<YjIconName, number>> = {
+  copy: 1.5,
+  answerCopy: 1.5,
   newTask: 1.5,
   workspace: 1.5,
   workflow: 1.5,

@@ -17,6 +17,7 @@ use super::feat137::{validate_process_state, ApprovalProjection, ApprovalProject
 use super::host_domain::{HostApprovalDecision, HostApprovalOutcome};
 use super::keychain::{DatabaseKey, ReceiptKey};
 use super::migrations;
+use super::runtime_permissions::{PermissionMode, PermissionState};
 use base64::Engine;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
@@ -2633,17 +2634,11 @@ impl ChatRepository {
                 ],
             )
             .map_err(map_constraint_or_database)?;
-        if let Some(scheduled) = context.scheduled {
+        if context.scheduled.is_some() || context.draft {
             transaction
                 .execute(
                     "INSERT INTO chat_task_permissions(session_id,mode) VALUES(?1,'ask')",
                     [session_id.to_string()],
-                )
-                .map_err(map_sqlite_error)?;
-            transaction
-                .execute(
-                    "UPDATE chat_outbox SET scheduled_run_id=?1 WHERE operation_id=?2",
-                    params![scheduled.run_id, create_operation_id.to_string()],
                 )
                 .map_err(map_sqlite_error)?;
         } else {
@@ -2653,6 +2648,14 @@ impl ChatRepository {
                 &scope.tenant_id,
                 session_id,
             )?;
+        }
+        if let Some(scheduled) = context.scheduled {
+            transaction
+                .execute(
+                    "UPDATE chat_outbox SET scheduled_run_id=?1 WHERE operation_id=?2",
+                    params![scheduled.run_id, create_operation_id.to_string()],
+                )
+                .map_err(map_sqlite_error)?;
         }
         Ok(PendingConversation {
             session_id,
@@ -4714,19 +4717,15 @@ impl ChatRepository {
         })
     }
 
-    pub fn permission_state(
-        &self,
-        session_id: Option<Uuid>,
-    ) -> Result<super::runtime_permissions::PermissionState, ChatError> {
-        let (draft, confirmed): (String, bool) = self.connection.query_row(
-            "SELECT draft_mode, full_access_confirmed FROM chat_permission_preferences WHERE owner_user_id=?1 AND tenant_id=?2",
-            params![self.scope.owner_user_id, self.scope.tenant_id], |r| Ok((r.get(0)?,r.get(1)?))
-        ).optional().map_err(map_sqlite_error)?.unwrap_or(("ask".to_owned(),false));
-        let mut mode = draft;
-        let mut busy = false;
+    pub fn permission_state(&self, session_id: Option<Uuid>) -> Result<PermissionState, ChatError> {
+        let mut state = draft_permission(
+            &self.connection,
+            &self.scope.owner_user_id,
+            &self.scope.tenant_id,
+        )?;
         if let Some(id) = session_id {
             self.session_summary(id)?;
-            mode = self
+            let stored: Option<String> = self
                 .connection
                 .query_row(
                     "SELECT mode FROM chat_task_permissions WHERE session_id=?1",
@@ -4734,16 +4733,12 @@ impl ChatRepository {
                     |r| r.get(0),
                 )
                 .optional()
-                .map_err(map_sqlite_error)?
-                .unwrap_or("ask".to_owned());
-            busy = self.connection.query_row(&super::schedules::recovery::coordination_sql(&self.connection,"SELECT EXISTS(SELECT 1 FROM chat_turns WHERE session_id=?1 AND status IN ('queued','streaming','stopping'))")?,[id.to_string()],|r|r.get(0)).map_err(map_sqlite_error)?;
-            busy |= self.deletion_status_for_session(id)?.is_some();
+                .map_err(map_sqlite_error)?;
+            state.mode = PermissionMode::parse(stored.as_deref().unwrap_or("ask"))?;
+            state.busy = self.connection.query_row(&super::schedules::recovery::coordination_sql(&self.connection,"SELECT EXISTS(SELECT 1 FROM chat_turns WHERE session_id=?1 AND status IN ('queued','streaming','stopping'))")?,[id.to_string()],|r|r.get(0)).map_err(map_sqlite_error)?;
+            state.busy |= self.deletion_status_for_session(id)?.is_some();
         }
-        Ok(super::runtime_permissions::PermissionState {
-            mode: super::runtime_permissions::PermissionMode::parse(&mode)?,
-            full_access_confirmed: confirmed,
-            busy,
-        })
+        Ok(state)
     }
 
     pub fn set_permission_mode(
@@ -4775,11 +4770,23 @@ impl ChatRepository {
             return Err(ChatError::ScopeDenied);
         }
         let tx = self.connection.transaction().map_err(map_sqlite_error)?;
-        tx.execute("INSERT INTO chat_permission_preferences(owner_user_id,tenant_id,draft_mode,full_access_confirmed) VALUES(?1,?2,'ask',?3) ON CONFLICT(owner_user_id,tenant_id) DO UPDATE SET full_access_confirmed=MAX(full_access_confirmed,excluded.full_access_confirmed)",params![self.scope.owner_user_id,self.scope.tenant_id,mode == super::runtime_permissions::PermissionMode::Full && confirm_full]).map_err(map_sqlite_error)?;
+        let confirms_full = mode == PermissionMode::Full && confirm_full;
         if let Some(id) = session_id {
+            if confirms_full {
+                tx.execute(
+                    "INSERT INTO chat_permission_preferences(owner_user_id,tenant_id,draft_mode,full_access_confirmed)
+                     VALUES(?1,?2,?3,1) ON CONFLICT(owner_user_id,tenant_id) DO UPDATE SET full_access_confirmed=1",
+                    params![self.scope.owner_user_id, self.scope.tenant_id, PermissionMode::new_chat_default().as_str()],
+                ).map_err(map_sqlite_error)?;
+            }
             tx.execute("INSERT INTO chat_task_permissions(session_id,mode) VALUES(?1,?2) ON CONFLICT(session_id) DO UPDATE SET mode=excluded.mode",params![id.to_string(),mode.as_str()]).map_err(map_sqlite_error)?;
         } else {
-            tx.execute("UPDATE chat_permission_preferences SET draft_mode=?3 WHERE owner_user_id=?1 AND tenant_id=?2",params![self.scope.owner_user_id,self.scope.tenant_id,mode.as_str()]).map_err(map_sqlite_error)?;
+            tx.execute(
+                "INSERT INTO chat_permission_preferences(owner_user_id,tenant_id,draft_mode,full_access_confirmed)
+                 VALUES(?1,?2,?3,?4) ON CONFLICT(owner_user_id,tenant_id) DO UPDATE SET
+                 draft_mode=excluded.draft_mode, full_access_confirmed=MAX(full_access_confirmed,excluded.full_access_confirmed)",
+                params![self.scope.owner_user_id, self.scope.tenant_id, mode.as_str(), confirms_full],
+            ).map_err(map_sqlite_error)?;
         }
         tx.commit().map_err(map_sqlite_error)?;
         self.permission_state(session_id)
@@ -9292,14 +9299,52 @@ fn unix_seconds() -> Result<i64, ChatError> {
         .map_err(|_| ChatError::DatabaseUnavailable)
 }
 
+fn draft_permission(
+    db: &Connection,
+    owner: &str,
+    tenant: &str,
+) -> Result<PermissionState, ChatError> {
+    let saved: Option<(String, bool)> = db.query_row(
+        "SELECT draft_mode, full_access_confirmed FROM chat_permission_preferences WHERE owner_user_id=?1 AND tenant_id=?2",
+        params![owner, tenant], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).optional().map_err(map_sqlite_error)?;
+    let (mode, full_access_confirmed) = match saved {
+        Some((mode, confirmed)) => (PermissionMode::parse(&mode)?, confirmed),
+        None => (PermissionMode::new_chat_default(), false),
+    };
+    Ok(PermissionState {
+        mode,
+        full_access_confirmed,
+        busy: false,
+    })
+}
+
 fn persist_new_task_permission(
     tx: &rusqlite::Transaction<'_>,
     owner: &str,
     tenant: &str,
     session_id: Uuid,
 ) -> Result<(), ChatError> {
-    tx.execute("INSERT INTO chat_task_permissions(session_id,mode) VALUES(?1,COALESCE((SELECT draft_mode FROM chat_permission_preferences WHERE owner_user_id=?2 AND tenant_id=?3),'ask'))",params![session_id.to_string(),owner,tenant]).map_err(map_sqlite_error)?;
-    tx.execute("UPDATE chat_permission_preferences SET draft_mode='ask' WHERE owner_user_id=?1 AND tenant_id=?2",params![owner,tenant]).map_err(map_sqlite_error)?;
+    let draft = draft_permission(tx, owner, tenant)?;
+    tx.execute(
+        "INSERT INTO chat_task_permissions(session_id,mode) VALUES(?1,?2)",
+        params![session_id.to_string(), draft.authorized_mode().as_str()],
+    )
+    .map_err(map_sqlite_error)?;
+    if draft.full_access_confirmed {
+        tx.execute(
+            "UPDATE chat_permission_preferences SET draft_mode=?3 WHERE owner_user_id=?1 AND tenant_id=?2",
+            params![owner, tenant, PermissionMode::new_chat_default().as_str()],
+        ).map_err(map_sqlite_error)?;
+    } else {
+        // Consuming this override leaves a fresh draft. Older clients must never
+        // find an unconfirmed full grant in the persisted preference.
+        tx.execute(
+            "DELETE FROM chat_permission_preferences WHERE owner_user_id=?1 AND tenant_id=?2",
+            params![owner, tenant],
+        )
+        .map_err(map_sqlite_error)?;
+    }
     Ok(())
 }
 
@@ -12240,17 +12285,29 @@ mod tests {
         fs::create_dir(&root).unwrap();
         let owner = scope();
         let mut repository = open_repository_for_scope(&root, 23, owner.clone());
-        assert_eq!(
-            repository.permission_state(None).unwrap().mode,
+        let expected_default = if super::super::runtime_permissions::enabled() {
+            PermissionMode::Full
+        } else {
             PermissionMode::Ask
-        );
+        };
+        let fresh = repository.permission_state(None).unwrap();
+        assert_eq!(fresh.mode, expected_default);
+        assert!(!fresh.full_access_confirmed);
         assert!(repository
             .set_permission_mode(None, PermissionMode::Full, false)
             .is_err());
+        let project = register_synthetic_project(&mut repository, &root);
+        let unconfirmed = repository
+            .create_session_and_enqueue(project, "Ordinary task before consent", Uuid::now_v7())
+            .unwrap();
+        let before_consent = repository
+            .permission_state(Some(unconfirmed.session_id))
+            .unwrap();
+        assert_eq!(before_consent.mode, PermissionMode::Ask);
+        assert!(!before_consent.full_access_confirmed);
         repository
             .set_permission_mode(None, PermissionMode::Full, true)
             .unwrap();
-        let project = register_synthetic_project(&mut repository, &root);
         let first = repository
             .create_session_and_enqueue(project, "Permission storage sample", Uuid::now_v7())
             .unwrap();
@@ -12278,6 +12335,32 @@ mod tests {
             .is_err());
         assert_eq!(
             repository.permission_state(None).unwrap().mode,
+            expected_default
+        );
+        let inherited = repository
+            .create_session_and_enqueue_multimodal(
+                project,
+                &[DraftContentBlock::Text(
+                    "New conversation after consent".into(),
+                )],
+                Uuid::now_v7(),
+                1,
+            )
+            .unwrap();
+        assert_eq!(
+            repository
+                .permission_state(Some(inherited.session_id))
+                .unwrap()
+                .mode,
+            expected_default
+        );
+        repository
+            .set_permission_mode(None, PermissionMode::Ask, false)
+            .unwrap();
+        drop(repository);
+        let mut repository = open_repository_for_scope(&root, 23, owner.clone());
+        assert_eq!(
+            repository.permission_state(None).unwrap().mode,
             PermissionMode::Ask
         );
         let second = repository
@@ -12292,6 +12375,17 @@ mod tests {
         );
         drop(repository);
         let reopened = open_repository_for_scope(&root, 23, owner);
+        assert_eq!(
+            reopened.permission_state(None).unwrap().mode,
+            expected_default
+        );
+        assert_eq!(
+            reopened
+                .permission_state(Some(unconfirmed.session_id))
+                .unwrap()
+                .mode,
+            PermissionMode::Ask
+        );
         let restored = reopened.permission_state(Some(first.session_id)).unwrap();
         assert_eq!(restored.mode, PermissionMode::Full);
         assert!(restored.full_access_confirmed);

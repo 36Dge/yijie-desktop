@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -17,6 +17,42 @@ spec.loader.exec_module(preflight)
 
 
 class StartupFreshnessTest(unittest.TestCase):
+    def test_editor_checks_registered_worktree_and_only_reuses_proven_equivalent_inputs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            coze = Path(temp)
+            def git(*args):
+                return preflight.git(coze, *args)
+            git("init", "-q")
+            (coze / "frontend").mkdir()
+            source = coze / "frontend/view.css"
+            source.write_text("p { margin: 0; }\n")
+            git("add", "frontend/view.css")
+            git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "baseline")
+            base = git("rev-parse", "HEAD").decode().strip()
+            clean = preflight.candidate_digest(preflight.repository_hashes(coze))
+            source.write_text("p { margin: 4px; }\n")
+            edited = preflight.candidate_digest(preflight.repository_hashes(coze))
+            editor = {"source_commit": base, "coze_candidate": edited}
+            state = {"editor": editor}
+            ctl, review = Mock(), Mock()
+            ctl.WorkflowError = RuntimeError
+            def verify():
+                hashes = preflight.repository_hashes(coze)
+                preflight.verify_workflow_editor(coze, state, coze, hashes, preflight.candidate_digest(hashes))
+            with patch.object(preflight.runpy, "run_path", return_value={"ctl": ctl, "review": review}):
+                verify()
+                ctl.verify_editor.assert_called_once_with(state)
+                source.write_text("p { margin: 0; }\n")
+                with self.assertRaisesRegex(ValueError, "源码与已登记的构建不一致"):
+                    verify()
+                editor["coze_candidate"] = clean
+                (coze / "notes.md").write_text("Release notes\n")
+                verify()
+                review.check_old_assets.assert_called_once_with(ctl, editor)
+                (coze / "frontend/label.css").write_text("label { display: block; }\n")
+                with self.assertRaisesRegex(ValueError, "源码与已登记的构建不一致"):
+                    verify()
+
     def test_workflow_provenance_reconstructs_the_recorded_tree_and_checks_copied_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp).resolve()
