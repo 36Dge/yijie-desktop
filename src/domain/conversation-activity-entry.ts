@@ -1,5 +1,6 @@
 import type { YjIconName } from "../icons/registry";
 import type { ConversationTimelineItemViewModel as Item } from "./conversation-timeline";
+import { nativeMcpLabels } from "./native-mcp-display";
 
 /** A reading row references a native fact; it is never another execution. */
 export type ConversationActivityEntry = Readonly<{
@@ -26,14 +27,16 @@ export function activityItemIcon(item: Item, mcp = activityNativeItem(item)?.mcp
     case "artifact": return "file";
     case "command": return item.execution?.kind === "command" ? "terminal" : "workspace";
     case "web_search": return "globe";
-    case "tool":
-      if (activityNativeItem(item)?.type === "fileChange") return "fileEdit";
-      if (activityNativeItem(item)?.type === "imageView") return "viewImage";
+    case "tool": {
+      const type = activityNativeItem(item)?.type;
+      if (type === "fileChange") return "fileEdit";
+      if (type === "imageView") return "viewImage";
       if (mcp?.server === "yijie_web") {
         if (mcp.tool === "kimi_web_search_pro") return "scanSearch";
         if (mcp.tool === "kimi_web_fetch") return "readPage";
       }
-      return "skillOperations";
+      return type === "mcpToolCall" ? "connector" : "skillOperations";
+    }
     default: return "warning";
   }
 }
@@ -73,31 +76,15 @@ function commandTitle(item: Item, action?: NonNullable<NonNullable<ReturnType<ty
   return preview && !genericCommandLabels.has(preview) ? `运行 ${preview}` : "运行命令";
 }
 
-// Display labels for the existing canonical broker tools, not registration or
-// permission identities. Unknown services and meaningful native titles keep
-// their existing presentation; the underlying fact is never rewritten.
-const brokerWebTitles = new Map([
-  ["kimi_web_search", "搜索网页（Kimi Basic）"],
-  ["kimi_web_search_pro", "搜索网页（Kimi Pro）"],
-  ["kimi_web_fetch", "读取网页（Kimi）"],
-]);
-function knownBrokerWebTitle(item: Item): string | undefined {
-  const mcp = activityNativeItem(item)?.mcp;
-  if(mcp?.server === "yijie_web") return new Map([["kimi_web_search", "采集网页资料"], ["kimi_web_search_pro", "网页深度搜索"], ["kimi_web_fetch", "读取指定网页"]]).get(mcp.tool ?? "");
-  return mcp?.server === "yijie_market" ? brokerWebTitles.get(mcp.tool ?? "") : undefined;
-}
 export function activityToolSourceLabel(item: Item): string | undefined {
   const native = activityNativeItem(item);
-  const source = native?.toolDisplay?.sourceLabel;
-  return knownBrokerWebTitle(item) && (!source || source === native?.mcp?.server) ? (native?.mcp?.server === "yijie_web" ? "易界网页检索" : "Kimi 网页检索") : source;
+  return native?.type === "mcpToolCall" ? nativeMcpLabels(native).source : native?.toolDisplay?.sourceLabel;
 }
 export function activityToolTitle(item: Item): string {
   const native = activityNativeItem(item);
   if (native?.type === "imageView") return "查看图片";
-  const title = native?.toolDisplay?.title || native?.toolLabel;
-  const mcp = native?.mcp;
-  const genericIdentity = !title || title === mcp?.tool || title === `${mcp?.server} / ${mcp?.tool}` || title === `${mcp?.server}/${mcp?.tool}` || title === "调用工具";
-  return (genericIdentity ? knownBrokerWebTitle(item) : undefined) || title || activityToolSourceLabel(item) || "调用工具";
+  if (native?.type === "mcpToolCall") return nativeMcpLabels(native).title;
+  return native?.toolDisplay?.title || native?.toolLabel || native?.toolDisplay?.sourceLabel || "调用工具";
 }
 
 export function activityWebTitle(item: Item): string {

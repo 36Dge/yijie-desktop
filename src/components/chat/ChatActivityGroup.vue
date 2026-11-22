@@ -65,17 +65,19 @@ function toggle() {
 .chat-activity-group__items { grid-area: 1 / 1; min-width: 0; list-style: none; margin: 0; padding: 0 var(--yj-space-3) 0 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--yj-space-3); }
 
 /* Only rows inside the shared frame use this layout. A standalone row is outside the list. */
-.chat-activity-group__items > .chat-turn-group__item--command :deep(.chat-timeline-item-shell__disclosure[aria-expanded="true"]) {
+.chat-activity-group__items > .chat-turn-group__item--command :deep(.chat-timeline-item-shell__disclosure[aria-expanded="true"]),
+.chat-activity-group__items :deep(.mcp-tool-row .chat-timeline-item-shell__disclosure[aria-expanded="true"]) {
   color: var(--yj-color-text-primary);
 }
-.chat-activity-group__items > .chat-turn-group__item--command :deep(.chat-timeline-item-shell__disclosure[aria-expanded="true"] strong) {
+.chat-activity-group__items > .chat-turn-group__item--command :deep(.chat-timeline-item-shell__disclosure[aria-expanded="true"] strong),
+.chat-activity-group__items :deep(.mcp-tool-row .chat-timeline-item-shell__disclosure[aria-expanded="true"] strong) {
   font-weight: var(--yj-font-weight-medium);
 }
 
-.chat-activity-group__items :deep(.chat-command-item__details) {
+.chat-activity-group__items :deep(.chat-execution-details) {
   gap: var(--yj-space-2);
   padding-block: 0 var(--yj-space-1);
-  /* Align with the title after its one-em terminal icon and the label gap. */
+  /* Align with the title after its one-em activity icon and the label gap. */
   padding-inline: calc(var(--yj-font-size-body) + var(--yj-space-2)) 0;
   border-radius: 0;
   background: transparent;

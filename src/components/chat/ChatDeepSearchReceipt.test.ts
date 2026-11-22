@@ -19,7 +19,7 @@ function search(id: string, change: Partial<Fact> = {}) {
   });
 }
 const separator = traceItem("progress", "agentMessage", {phase: "commentary", text: "已核对预约。"});
-it("places eleven calls in two batches on one primary card and restores all logical IDs", async () => {
+it("shows each grouped call in order with its outcome across both batches", async () => {
   const calls = Array.from({length: 11}, (_, n) => search("call-" + n, {relation: n ? "reused" : "first"}));
   const changed = search("filtered", {operation_id: "019a8811-0000-7000-8000-000000000176", relation: "first"});
   const items = [...calls.slice(0, 8), separator, ...calls.slice(8), changed];
@@ -31,8 +31,9 @@ it("places eleven calls in two batches on one primary card and restores all logi
     expect(cards[0]!.get(disclosure).attributes("aria-description")).toContain("0 条结果 · 已复用 10 次");
     expect(cards[0]!.get(disclosure).text()).not.toMatch(/条结果|已复用/);
     await cards[0]!.get(disclosure).trigger("click");
-    expect(cards[0]!.findAll(".native-tool__calls li")).toHaveLength(11);
-    for (const call of calls) expect(cards[0]!.text()).toContain(call.id);
+    const details = cards[0]!.findAll(".native-tool__calls li").map(row => row.text());
+    expect(details).toEqual(calls.map((call, index) =>
+      `本轮第 ${items.indexOf(call) + 1} 项 · ${index === 0 ? "已收到服务响应" : "复用原结果"}`));
     wrapper.unmount();
   }
 });

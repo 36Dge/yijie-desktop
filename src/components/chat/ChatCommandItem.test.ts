@@ -412,6 +412,9 @@ describe("ChatCommandItem", () => {
     expect(sourceText).toContain('aria-live="polite"');
     expect(sourceText).toContain("max-width: 100%");
     expect(sourceText).toContain("overflow-wrap: anywhere");
-    expect(sourceText).toContain("@media (max-width: 40rem)");
+    expect(wrapper.get(".chat-command-item__details").classes()).toContain("chat-execution-details");
+    const detailsCss = readFileSync("src/components/chat/chat-execution-details.css", "utf8");
+    expect(detailsCss).toContain("@media (max-width: 40rem)");
+    expect(detailsCss).toContain("padding-inline: var(--yj-space-3)");
   });
 });

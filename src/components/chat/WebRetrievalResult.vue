@@ -2,9 +2,11 @@
 import { computed, ref, useId } from "vue";
 import { sourceHref } from "../../composables/useWebSources";
 import { readWebRetrievalResult, type DeepSearchPreview } from "../../domain/web-retrieval-display";
-const props = defineProps<{ tool?: string; text?: string; preview?: DeepSearchPreview }>();
+const props = defineProps<{ tool?: string; text?: string; parsed?: NonNullable<ReturnType<typeof readWebRetrievalResult>>; preview?: DeepSearchPreview }>();
 const emit = defineEmits<{ "open-source": [url: string] }>();
-const result = computed(() => readWebRetrievalResult(props.tool ?? "", props.text ?? ""));
+const result = computed<ReturnType<typeof readWebRetrievalResult>>(
+  () => props.parsed ?? readWebRetrievalResult(props.tool ?? "", props.text ?? ""),
+);
 const showAll = ref(false);
 const sourceListId = useId();
 const previewLimit = 3;

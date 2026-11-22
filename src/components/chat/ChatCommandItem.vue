@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import "./chat-execution-details.css";
 import { formatToolDuration } from "../../domain/chat-ui";
 import { activityItemTitle } from "../../domain/conversation-activity-summary";
 import { activityItemIcon, type ConversationActivityEntry } from "../../domain/conversation-activity-entry";
@@ -307,7 +308,7 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
       aria-atomic="true"
     >{{ statusPresentation.summary }}</span>
 
-    <div class="chat-command-item__details">
+    <div class="chat-command-item__details chat-execution-details">
       <p v-if="activityEntry && (native?.item.commandActions?.length ?? 0) > 1" class="chat-command-item__state">以下状态和输出属于同一次命令调用。</p>
       <div class="chat-command-item__summary">
         <div class="chat-command-item__section-header">
@@ -370,7 +371,7 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
         </div>
       </div>
 
-      <dl class="chat-command-item__facts yj-selectable-text">
+      <dl class="chat-command-item__facts chat-execution-details__footer yj-selectable-text">
         <div>
           <dt>工作目录</dt>
           <dd>{{ cwdLabel }}</dd>
@@ -393,7 +394,6 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
 </template>
 
 <style scoped>
-.chat-command-item__details,
 .chat-command-item__summary,
 .chat-command-item__output,
 .chat-command-item__output-sections,
@@ -401,13 +401,6 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
 .chat-command-item__error > div {
   display: grid;
   min-width: 0;
-}
-
-.chat-command-item__details {
-  gap: var(--yj-space-3);
-  padding: var(--yj-space-3) var(--yj-space-4);
-  border-radius: var(--yj-radius-xl);
-  background: color-mix(in srgb, var(--yj-color-text-primary) 6%, transparent);
 }
 
 .chat-command-item__summary,
@@ -432,7 +425,6 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
   gap: var(--yj-space-1) var(--yj-space-4);
   min-width: 0;
   margin: var(--yj-space-0);
-  padding: var(--yj-space-0);
   color: var(--yj-color-text-secondary);
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
@@ -441,11 +433,7 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
 
 .chat-command-item__actions {
   list-style: none;
-}
-
-.chat-command-item__facts {
-  border-block-start: var(--yj-border-width) solid color-mix(in srgb, var(--yj-color-text-primary) 6%, transparent);
-  padding-block-start: var(--yj-space-2);
+  padding: var(--yj-space-0);
 }
 
 .chat-command-item__facts > div {
@@ -547,9 +535,4 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
   white-space: nowrap;
 }
 
-@media (max-width: 40rem) {
-  .chat-command-item__details {
-    padding-inline: var(--yj-space-3);
-  }
-}
 </style>

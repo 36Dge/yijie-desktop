@@ -1,0 +1,19 @@
+.chat-execution-details {
+  display: grid;
+  min-width: 0;
+  gap: var(--yj-space-3);
+  padding: var(--yj-space-3) var(--yj-space-4);
+  border-radius: var(--yj-radius-xl);
+  background: color-mix(in srgb, var(--yj-color-text-primary) 6%, transparent);
+}
+
+.chat-execution-details__footer {
+  border-block-start: var(--yj-border-width) solid color-mix(in srgb, var(--yj-color-text-primary) 6%, transparent);
+  padding-block-start: var(--yj-space-2);
+}
+
+@media (max-width: 40rem) {
+  .chat-execution-details {
+    padding-inline: var(--yj-space-3);
+  }
+}

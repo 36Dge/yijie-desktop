@@ -54,7 +54,7 @@ it.each([
   {last: traceItem("command", "commandExecution", {exitCode: 0}), glyph: "lucide-square-terminal"},
   {last: traceItem("plugin", "mcpToolCall", {mcp: {
     server: "external", tool: "kimi_web_search_pro", resultKind: "empty", texts: [], diagnostics: [],
-  }}), glyph: "lucide-blocks"},
+  }}), glyph: "lucide-cable"},
 ])("matches the final row's $glyph icon after a web search", async ({last, glyph}) => {
   const turn = traceTurn([traceItem("web", "webSearch"), last]);
   const wrapper = mount(ChatTurnGroup, {props: {turn, position: 1}});
