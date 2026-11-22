@@ -3,13 +3,43 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 import { marketCallReceipt, marketDecisionFact, marketObservation, marketTestId as id } from "../../test/market-chat-fixture";
 import MarketChatActivity from "./MarketChatActivity.vue";
+const historyProps = {
+  showToolHistory: true, refreshing: false, deciding: null, error: null, actionable: () => false,
+};
+
 describe("market review and result presentation", () => {
+  it("keeps tool history out of chat during approval and after reopening the turn", async () => {
+    const observation = marketObservation();
+    const tool = observation.tools!.items[0]!;
+    tool.state = "completed";
+    tool.resultText = "先前调用的文本结果";
+    tool.structuredResultText = '{"rows":[1]}';
+    observation.availableTurns = [{ nativeTurnId: tool.nativeTurnId, selectionDisplay: observation.selectionDisplay }];
+    observation.decisionFacts = [marketDecisionFact()];
+
+    const props = { observation, connected: true, refreshing: false, deciding: null, error: null, actionable: () => true };
+    const wrapper = mount(MarketChatActivity, { props });
+    expect(wrapper.find(".approval-prompt").exists()).toBe(true);
+    expect(wrapper.find('select, [aria-label="连接器工具结果"], [aria-label="只读决定记录"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("工具调用记录");
+
+    const completed = structuredClone(observation);
+    completed.approvals!.requests = [];
+    await wrapper.setProps({ observation: completed });
+    expect(wrapper.find("section").exists()).toBe(false);
+    wrapper.unmount();
+
+    const reopened = mount(MarketChatActivity, { props: { ...props, observation: completed } });
+    expect(reopened.find("section").exists()).toBe(false);
+    expect(reopened.emitted("decision")).toBeUndefined();
+    reopened.unmount();
+  });
   it("uses append order after clock correction and preserves stronger acknowledgement evidence", async () => {
     const observation = marketObservation(); observation.approvals!.requests = []; observation.tools!.items = [];
     const latest = marketDecisionFact("unconfirmed"); latest.observedAtUnixMs = 1_794_800_001_000;
     const older = marketDecisionFact("requested"); older.observedAtUnixMs = 1_794_800_002_000;
     observation.decisionFacts = [latest, older];
-    const wrapper = mount(MarketChatActivity, { props: { observation, connected: false, refreshing: false, deciding: null, error: null, actionable: () => false } });
+    const wrapper = mount(MarketChatActivity, { props: { ...historyProps, observation, connected: false } });
     expect(wrapper.get('[aria-label="只读决定记录"] .market-activity__meta').text()).toContain(new Date(latest.observedAtUnixMs).toLocaleString('zh-CN'));
     const acknowledged = marketDecisionFact("acknowledged"); acknowledged.observedAtUnixMs = 1_794_800_000_500;
     await wrapper.setProps({ observation: { ...observation, decisionFacts: [latest, acknowledged, older] } });
@@ -20,7 +50,7 @@ describe("market review and result presentation", () => {
     const observation = marketObservation(); observation.approvals!.requests = []; observation.tools!.items = [];
     const fact = marketDecisionFact(); fact.observedAtUnixMs = 1_794_886_903;
     observation.decisionFacts = [fact];
-    const wrapper = mount(MarketChatActivity, { props: { observation, connected: false, refreshing: false, deciding: null, error: null, actionable: () => false } });
+    const wrapper = mount(MarketChatActivity, { props: { ...historyProps, observation, connected: false } });
     expect(wrapper.get('[aria-label="只读决定记录"]').text()).toContain("旧记录时间单位异常");
     expect(fact.observedAtUnixMs).toBe(1_794_886_903);
     expect(wrapper.emitted("decision")).toBeUndefined(); wrapper.unmount();
@@ -29,7 +59,7 @@ describe("market review and result presentation", () => {
     const observation = marketObservation(); observation.approvals!.requests = [];
     const item = observation.tools!.items[0]!; item.state = "completed";
     item.resultText = "one ordinary row"; item.structuredResultText = '{"rows":[1]}'; item.truncated = false;
-    const wrapper = mount(MarketChatActivity, { props: { observation, connected: true, refreshing: false, deciding: null, error: null, actionable: () => false } });
+    const wrapper = mount(MarketChatActivity, { props: { ...historyProps, observation, connected: true } });
     expect(wrapper.text()).toContain("one ordinary row");
     expect(wrapper.get('[aria-label="结构化工具结果"]').text()).toBe('{"rows":[1]}');
     expect(wrapper.text()).not.toContain("部分内容已省略"); wrapper.unmount();
@@ -37,7 +67,7 @@ describe("market review and result presentation", () => {
   it.each(["requested", "acknowledged", "unconfirmed"] as const)("keeps a %s decision without a tool result read-only", (kind) => {
     const observation = marketObservation(); observation.approvals!.requests = []; observation.tools!.items = [];
     observation.decisionFacts = [marketDecisionFact(kind)];
-    const wrapper = mount(MarketChatActivity, { props: { observation, connected: false, refreshing: false, deciding: null, error: null, actionable: () => false } });
+    const wrapper = mount(MarketChatActivity, { props: { ...historyProps, observation, connected: false } });
     const record = wrapper.get('[aria-label="只读决定记录"]');
     expect(record.text()).toContain(kind === "acknowledged" ? "已确认允许一次" : "已请求允许一次");
     expect(record.findAll("button")).toHaveLength(0);
@@ -48,7 +78,7 @@ describe("market review and result presentation", () => {
     const observation = marketObservation(); observation.approvals!.requests = [];
     observation.decisionFacts = [marketDecisionFact("requested"), marketDecisionFact("acknowledged")];
     const item = observation.tools!.items[0]!; item.correlation = marketCallReceipt(); item.callRef = item.correlation.callRef; item.state = "failed";
-    const wrapper = mount(MarketChatActivity, { props: { observation, connected: true, refreshing: false, deciding: null, error: null, actionable: () => false } });
+    const wrapper = mount(MarketChatActivity, { props: { ...historyProps, observation, connected: true } });
     expect(wrapper.find('[aria-label="只读决定记录"]').exists()).toBe(false);
     expect(wrapper.find('[aria-label="连接器工具结果"]').exists()).toBe(false);
     expect(wrapper.text()).not.toContain("执行失败");
@@ -61,7 +91,7 @@ describe("market review and result presentation", () => {
     const item = observation.tools!.items[0]!;
     item.state = "failed"; item.correlation = marketCallReceipt(); item.callRef = item.correlation.callRef;
     observation.availableTurns = [{ nativeTurnId: item.nativeTurnId, selectionDisplay: observation.selectionDisplay }];
-    const wrapper = mount(MarketChatActivity, { props: { observation, connected: true, refreshing: false, deciding: null, error: null, actionable: () => false } });
+    const wrapper = mount(MarketChatActivity, { props: { ...historyProps, observation, connected: true } });
     expect(wrapper.text()).toContain("Tushare·金融数据");
     expect(wrapper.find('[aria-label="连接器工具结果"]').exists()).toBe(false);
     expect(item.correlation.decisionReceipt?.decision).toBe("approve_once");
@@ -80,7 +110,7 @@ describe("market review and result presentation", () => {
     original[0]!.displayName = "原轮次连接器名称";
     observation.availableTurns = [{ nativeTurnId: item.nativeTurnId, selectionDisplay: original }];
     observation.selectionDisplay = next === "empty" ? [] : [{ ...original[0]!, displayName: "新提交名称", reference: { ...original[0]!.reference, generation: 2 } }];
-    const wrapper = mount(MarketChatActivity, { props: { observation, connected: true, refreshing: false, deciding: null, error: null, actionable: () => false } });
+    const wrapper = mount(MarketChatActivity, { props: { ...historyProps, observation, connected: true } });
     const result = wrapper.get('[aria-label="连接器工具结果"]');
     expect(result.get("strong").text()).toBe("原轮次连接器名称");
     expect(result.text()).toContain("原轮次结果");
@@ -97,7 +127,7 @@ describe("market review and result presentation", () => {
       nativeTurnId: source === "other-turn" ? id(40) : item.nativeTurnId,
       selectionDisplay: [{ ...observation.selectionDisplay[0]!, reference: { ...item.correlation.reference, generation: source === "other-generation" ? 2 : 1 } }],
     }];
-    const wrapper = mount(MarketChatActivity, { props: { observation, connected: true, refreshing: false, deciding: null, error: null, actionable: () => false } });
+    const wrapper = mount(MarketChatActivity, { props: { ...historyProps, observation, connected: true } });
     const result = wrapper.get('[aria-label="连接器工具结果"]');
     expect(result.get("strong").text()).toBe("tushareMcp");
     expect(result.text()).toContain("保留原生结果");
@@ -129,7 +159,7 @@ describe("market review and result presentation", () => {
     const wrapper = mount(MarketChatActivity, { props: { observation, liveNativeTurnId: observation.tools!.nativeTurnId,
       connected: true, refreshing: false, deciding: null, error: null, actionable: () => true } });
     expect(wrapper.text()).toContain("读取合成标的指定日期的一条行情数据。");
-    expect(wrapper.text()).toContain("正在等待工具返回");
+    expect(wrapper.text()).not.toContain("正在等待工具返回");
     expect(wrapper.text()).not.toContain("审批与结果关联未确认");
     const approve = wrapper.get('button[aria-keyshortcuts="Enter"]');
     await approve.trigger("click");
@@ -147,8 +177,7 @@ describe("market review and result presentation", () => {
       {...sample, nativeItemId: "success", state: "completed", resultText: "有效结果"},
     );
     const wrapper = mount(MarketChatActivity, {props: {
-      observation, liveNativeTurnId: sample.nativeTurnId, connected: true, refreshing: false,
-      deciding: null, error: null, actionable: () => false,
+      ...historyProps, observation, liveNativeTurnId: sample.nativeTurnId, connected: true,
     }});
     const rows = () => wrapper.findAll('[aria-label="连接器工具结果"]');
     expect(rows()).toHaveLength(2);
@@ -190,7 +219,7 @@ describe("market review and result presentation", () => {
     observation.approvals!.requests[0]!.state = "approved";
     const item = observation.tools!.items[0]!;
     item.state = "completed"; item.resultText = "本次查询结果";
-    const wrapper = mount(MarketChatActivity, { props: { observation, connected: true, refreshing: false, deciding: null, error: null, actionable: () => false } });
+    const wrapper = mount(MarketChatActivity, { props: { ...historyProps, observation, connected: true } });
     expect(wrapper.find(".approval-prompt").exists()).toBe(false);
     expect(wrapper.text()).toContain("本次查询结果");
     expect(wrapper.text()).toContain("审批与结果关联未确认");
@@ -205,7 +234,7 @@ describe("market review and result presentation", () => {
     item.service = { serviceId: "tushareMcp", reference: history.selectionDisplay[0]!.reference, credentialRef: id(50) };
     item.state = "completed"; item.resultText = "原轮次的实际结果";
     live.availableTurns = [{ nativeTurnId: id(40), selectionDisplay: history.selectionDisplay }];
-    const wrapper = mount(MarketChatActivity, { props: { observation: live, toolObservation: history, selectedTurnId: id(40), connected: true, refreshing: false, deciding: null, error: null, actionable: () => true } });
+    const wrapper = mount(MarketChatActivity, { props: { showToolHistory: true, observation: live, toolObservation: history, selectedTurnId: id(40), connected: true, refreshing: false, deciding: null, error: null, actionable: () => true } });
     expect(wrapper.text()).toContain("原轮次名称");
     expect(wrapper.text()).toContain("原轮次的实际结果");
     expect(wrapper.text()).not.toContain("不应恢复的旧审批");

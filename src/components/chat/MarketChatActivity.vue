@@ -12,6 +12,7 @@ const props = defineProps<{
   deciding: string | null;
   error: string | null;
   actionable: (approval: MarketApproval) => boolean;
+  showToolHistory?: boolean;
   toolObservation?: NativeObservation | null;
   selectedTurnId?: string | null;
   liveNativeTurnId?: string | null;
@@ -78,7 +79,7 @@ function callSourceName(turnId: string, identity: Pick<DecisionFact, "serviceId"
 }
 </script>
 <template>
-  <section v-if="observation?.managed || error" class="market-activity" aria-label="连接器调用" :aria-busy="refreshing" aria-live="polite">
+  <section v-if="error || (observation?.managed && (pending.length || remembered.length || showToolHistory))" class="market-activity" aria-label="连接器调用" :aria-busy="refreshing" aria-live="polite">
     <p v-if="error" class="market-activity__notice" role="alert">{{ error }} <button class="yj-control" type="button" :disabled="refreshing || !!deciding" @click="$emit('refresh')">{{ refreshing ? '正在核对' : '刷新状态' }}</button></p>
     <ChatApprovalPrompt v-for="approval in pending" :key="approval.approvalId" :source="approvalName(approval)" icon="connector" :question="approval.review.title"
       :persist-options="approval.persistOptions" :submitting="deciding === approval.approvalId" :disabled="!actionable(approval)"
@@ -93,38 +94,40 @@ function callSourceName(turnId: string, identity: Pick<DecisionFact, "serviceId"
     <p v-for="approval in remembered" :key="approval.approvalId" class="market-activity__meta" role="status">
       {{ approvalName(approval) }} · {{ approval.review.title }} · {{ approval.appliedPersist === "always" ? "已保存长期授权" : approval.appliedPersist === "session" ? "仅本会话有效" : "授权未保存" }}
     </p>
-    <label v-if="observation?.availableTurns?.length" class="market-activity__history">
-      <span>工具调用记录</span>
-      <select class="yj-control" aria-label="查看连接器调用轮次" :value="selectedTurnId ?? ''" @change="$emit('selectTurn', ($event.target as HTMLSelectElement).value || null)">
-        <option value="">最新轮次</option>
-        <option v-for="(turn, index) in observation.availableTurns" :key="turn.nativeTurnId" :value="turn.nativeTurnId">{{ index === 0 ? '最近一次' : `往前第 ${index} 次` }} · {{ turn.selectionDisplay.map(item => item.displayName).join('、') || '未选用连接器' }} · {{ turn.nativeTurnId.slice(-6) }}</option>
-      </select>
-    </label>
-    <p v-if="observation?.turnsTruncated" class="market-activity__meta">仅列出最近 128 轮连接器提交。</p>
-    <p v-if="historyRefreshing" role="status">正在读取所选轮次的工具结果。</p>
-    <p v-if="historyError" role="alert">{{ historyError }} <button class="yj-control" type="button" :disabled="historyRefreshing" @click="$emit('selectTurn', selectedTurnId ?? null)">刷新此轮</button></p>
-    <p v-if="selectedTurnId && displayed?.tools && !displayed.tools.items.length && !historyRefreshing" class="market-activity__meta">此轮没有连接器工具调用记录。</p>
-    <article v-for="fact in unlinkedDecisions" :key="`${fact.callRef}:${fact.decisionId}`" class="market-activity__card" aria-label="只读决定记录">
-      <strong>{{ callSourceName(fact.nativeTurnId, fact) }}</strong>
-      <p class="market-activity__meta">{{ fact.toolName }} · {{ decisionTime(fact.observedAtUnixMs) }}</p>
-      <p>{{ fact.kind === 'acknowledged' ? '已确认' : '已请求' }}{{ decisionIntents[fact.decision] }}</p>
-      <p v-if="fact.kind !== 'acknowledged'" class="market-activity__meta">决定送达未确认。</p>
-    </article>
-    <p v-if="displayed?.decisionFactsTruncated" class="market-activity__meta">仅展示此轮部分决定记录，优先保留待确认调用的记录。</p>
-    <article v-for="item in visibleTools" :key="item.nativeItemId" class="market-activity__card" aria-label="连接器工具结果">
-      <header><YjIcon name="connector" size="md" /><strong>{{ toolSourceName(item) }}</strong><span>{{ item.state === 'in_progress' ? '执行中' : '已完成' }}</span></header>
-      <p class="market-activity__meta">{{ item.toolName }}</p>
-      <p v-if="item.correlation" class="market-activity__meta" aria-label="本次调用的批准记录">{{ item.correlation.decisionReceipt ? decisionLabels[item.correlation.decisionReceipt.decision] : '未记录到用户决定' }} · {{ item.correlation.admissionConsumed ? '执行结果以工具记录为准' : '本次未开始执行' }}</p>
-      <p v-else-if="item.state !== 'in_progress'" class="market-activity__meta">审批与结果关联未确认。</p>
-      <p v-if="item.resultTextSource === 'structured' && item.resultText" class="market-activity__meta">结构化结果（JSON）</p>
-      <WebRetrievalResult v-if="item.resultText && ['kimi_web_search', 'kimi_web_search_pro', 'kimi_web_fetch'].includes(item.toolName)" :tool="item.toolName" :text="item.resultText" />
-      <pre v-else-if="item.resultText">{{ item.resultText }}</pre>
-      <p v-else-if="item.state === 'in_progress'">正在等待工具返回。</p>
-      <p v-else>工具调用已结束，没有可展示的文本结果。</p>
-      <template v-if="item.structuredResultText"><p class="market-activity__meta">结构化结果（JSON）</p><pre aria-label="结构化工具结果">{{ item.structuredResultText }}</pre></template>
-      <p v-if="item.truncated" class="market-activity__meta">结果展示不完整，部分内容已省略。</p>
-    </article>
-    <p v-if="visibleTools.length && displayed?.tools?.truncated" class="market-activity__meta">调用记录较多，仅展示当前返回的部分记录。</p>
+    <template v-if="showToolHistory">
+      <label v-if="observation?.availableTurns?.length" class="market-activity__history">
+        <span>工具调用记录</span>
+        <select class="yj-control" aria-label="查看连接器调用轮次" :value="selectedTurnId ?? ''" @change="$emit('selectTurn', ($event.target as HTMLSelectElement).value || null)">
+          <option value="">最新轮次</option>
+          <option v-for="(turn, index) in observation.availableTurns" :key="turn.nativeTurnId" :value="turn.nativeTurnId">{{ index === 0 ? '最近一次' : `往前第 ${index} 次` }} · {{ turn.selectionDisplay.map(item => item.displayName).join('、') || '未选用连接器' }} · {{ turn.nativeTurnId.slice(-6) }}</option>
+        </select>
+      </label>
+      <p v-if="observation?.turnsTruncated" class="market-activity__meta">仅列出最近 128 轮连接器提交。</p>
+      <p v-if="historyRefreshing" role="status">正在读取所选轮次的工具结果。</p>
+      <p v-if="historyError" role="alert">{{ historyError }} <button class="yj-control" type="button" :disabled="historyRefreshing" @click="$emit('selectTurn', selectedTurnId ?? null)">刷新此轮</button></p>
+      <p v-if="selectedTurnId && displayed?.tools && !displayed.tools.items.length && !historyRefreshing" class="market-activity__meta">此轮没有连接器工具调用记录。</p>
+      <article v-for="fact in unlinkedDecisions" :key="`${fact.callRef}:${fact.decisionId}`" class="market-activity__card" aria-label="只读决定记录">
+        <strong>{{ callSourceName(fact.nativeTurnId, fact) }}</strong>
+        <p class="market-activity__meta">{{ fact.toolName }} · {{ decisionTime(fact.observedAtUnixMs) }}</p>
+        <p>{{ fact.kind === 'acknowledged' ? '已确认' : '已请求' }}{{ decisionIntents[fact.decision] }}</p>
+        <p v-if="fact.kind !== 'acknowledged'" class="market-activity__meta">决定送达未确认。</p>
+      </article>
+      <p v-if="displayed?.decisionFactsTruncated" class="market-activity__meta">仅展示此轮部分决定记录，优先保留待确认调用的记录。</p>
+      <article v-for="item in visibleTools" :key="item.nativeItemId" class="market-activity__card" aria-label="连接器工具结果">
+        <header><YjIcon name="connector" size="md" /><strong>{{ toolSourceName(item) }}</strong><span>{{ item.state === 'in_progress' ? '执行中' : '已完成' }}</span></header>
+        <p class="market-activity__meta">{{ item.toolName }}</p>
+        <p v-if="item.correlation" class="market-activity__meta" aria-label="本次调用的批准记录">{{ item.correlation.decisionReceipt ? decisionLabels[item.correlation.decisionReceipt.decision] : '未记录到用户决定' }} · {{ item.correlation.admissionConsumed ? '执行结果以工具记录为准' : '本次未开始执行' }}</p>
+        <p v-else-if="item.state !== 'in_progress'" class="market-activity__meta">审批与结果关联未确认。</p>
+        <p v-if="item.resultTextSource === 'structured' && item.resultText" class="market-activity__meta">结构化结果（JSON）</p>
+        <WebRetrievalResult v-if="item.resultText && ['kimi_web_search', 'kimi_web_search_pro', 'kimi_web_fetch'].includes(item.toolName)" :tool="item.toolName" :text="item.resultText" />
+        <pre v-else-if="item.resultText">{{ item.resultText }}</pre>
+        <p v-else-if="item.state === 'in_progress'">正在等待工具返回。</p>
+        <p v-else>工具调用已结束，没有可展示的文本结果。</p>
+        <template v-if="item.structuredResultText"><p class="market-activity__meta">结构化结果（JSON）</p><pre aria-label="结构化工具结果">{{ item.structuredResultText }}</pre></template>
+        <p v-if="item.truncated" class="market-activity__meta">结果展示不完整，部分内容已省略。</p>
+      </article>
+      <p v-if="visibleTools.length && displayed?.tools?.truncated" class="market-activity__meta">调用记录较多，仅展示当前返回的部分记录。</p>
+    </template>
   </section>
 </template>
 <style scoped>

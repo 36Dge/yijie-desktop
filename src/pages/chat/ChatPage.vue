@@ -1670,7 +1670,18 @@ onBeforeUnmount(() => {
             </div>
             <button v-if="cleanup.actionLabel" class="chat-notice__action yj-control" type="button" @click="refreshCleanup">{{ cleanup.actionLabel }}</button>
           </div>
-          <MarketChatActivity v-if="!isDraftMode && marketConnectorsEnabled" :observation="marketChat.observation.value" :connected="marketChat.connected.value" :refreshing="marketChat.refreshing.value" :deciding="marketChat.deciding.value" :error="marketChat.error.value" :actionable="marketChat.actionable" :tool-observation="marketChat.toolObservation.value" :selected-turn-id="marketChat.selectedTurnId.value" :live-native-turn-id="liveNativeTurnId" :history-refreshing="marketChat.historyRefreshing.value" :history-error="marketChat.historyError.value" @refresh="marketChat.refresh" @decision="marketChat.decide" @select-turn="marketChat.selectTurn" />
+          <MarketChatActivity
+            v-if="!isDraftMode && marketConnectorsEnabled"
+            :observation="marketChat.observation.value"
+            :connected="marketChat.connected.value"
+            :refreshing="marketChat.refreshing.value"
+            :deciding="marketChat.deciding.value"
+            :error="marketChat.error.value"
+            :actionable="marketChat.actionable"
+            :live-native-turn-id="liveNativeTurnId"
+            @refresh="marketChat.refresh"
+            @decision="marketChat.decide"
+          />
           <ChatSkillNotice v-if="skillNotice" :message="skillNotice" @manage="manageSkills" />
         </div>
       </div>

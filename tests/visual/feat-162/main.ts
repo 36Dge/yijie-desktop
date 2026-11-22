@@ -67,7 +67,7 @@ createApp(defineComponent({
           h("select", { "aria-label": "预览场景", value: scenario.value, onChange: (e: Event) => { scenario.value = (e.target as HTMLSelectElement).value; void audit(); } }, [h("option", { value: "results" }, "三工具结果和待批状态"), h("option", { value: "empty-error" }, "空结果、错误、历史和过期")]),
         ]),
         h("p", { role: "status" }, notice.value),
-        h(MarketChatActivity, { observation, connected: true, refreshing: false, deciding: null, error: null,
+        h(MarketChatActivity, { observation, showToolHistory: true, connected: true, refreshing: false, deciding: null, error: null,
           actionable: (item: MarketApproval) => item.state === "pending",
           onDecision: (_id: string, decision: string) => { notice.value = `仅界面事件：${decision}；没有发送审批或HTTP。`; void audit(); },
         }),
