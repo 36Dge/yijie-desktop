@@ -42,6 +42,7 @@
   --yj-color-chat-generation-notice: color-mix(in srgb, var(--yj-color-text-tertiary) 70%, var(--yj-color-bg-page));
   --yj-color-chat-timing: #858585;
   --yj-color-chat-link: #6b980b;
+  --yj-color-chat-inline-code-bg: color-mix(in srgb, currentColor 7%, transparent);
   --yj-color-chat-task-indicator: #8ac20f;
   --yj-color-chat-completion-dot: var(--yj-color-chat-task-indicator);
   --yj-color-chat-file-link: var(--yj-color-connector-composer-mention);
@@ -154,6 +155,7 @@
   /* WorkBuddy 5.11.3 conversation renderer, default font level (2). */
   --yj-font-size-chat-root: 17.143px;
   --yj-font-size-chat-body: calc(var(--yj-font-size-chat-root) * 0.875);
+  --yj-font-size-chat-inline-code: max(var(--yj-font-size-code), 0.9em);
   --yj-font-size-chat-answer-title: calc(var(--yj-font-size-chat-root) * 1.25);
   --yj-font-size-chat-answer-heading: var(--yj-font-size-chat-root);
   --yj-font-size-chat-artifact-title: 15px;

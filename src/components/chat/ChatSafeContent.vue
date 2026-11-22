@@ -293,10 +293,13 @@ h3.chat-safe-content__heading {
 }
 
 .chat-safe-content__inline-code {
-  padding: var(--yj-space-0) var(--yj-space-1);
-  border: var(--yj-border-width) solid var(--yj-color-border-subtle);
+  padding: calc(var(--yj-space-1) / 4) var(--yj-space-1);
   border-radius: var(--yj-radius-xs);
-  background: var(--yj-color-bg-subtle);
+  color: var(--yj-color-text-body);
+  background-color: var(--yj-color-chat-inline-code-bg);
+  font-family: var(--yj-font-family-chat-mono);
+  font-size: var(--yj-font-size-chat-inline-code);
+  line-height: normal;
   white-space: break-spaces;
 }
 
@@ -422,9 +425,11 @@ h3.chat-safe-content__heading {
 .chat-safe-content--answer strong { font-weight: var(--yj-font-weight-semibold); }
 .chat-safe-content--answer > .chat-safe-content__list > .chat-safe-content__list-item--loose + li,
 .chat-safe-content--answer > .chat-safe-content__list > li + .chat-safe-content__list-item--loose { margin-block-start: var(--yj-space-1); }
-.chat-safe-content--answer .chat-safe-content__inline-code,
-.chat-safe-content--answer pre { font-family: var(--yj-font-family-chat-mono); }
-.chat-safe-content--answer pre { font-size: var(--yj-font-size-code); line-height: var(--yj-line-height-code); }
+.chat-safe-content--answer pre {
+  font-family: var(--yj-font-family-chat-mono);
+  font-size: var(--yj-font-size-code);
+  line-height: var(--yj-line-height-code);
+}
 .chat-safe-content--answer pre code { font: inherit; }
 .chat-safe-content--answer th,
 .chat-safe-content--answer td { font-size: var(--yj-font-size-chat-body); line-height: var(--yj-line-height-chat-answer); }

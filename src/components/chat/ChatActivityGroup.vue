@@ -63,4 +63,35 @@ function toggle() {
 .chat-activity-group__viewport { display: grid; grid-template-columns: minmax(0, 1fr); max-height: var(--yj-layout-chat-activity-max-height); overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: none; }
 .chat-activity-group__viewport::-webkit-scrollbar { display: none; }
 .chat-activity-group__items { grid-area: 1 / 1; min-width: 0; list-style: none; margin: 0; padding: 0 var(--yj-space-3) 0 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--yj-space-3); }
+
+/* Only rows inside the shared frame use this layout. A standalone row is outside the list. */
+.chat-activity-group__items > .chat-turn-group__item--command :deep(.chat-timeline-item-shell__disclosure[aria-expanded="true"]) {
+  color: var(--yj-color-text-primary);
+}
+.chat-activity-group__items > .chat-turn-group__item--command :deep(.chat-timeline-item-shell__disclosure[aria-expanded="true"] strong) {
+  font-weight: var(--yj-font-weight-medium);
+}
+
+.chat-activity-group__items :deep(.chat-command-item__details) {
+  gap: var(--yj-space-2);
+  padding-block: 0 var(--yj-space-1);
+  /* Align with the title after its one-em terminal icon and the label gap. */
+  padding-inline: calc(var(--yj-font-size-body) + var(--yj-space-2)) 0;
+  border-radius: 0;
+  background: transparent;
+}
+.chat-activity-group__items :deep(.chat-command-item__summary) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--yj-space-1) var(--yj-space-2);
+}
+.chat-activity-group__items :deep(.chat-command-item__summary > .chat-command-item__section-header) {
+  display: contents;
+}
+.chat-activity-group__items :deep(.chat-command-item__actions) {
+  order: 1;
+  max-width: 100%;
+  margin-inline-start: auto;
+}
 </style>

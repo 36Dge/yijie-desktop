@@ -308,34 +308,18 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
     >{{ statusPresentation.summary }}</span>
 
     <div class="chat-command-item__details">
-      <p v-if="activityEntry && (native?.item.commandActions?.length ?? 0) > 1">以下状态和输出属于同一次命令调用。</p>
-      <ul v-if="displayedActions.length" aria-label="原生命令动作">
-        <li v-for="action in displayedActions" :key="action.index">
-          {{ {read: '读取文件', listFiles: '查看目录', search: '搜索文件', unknown: '运行命令'}[action.kind] }}<span v-if="action.label"> · {{ action.label }}</span><span v-if="action.query"> · {{ action.query }}</span>
-        </li>
-      </ul>
-      <dl class="chat-command-item__facts yj-selectable-text">
-        <div>
-          <dt>安全摘要</dt>
-          <dd>{{ commandSummary || "命令执行" }}</dd>
+      <p v-if="activityEntry && (native?.item.commandActions?.length ?? 0) > 1" class="chat-command-item__state">以下状态和输出属于同一次命令调用。</p>
+      <div class="chat-command-item__summary">
+        <div class="chat-command-item__section-header">
+          <h3 class="yj-selectable-text">安全摘要</h3>
+          <ul v-if="displayedActions.length" class="chat-command-item__actions" role="list" aria-label="原生命令动作">
+            <li v-for="action in displayedActions" :key="action.index">
+              {{ {read: '读取文件', listFiles: '查看目录', search: '搜索文件', unknown: '运行命令'}[action.kind] }}<span v-if="action.label"> · {{ action.label }}</span><span v-if="action.query"> · {{ action.query }}</span>
+            </li>
+          </ul>
         </div>
-        <div>
-          <dt>工作目录</dt>
-          <dd>{{ cwdLabel }}</dd>
-        </div>
-        <div v-if="durationLabel">
-          <dt>耗时</dt>
-          <dd>{{ durationLabel }}</dd>
-        </div>
-        <div v-if="exitCode !== null">
-          <dt>退出码</dt>
-          <dd>{{ exitCode }}</dd>
-        </div>
-        <div v-else-if="native && execution.status === 'completed'">
-          <dt>执行结果</dt>
-          <dd>退出码未提供，执行结果未确认。</dd>
-        </div>
-      </dl>
+        <p class="chat-command-item__command yj-selectable-text">{{ commandSummary || "命令执行" }}</p>
+      </div>
 
       <p
         v-if="summaryTruncation"
@@ -385,12 +369,32 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
           <code>{{ executionError.code }}</code>
         </div>
       </div>
+
+      <dl class="chat-command-item__facts yj-selectable-text">
+        <div>
+          <dt>工作目录</dt>
+          <dd>{{ cwdLabel }}</dd>
+        </div>
+        <div v-if="durationLabel">
+          <dt>耗时</dt>
+          <dd>{{ durationLabel }}</dd>
+        </div>
+        <div v-if="exitCode !== null">
+          <dt>退出码</dt>
+          <dd>{{ exitCode }}</dd>
+        </div>
+        <div v-else-if="native && execution.status === 'completed'">
+          <dt>执行结果</dt>
+          <dd>退出码未提供，执行结果未确认。</dd>
+        </div>
+      </dl>
     </div>
   </ChatTimelineItemShell>
 </template>
 
 <style scoped>
 .chat-command-item__details,
+.chat-command-item__summary,
 .chat-command-item__output,
 .chat-command-item__output-sections,
 .chat-command-item__output-section,
@@ -399,43 +403,73 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
   min-width: 0;
 }
 
-.chat-command-item__details,
-.chat-command-item__output,
-.chat-command-item__output-sections {
+.chat-command-item__details {
   gap: var(--yj-space-3);
+  padding: var(--yj-space-3) var(--yj-space-4);
+  border-radius: var(--yj-radius-xl);
+  background: color-mix(in srgb, var(--yj-color-text-primary) 6%, transparent);
+}
+
+.chat-command-item__summary,
+.chat-command-item__output,
+.chat-command-item__output-section {
+  gap: var(--yj-space-1);
+}
+
+.chat-command-item__output {
+  --yj-color-icon-subtle: var(--yj-color-icon-muted);
+}
+
+.chat-command-item__output-sections {
+  gap: var(--yj-space-2);
+}
+
+.chat-command-item__actions,
+.chat-command-item__facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--yj-space-1) var(--yj-space-4);
+  min-width: 0;
+  margin: var(--yj-space-0);
+  padding: var(--yj-space-0);
+  color: var(--yj-color-text-secondary);
+  font-size: var(--yj-font-size-caption);
+  line-height: var(--yj-line-height-caption);
+  overflow-wrap: anywhere;
+}
+
+.chat-command-item__actions {
+  list-style: none;
 }
 
 .chat-command-item__facts {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin: var(--yj-space-0);
-  gap: var(--yj-space-2) var(--yj-space-4);
+  border-block-start: var(--yj-border-width) solid color-mix(in srgb, var(--yj-color-text-primary) 6%, transparent);
+  padding-block-start: var(--yj-space-2);
 }
 
 .chat-command-item__facts > div {
   display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
   min-width: 0;
+  max-width: 100%;
   gap: var(--yj-space-1);
 }
 
-.chat-command-item__facts dt,
-.chat-command-item__output h3,
+.chat-command-item__section-header h3,
 .chat-command-item__output h4 {
   margin: var(--yj-space-0);
-  color: var(--yj-color-text-tertiary);
+  color: var(--yj-color-text-secondary);
   font-size: var(--yj-font-size-caption);
-  font-weight: var(--yj-font-weight-semibold);
+  font-weight: var(--yj-font-weight-medium);
   line-height: var(--yj-line-height-caption);
 }
 
 .chat-command-item__facts dd {
-  min-width: 0;
   margin: var(--yj-space-0);
-  color: var(--yj-color-text-primary);
-  font-size: var(--yj-font-size-body);
-  line-height: var(--yj-line-height-body);
-  overflow-wrap: anywhere;
+  color: var(--yj-color-text-body);
+  font-variant-numeric: tabular-nums;
 }
 
 .chat-command-item__section-header,
@@ -449,6 +483,7 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
 
 .chat-command-item__section-header {
   align-items: center;
+  flex-wrap: wrap;
   justify-content: space-between;
 }
 
@@ -468,25 +503,21 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
   color: var(--yj-color-text-body);
 }
 
-.chat-command-item__output-section {
-  gap: var(--yj-space-2);
+.chat-command-item__command,
+.chat-command-item__output pre {
+  margin: var(--yj-space-0);
+  color: var(--yj-color-text-primary);
+  font-family: var(--yj-font-family-chat-mono);
+  font-size: var(--yj-font-size-code);
+  line-height: var(--yj-line-height-code);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .chat-command-item__output pre {
   max-width: 100%;
   max-height: calc(var(--yj-space-16) * 6);
-  margin: var(--yj-space-0);
-  padding: var(--yj-space-3);
-  border: var(--yj-border-width) solid var(--yj-color-border-subtle);
-  border-radius: var(--yj-radius-md);
-  color: var(--yj-color-text-primary);
-  background: var(--yj-color-bg-card);
-  font-family: var(--yj-font-family-mono);
-  font-size: var(--yj-font-size-caption);
-  line-height: var(--yj-line-height-body);
   overflow: auto;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
 }
 
 .chat-command-item__error {
@@ -517,8 +548,8 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
 }
 
 @media (max-width: 40rem) {
-  .chat-command-item__facts {
-    grid-template-columns: minmax(0, 1fr);
+  .chat-command-item__details {
+    padding-inline: var(--yj-space-3);
   }
 }
 </style>
