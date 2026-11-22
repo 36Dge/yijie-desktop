@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "contract_version": "0.2.0",
+  "contract_version": "0.3.0",
   "feature": "FEAT-157",
   "mode": "local_worktree_candidate",
   "release": false,
@@ -8,11 +8,11 @@
   "sources": [
     {
       "path": "compatibility/market-selection/wire.schema.json",
-      "sha256": "7651ee4d674c4fd23a7045ac6a80e77d96d1998c6cb873a47d03c850fab2b514"
+      "sha256": "2eef8d80e3d38896af087482d42ccd76b19bf79fa382e930efd723050aa90d62"
     },
     {
       "path": "compatibility/market-selection/native-ipc.json",
-      "sha256": "c7fce5244012fcd7d5be054f3792f073c1b18331eb0ca5883b5c8469cbe4090a"
+      "sha256": "ce51e1f8fa4c6f7b66a5e31bb8e757f33ac41bdc10514257779c7fcfd86fa750"
     },
     {
       "path": "openapi/market-connectors/market-connectors.yaml",
@@ -28,7 +28,7 @@
     },
     {
       "path": "scripts/market-selection-source.mjs",
-      "sha256": "b95218e43d0287dde7b22b08dd69e5c4010950f9552dadd66b753d1b05507d1d"
+      "sha256": "267e9deda9ca9924bf3a6fac4a1415b1063628598e2f74fc7d01060c6fe1d864"
     },
     {
       "path": "scripts/generate-market-selection.mjs",
@@ -46,19 +46,19 @@
   "generated": [
     {
       "path": "sdks/rust/market-selection/types.gen.rs",
-      "sha256": "46f54b763cf9acf4e9271def9b0c5ce7423698fa02c2e28aaaf855b9053b2315"
+      "sha256": "8c845ddfc9ff28d5943cb2f4e89d8794c822b525f2207da86010f2c4806ce397"
     },
     {
       "path": "sdks/typescript/src/domain/market-selection.generated.ts",
-      "sha256": "14efc98753a03abc58feb2f3215204f7825ac87136c83a8e125302c010d5805d"
+      "sha256": "0367200654b559be600eb582e29e69dd3c34458cd4346c3e6016136030d11b98"
     },
     {
       "path": "sdks/typescript/src/api/generated/market-selection-validator.gen.js",
-      "sha256": "eac5bb0420d226a8e03374e6dfdc2ff14f8f6f3c6325f9d7bb3371de924db99a"
+      "sha256": "6814d85f3f49da315b5ca08cb98beb6d83181c0b283c62c5bc2421a8fe66655d"
     },
     {
       "path": "sdks/jsonschema/market-selection.schema.json",
-      "sha256": "4674fa88049d37e1c553204b4f90da24d12b3d91b90479bbd591be7670873b3a"
+      "sha256": "238a29ed562840c0d2286fcea1ccdb21dffb20ea3185229929d2a6fbff568205"
     },
     {
       "path": "sdks/go/market-selection/digest.gen.go",

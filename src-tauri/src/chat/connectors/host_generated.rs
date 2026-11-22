@@ -115,6 +115,18 @@ pub struct Submission {
     pub permission_mode: PermissionMode,
     pub snapshot: SelectionSnapshot,
     pub services: Vec<ServiceBinding>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub native_approval_version: Option<i64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub native_approval_authority_operations: Option<Vec<CanonicalId>>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -130,6 +142,18 @@ struct SubmissionWire {
     pub permission_mode: PermissionMode,
     pub snapshot: SelectionSnapshot,
     pub services: Vec<ServiceBinding>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub native_approval_version: Option<i64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub native_approval_authority_operations: Option<Vec<CanonicalId>>,
 }
 impl TryFrom<SubmissionWire> for Submission {
     type Error = &'static str;
@@ -145,6 +169,8 @@ impl TryFrom<SubmissionWire> for Submission {
             permission_mode: w.permission_mode,
             snapshot: w.snapshot,
             services: w.services,
+            native_approval_version: w.native_approval_version,
+            native_approval_authority_operations: w.native_approval_authority_operations,
         };
         v.validate()?;
         Ok(v)
@@ -232,6 +258,39 @@ impl Submission {
                 item.validate()?;
             }
         }
+        self.native_approval_version
+            .as_ref()
+            .map(
+                |value_native_approval_version| -> Result<(), &'static str> {
+                    if *value_native_approval_version != 1 {
+                        return Err("invalid broker constant");
+                    }
+                    Ok(())
+                },
+            )
+            .transpose()?;
+        self.native_approval_authority_operations
+            .as_ref()
+            .map(
+                |value_native_approval_authority_operations| -> Result<(), &'static str> {
+                    if value_native_approval_authority_operations.is_empty() {
+                        return Err("invalid broker collection");
+                    }
+                    if value_native_approval_authority_operations.len() > 58 {
+                        return Err("invalid broker collection");
+                    }
+                    for item in value_native_approval_authority_operations.iter() {
+                        if !canonical_id(item) {
+                            return Err("invalid market UUID");
+                        }
+                        if item == "00000000-0000-0000-0000-000000000000" {
+                            return Err("invalid broker identity");
+                        }
+                    }
+                    Ok(())
+                },
+            )
+            .transpose()?;
         if self.services.len() != self.snapshot.selection.len()
             || self
                 .services
@@ -241,11 +300,23 @@ impl Submission {
         {
             return Err("service snapshot mismatch");
         }
-        if !self.snapshot.selection.is_empty() && self.permission_mode != PermissionMode::Ask {
+        if !self.snapshot.selection.is_empty()
+            && self.permission_mode != PermissionMode::Ask
+            && self.native_approval_version != Some(1)
+        {
             return Err("permission_mode_unavailable");
         }
         if self.agent_session_id.is_none() && self.intent.expected_revision != 0 {
             return Err("invalid new session revision");
+        }
+        if self.native_approval_version.is_some()
+            != self.native_approval_authority_operations.is_some()
+            || self
+                .native_approval_authority_operations
+                .as_ref()
+                .is_some_and(|ops| ops.len() != self.services.len())
+        {
+            return Err("market approval authority mismatch");
         }
         Ok(())
     }
@@ -338,6 +409,12 @@ pub struct HelloResult {
     pub owner_user_id: CanonicalId,
     pub tenant_id: CanonicalId,
     pub ready: bool,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub native_approval_version: Option<i64>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -347,6 +424,12 @@ struct HelloResultWire {
     pub owner_user_id: CanonicalId,
     pub tenant_id: CanonicalId,
     pub ready: bool,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub native_approval_version: Option<i64>,
 }
 impl TryFrom<HelloResultWire> for HelloResult {
     type Error = &'static str;
@@ -357,6 +440,7 @@ impl TryFrom<HelloResultWire> for HelloResult {
             owner_user_id: w.owner_user_id,
             tenant_id: w.tenant_id,
             ready: w.ready,
+            native_approval_version: w.native_approval_version,
         };
         v.validate()?;
         Ok(v)
@@ -406,6 +490,17 @@ impl HelloResult {
                 return Err("invalid broker constant");
             }
         }
+        self.native_approval_version
+            .as_ref()
+            .map(
+                |value_native_approval_version| -> Result<(), &'static str> {
+                    if *value_native_approval_version != 1 {
+                        return Err("invalid broker constant");
+                    }
+                    Ok(())
+                },
+            )
+            .transpose()?;
         Ok(())
     }
 }
@@ -1038,6 +1133,18 @@ pub struct MarketApproval {
         deserialize_with = "optional_non_null"
     )]
     pub execution_expires_at_unix_ms: Option<i64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub persist_options: Option<Vec<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub applied_persist: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1074,6 +1181,18 @@ struct MarketApprovalWire {
         deserialize_with = "optional_non_null"
     )]
     pub execution_expires_at_unix_ms: Option<i64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub persist_options: Option<Vec<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub applied_persist: Option<String>,
 }
 impl TryFrom<MarketApprovalWire> for MarketApproval {
     type Error = &'static str;
@@ -1091,6 +1210,8 @@ impl TryFrom<MarketApprovalWire> for MarketApproval {
             decision: w.decision,
             decision_expires_at_unix_ms: w.decision_expires_at_unix_ms,
             execution_expires_at_unix_ms: w.execution_expires_at_unix_ms,
+            persist_options: w.persist_options,
+            applied_persist: w.applied_persist,
         };
         v.validate()?;
         Ok(v)
@@ -1187,6 +1308,37 @@ impl MarketApproval {
                     Ok(())
                 },
             )
+            .transpose()?;
+        self.persist_options
+            .as_ref()
+            .map(|value_persist_options| -> Result<(), &'static str> {
+                if value_persist_options.is_empty() {
+                    return Err("invalid broker collection");
+                }
+                if value_persist_options.len() > 2 {
+                    return Err("invalid broker collection");
+                }
+                for item in value_persist_options.iter() {
+                    if !["session", "always"].contains(&item.as_str()) {
+                        return Err("invalid broker enum");
+                    }
+                }
+                for (i, item) in value_persist_options.iter().enumerate() {
+                    if value_persist_options[..i].contains(item) {
+                        return Err("duplicate broker collection item");
+                    }
+                }
+                Ok(())
+            })
+            .transpose()?;
+        self.applied_persist
+            .as_ref()
+            .map(|value_applied_persist| -> Result<(), &'static str> {
+                if !["session", "always", "unavailable"].contains(&value_applied_persist.as_str()) {
+                    return Err("invalid broker enum");
+                }
+                Ok(())
+            })
             .transpose()?;
         if self.decision_expires_at_unix_ms.is_some() != self.execution_expires_at_unix_ms.is_some()
             || self
@@ -1316,6 +1468,16 @@ impl ApprovalDecidePayload {
             if value_decision_id == "00000000-0000-0000-0000-000000000000" {
                 return Err("invalid broker identity");
             }
+        }
+        if !matches!(
+            self.decision,
+            Decision::ApproveOnce
+                | Decision::ApproveSession
+                | Decision::ApproveAlways
+                | Decision::Reject
+                | Decision::Cancel
+        ) {
+            return Err("not a user decision");
         }
         Ok(())
     }
@@ -3503,6 +3665,16 @@ impl NativeApprovalDecidePayload {
                 return Err("invalid broker number");
             }
         }
+        if !matches!(
+            self.decision,
+            Decision::ApproveOnce
+                | Decision::ApproveSession
+                | Decision::ApproveAlways
+                | Decision::Reject
+                | Decision::Cancel
+        ) {
+            return Err("not a user decision");
+        }
         Ok(())
     }
 }
@@ -4156,6 +4328,608 @@ impl DecisionFact {
 impl std::fmt::Debug for DecisionFact {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("DecisionFact([redacted])")
+    }
+}
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "RememberedToolRuleWire")]
+pub struct RememberedToolRule {
+    pub key: ArgsDigest,
+    pub tool: ToolName,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RememberedToolRuleWire {
+    pub key: ArgsDigest,
+    pub tool: ToolName,
+}
+impl TryFrom<RememberedToolRuleWire> for RememberedToolRule {
+    type Error = &'static str;
+    fn try_from(w: RememberedToolRuleWire) -> Result<Self, Self::Error> {
+        let v = Self {
+            key: w.key,
+            tool: w.tool,
+        };
+        v.validate()?;
+        Ok(v)
+    }
+}
+impl RememberedToolRule {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        {
+            let value_key = &self.key;
+            if value_key.len() != 64
+                || !value_key
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            {
+                return Err("invalid market digest");
+            }
+        }
+        {
+            let value_tool = &self.tool;
+            if value_tool.chars().count() < 1 {
+                return Err("invalid broker text");
+            }
+            if value_tool.chars().count() > 128 {
+                return Err("invalid broker text");
+            }
+        }
+        Ok(())
+    }
+}
+impl std::fmt::Debug for RememberedToolRule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RememberedToolRule([redacted])")
+    }
+}
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "RememberedToolRulesWire")]
+pub struct RememberedToolRules {
+    pub rules: Vec<RememberedToolRule>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub next: Option<ArgsDigest>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RememberedToolRulesWire {
+    pub rules: Vec<RememberedToolRule>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub next: Option<ArgsDigest>,
+}
+impl TryFrom<RememberedToolRulesWire> for RememberedToolRules {
+    type Error = &'static str;
+    fn try_from(w: RememberedToolRulesWire) -> Result<Self, Self::Error> {
+        let v = Self {
+            rules: w.rules,
+            next: w.next,
+        };
+        v.validate()?;
+        Ok(v)
+    }
+}
+impl RememberedToolRules {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        {
+            let value_rules = &self.rules;
+            if value_rules.len() > 32 {
+                return Err("invalid broker collection");
+            }
+            for item in value_rules.iter() {
+                item.validate()?;
+            }
+        }
+        self.next
+            .as_ref()
+            .map(|value_next| -> Result<(), &'static str> {
+                if value_next.len() != 64
+                    || !value_next
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                {
+                    return Err("invalid market digest");
+                }
+                Ok(())
+            })
+            .transpose()?;
+        Ok(())
+    }
+}
+impl std::fmt::Debug for RememberedToolRules {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RememberedToolRules([redacted])")
+    }
+}
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    rename_all = "camelCase",
+    try_from = "NativeRememberedRulesPayloadWire"
+)]
+pub struct NativeRememberedRulesPayload {
+    pub reference: SelectionRef,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub revoke: Option<ArgsDigest>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub after: Option<ArgsDigest>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct NativeRememberedRulesPayloadWire {
+    pub reference: SelectionRef,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub revoke: Option<ArgsDigest>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub after: Option<ArgsDigest>,
+}
+impl TryFrom<NativeRememberedRulesPayloadWire> for NativeRememberedRulesPayload {
+    type Error = &'static str;
+    fn try_from(w: NativeRememberedRulesPayloadWire) -> Result<Self, Self::Error> {
+        let v = Self {
+            reference: w.reference,
+            revoke: w.revoke,
+            after: w.after,
+        };
+        v.validate()?;
+        Ok(v)
+    }
+}
+impl NativeRememberedRulesPayload {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        {
+            let value_reference = &self.reference;
+            value_reference.validate()?;
+        }
+        self.revoke
+            .as_ref()
+            .map(|value_revoke| -> Result<(), &'static str> {
+                if value_revoke.len() != 64
+                    || !value_revoke
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                {
+                    return Err("invalid market digest");
+                }
+                Ok(())
+            })
+            .transpose()?;
+        self.after
+            .as_ref()
+            .map(|value_after| -> Result<(), &'static str> {
+                if value_after.len() != 64
+                    || !value_after
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                {
+                    return Err("invalid market digest");
+                }
+                Ok(())
+            })
+            .transpose()?;
+        Ok(())
+    }
+}
+impl std::fmt::Debug for NativeRememberedRulesPayload {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NativeRememberedRulesPayload([redacted])")
+    }
+}
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "RememberedRulesPayloadWire")]
+pub struct RememberedRulesPayload {
+    pub reference: SelectionRef,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub revoke: Option<ArgsDigest>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub after: Option<ArgsDigest>,
+    pub scope: ScopeBinding,
+    pub host_instance_id: CanonicalId,
+    pub service_id: ServiceId,
+    pub credential_ref: CanonicalId,
+    pub authority_operation_id: CanonicalId,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RememberedRulesPayloadWire {
+    pub reference: SelectionRef,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub revoke: Option<ArgsDigest>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub after: Option<ArgsDigest>,
+    pub scope: ScopeBinding,
+    pub host_instance_id: CanonicalId,
+    pub service_id: ServiceId,
+    pub credential_ref: CanonicalId,
+    pub authority_operation_id: CanonicalId,
+}
+impl TryFrom<RememberedRulesPayloadWire> for RememberedRulesPayload {
+    type Error = &'static str;
+    fn try_from(w: RememberedRulesPayloadWire) -> Result<Self, Self::Error> {
+        let v = Self {
+            reference: w.reference,
+            revoke: w.revoke,
+            after: w.after,
+            scope: w.scope,
+            host_instance_id: w.host_instance_id,
+            service_id: w.service_id,
+            credential_ref: w.credential_ref,
+            authority_operation_id: w.authority_operation_id,
+        };
+        v.validate()?;
+        Ok(v)
+    }
+}
+impl RememberedRulesPayload {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        {
+            let value_reference = &self.reference;
+            value_reference.validate()?;
+        }
+        self.revoke
+            .as_ref()
+            .map(|value_revoke| -> Result<(), &'static str> {
+                if value_revoke.len() != 64
+                    || !value_revoke
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                {
+                    return Err("invalid market digest");
+                }
+                Ok(())
+            })
+            .transpose()?;
+        self.after
+            .as_ref()
+            .map(|value_after| -> Result<(), &'static str> {
+                if value_after.len() != 64
+                    || !value_after
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                {
+                    return Err("invalid market digest");
+                }
+                Ok(())
+            })
+            .transpose()?;
+        {
+            let value_scope = &self.scope;
+            value_scope.validate()?;
+        }
+        {
+            let value_host_instance_id = &self.host_instance_id;
+            if !canonical_id(value_host_instance_id) {
+                return Err("invalid market UUID");
+            }
+            if value_host_instance_id == "00000000-0000-0000-0000-000000000000" {
+                return Err("invalid broker identity");
+            }
+        }
+        {
+            let value_service_id = &self.service_id;
+            if value_service_id.chars().count() < 1 {
+                return Err("invalid broker text");
+            }
+            if value_service_id.chars().count() > 128 {
+                return Err("invalid broker text");
+            }
+            if value_service_id.is_empty()
+                || !value_service_id.as_bytes()[0].is_ascii_alphanumeric()
+                || !value_service_id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+            {
+                return Err("invalid service ID");
+            }
+        }
+        {
+            let value_credential_ref = &self.credential_ref;
+            if !canonical_id(value_credential_ref) {
+                return Err("invalid market UUID");
+            }
+            if value_credential_ref == "00000000-0000-0000-0000-000000000000" {
+                return Err("invalid broker identity");
+            }
+        }
+        {
+            let value_authority_operation_id = &self.authority_operation_id;
+            if !canonical_id(value_authority_operation_id) {
+                return Err("invalid market UUID");
+            }
+            if value_authority_operation_id == "00000000-0000-0000-0000-000000000000" {
+                return Err("invalid broker identity");
+            }
+        }
+        Ok(())
+    }
+}
+impl std::fmt::Debug for RememberedRulesPayload {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RememberedRulesPayload([redacted])")
+    }
+}
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    rename_all = "camelCase",
+    try_from = "NativeRememberedRulesRequestWire"
+)]
+pub struct NativeRememberedRulesRequest {
+    pub schema_version: i64,
+    pub request_id: CanonicalId,
+    pub context_id: CanonicalId,
+    pub payload: NativeRememberedRulesPayload,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct NativeRememberedRulesRequestWire {
+    pub schema_version: i64,
+    pub request_id: CanonicalId,
+    pub context_id: CanonicalId,
+    pub payload: NativeRememberedRulesPayload,
+}
+impl TryFrom<NativeRememberedRulesRequestWire> for NativeRememberedRulesRequest {
+    type Error = &'static str;
+    fn try_from(w: NativeRememberedRulesRequestWire) -> Result<Self, Self::Error> {
+        let v = Self {
+            schema_version: w.schema_version,
+            request_id: w.request_id,
+            context_id: w.context_id,
+            payload: w.payload,
+        };
+        v.validate()?;
+        Ok(v)
+    }
+}
+impl NativeRememberedRulesRequest {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        {
+            let value_schema_version = &self.schema_version;
+            if *value_schema_version != 1 {
+                return Err("invalid broker constant");
+            }
+        }
+        {
+            let value_request_id = &self.request_id;
+            if !canonical_id(value_request_id) {
+                return Err("invalid market UUID");
+            }
+            if value_request_id == "00000000-0000-0000-0000-000000000000" {
+                return Err("invalid broker identity");
+            }
+        }
+        {
+            let value_context_id = &self.context_id;
+            if !canonical_id(value_context_id) {
+                return Err("invalid market UUID");
+            }
+            if value_context_id == "00000000-0000-0000-0000-000000000000" {
+                return Err("invalid broker identity");
+            }
+        }
+        {
+            let value_payload = &self.payload;
+            value_payload.validate()?;
+        }
+        Ok(())
+    }
+}
+impl std::fmt::Debug for NativeRememberedRulesRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NativeRememberedRulesRequest([redacted])")
+    }
+}
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    rename_all = "camelCase",
+    try_from = "NativeRememberedRulesResponseWire"
+)]
+pub struct NativeRememberedRulesResponse {
+    pub schema_version: i64,
+    pub request_id: CanonicalId,
+    pub data: RememberedToolRules,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeRememberedRulesResponseWire {
+    pub schema_version: i64,
+    pub request_id: CanonicalId,
+    pub data: RememberedToolRules,
+}
+impl TryFrom<NativeRememberedRulesResponseWire> for NativeRememberedRulesResponse {
+    type Error = &'static str;
+    fn try_from(w: NativeRememberedRulesResponseWire) -> Result<Self, Self::Error> {
+        let v = Self {
+            schema_version: w.schema_version,
+            request_id: w.request_id,
+            data: w.data,
+        };
+        v.validate()?;
+        Ok(v)
+    }
+}
+impl NativeRememberedRulesResponse {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        {
+            let value_schema_version = &self.schema_version;
+            if *value_schema_version != 1 {
+                return Err("invalid broker constant");
+            }
+        }
+        {
+            let value_request_id = &self.request_id;
+            if !canonical_id(value_request_id) {
+                return Err("invalid market UUID");
+            }
+            if value_request_id == "00000000-0000-0000-0000-000000000000" {
+                return Err("invalid broker identity");
+            }
+        }
+        {
+            let value_data = &self.data;
+            value_data.validate()?;
+        }
+        Ok(())
+    }
+}
+impl std::fmt::Debug for NativeRememberedRulesResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NativeRememberedRulesResponse([redacted])")
+    }
+}
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "RememberedRulesRequestWire")]
+pub struct RememberedRulesRequest {
+    pub schema_version: i64,
+    pub request_id: CanonicalId,
+    pub method: String,
+    pub payload: RememberedRulesPayload,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RememberedRulesRequestWire {
+    pub schema_version: i64,
+    pub request_id: CanonicalId,
+    pub method: String,
+    pub payload: RememberedRulesPayload,
+}
+impl TryFrom<RememberedRulesRequestWire> for RememberedRulesRequest {
+    type Error = &'static str;
+    fn try_from(w: RememberedRulesRequestWire) -> Result<Self, Self::Error> {
+        let v = Self {
+            schema_version: w.schema_version,
+            request_id: w.request_id,
+            method: w.method,
+            payload: w.payload,
+        };
+        v.validate()?;
+        Ok(v)
+    }
+}
+impl RememberedRulesRequest {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        {
+            let value_schema_version = &self.schema_version;
+            if *value_schema_version != 1 {
+                return Err("invalid broker constant");
+            }
+        }
+        {
+            let value_request_id = &self.request_id;
+            if !canonical_id(value_request_id) {
+                return Err("invalid market UUID");
+            }
+            if value_request_id == "00000000-0000-0000-0000-000000000000" {
+                return Err("invalid broker identity");
+            }
+        }
+        {
+            let value_method = &self.method;
+            if value_method != "remembered_tool_rules" {
+                return Err("invalid broker constant");
+            }
+        }
+        {
+            let value_payload = &self.payload;
+            value_payload.validate()?;
+        }
+        Ok(())
+    }
+}
+impl std::fmt::Debug for RememberedRulesRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RememberedRulesRequest([redacted])")
+    }
+}
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "RememberedRulesResponseWire")]
+pub struct RememberedRulesResponse {
+    pub schema_version: i64,
+    pub request_id: CanonicalId,
+    pub data: RememberedToolRules,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RememberedRulesResponseWire {
+    pub schema_version: i64,
+    pub request_id: CanonicalId,
+    pub data: RememberedToolRules,
+}
+impl TryFrom<RememberedRulesResponseWire> for RememberedRulesResponse {
+    type Error = &'static str;
+    fn try_from(w: RememberedRulesResponseWire) -> Result<Self, Self::Error> {
+        let v = Self {
+            schema_version: w.schema_version,
+            request_id: w.request_id,
+            data: w.data,
+        };
+        v.validate()?;
+        Ok(v)
+    }
+}
+impl RememberedRulesResponse {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        {
+            let value_schema_version = &self.schema_version;
+            if *value_schema_version != 1 {
+                return Err("invalid broker constant");
+            }
+        }
+        {
+            let value_request_id = &self.request_id;
+            if !canonical_id(value_request_id) {
+                return Err("invalid market UUID");
+            }
+            if value_request_id == "00000000-0000-0000-0000-000000000000" {
+                return Err("invalid broker identity");
+            }
+        }
+        {
+            let value_data = &self.data;
+            value_data.validate()?;
+        }
+        Ok(())
+    }
+}
+impl std::fmt::Debug for RememberedRulesResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RememberedRulesResponse([redacted])")
     }
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -940,6 +940,7 @@ impl ChatRepository {
                 migrations::MARKET_DECISION_FACTS_SCHEMA_VERSION,
                 migrations::BUILTIN_WEB_SELECTION_SCHEMA_VERSION,
                 migrations::KIMI_HIGH_EFFORT_SCHEMA_VERSION,
+                migrations::MARKET_NATIVE_APPROVAL_SCHEMA_VERSION,
             ]
             .contains(&version)
             {

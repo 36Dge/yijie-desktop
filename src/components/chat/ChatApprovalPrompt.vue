@@ -7,8 +7,9 @@ import YjIcon from "../yijie/YjIcon.vue";
 const props = defineProps<{
   source: string; icon: YjIconName; question: string;
   disabled: boolean; submitting: boolean; commandPrefix?: readonly string[];
+  persistOptions?: readonly ("session" | "always")[];
 }>();
-const emit = defineEmits<{ once: []; reject: []; similar: [] }>();
+const emit = defineEmits<{ once: []; reject: []; similar: []; persist: [scope: "session" | "always"] }>();
 const card = ref<HTMLElement | null>(null);
 const overlay = ref<HTMLElement | null>(null);
 const trigger = ref<HTMLButtonElement | null>(null);
@@ -19,8 +20,14 @@ const id = useId();
 // Display argv boundaries; this string is never used in a decision.
 const prefixLabel = computed(() => props.commandPrefix?.map(arg =>
   /^[\p{L}\p{N}_./:=@%+,-]+$/u.test(arg) ? arg : JSON.stringify(arg)).join(" "));
+const hasOptions = computed(() => !!prefixLabel.value || !!props.persistOptions?.length);
+function selectScope(scope: "session" | "always") {
+  if (blocked.value || !props.persistOptions?.includes(scope)) return;
+  closeMenu();
+  emit("persist", scope);
+}
 const blocked = computed(() => props.disabled || props.submitting);
-watch([blocked, prefixLabel], () => { open.value = false; });
+watch([blocked, prefixLabel, () => props.persistOptions?.join("|")], () => { open.value = false; });
 watch(open, () => { explain.value = false; });
 onMounted(() => {
   if (document.activeElement === document.body) card.value?.focus({ preventScroll: true });
@@ -52,7 +59,7 @@ function menuKeys(event: KeyboardEvent) {
   if (event.key === "ArrowLeft") { event.preventDefault(); menu.value?.querySelector<HTMLButtonElement>(".approval-menu__similar")?.focus(); return; }
   if (event.key === "Tab") {
     const info = menu.value?.querySelector<HTMLButtonElement>(".approval-menu__info");
-    if (!event.shiftKey && document.activeElement !== info) { event.preventDefault(); info?.focus(); return; }
+    if (info && !event.shiftKey && document.activeElement !== info) { event.preventDefault(); info?.focus(); return; }
     trigger.value?.focus({ preventScroll: true }); closeMenu(); return;
   }
   if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
@@ -67,7 +74,7 @@ watch(menu, el => { if (el && open.value) el.querySelector("button")?.focus({ pr
 </script>
 
 <template>
-  <Teleport v-if="prefixLabel" to="body"><div ref="overlay" class="chat-control-overlay" /></Teleport>
+  <Teleport v-if="hasOptions" to="body"><div ref="overlay" class="chat-control-overlay" /></Teleport>
   <article ref="card" class="approval-prompt" tabindex="0" role="group" :aria-labelledby="id" :aria-busy="submitting" @keydown="keys">
     <div class="approval-prompt__body">
       <header><YjIcon :name="icon" size="sm" tone="muted" /><span>{{ source }}</span><slot name="context" /></header>
@@ -79,7 +86,7 @@ watch(menu, el => { if (el && open.value) el.querySelector("button")?.focus({ pr
       <button type="button" class="approval-prompt__reject" :disabled="blocked" aria-keyshortcuts="Escape" @click="select('reject')">拒绝 <kbd aria-hidden="true">Esc</kbd></button>
       <div class="approval-prompt__split">
         <button type="button" class="approval-prompt__once" :disabled="blocked" aria-keyshortcuts="Enter" @click="select('once')">{{ submitting ? "正在提交" : "允许一次" }} <kbd aria-hidden="true">↵</kbd></button>
-        <NPopover v-if="prefixLabel" :to="overlay ?? false" v-model:show="open" trigger="click" placement="top-end" :disabled="blocked" :show-arrow="false" raw>
+        <NPopover v-if="hasOptions" :to="overlay ?? false" v-model:show="open" trigger="click" placement="top-end" :disabled="blocked" :show-arrow="false" raw>
           <template #trigger>
             <button ref="trigger" type="button" class="approval-prompt__arrow" aria-label="更多允许选项" aria-haspopup="menu" :aria-expanded="open" :aria-controls="open ? id + '-menu' : undefined" :disabled="blocked" @keydown.down.prevent="open = true">
               <YjIcon name="chevronDown" size="xs" />
@@ -87,7 +94,10 @@ watch(menu, el => { if (el && open.value) el.querySelector("button")?.focus({ pr
           </template>
           <div :id="id + '-menu'" ref="menu" class="chat-control-menu approval-menu" role="menu" aria-label="允许选项" @keydown="menuKeys">
             <button type="button" role="menuitem" @click="select('once')">允许一次</button>
-            <div class="approval-menu__row">
+            <button v-for="scope in persistOptions" :key="scope" type="button" role="menuitem" @click="selectScope(scope)">
+              {{ scope === "session" ? "本会话允许此工具" : "始终允许此工具" }}
+            </button>
+            <div v-if="prefixLabel" class="approval-menu__row">
               <button type="button" role="menuitem" class="approval-menu__similar" :aria-describedby="id + '-scope'" @click="select('similar')">允许类似命令</button>
               <button class="approval-menu__info" type="button" aria-label="了解类似命令的授权范围" :aria-expanded="explain" @click="explain = !explain"><YjIcon name="info" size="xs" tone="muted" /></button>
               <small :id="id + '-scope'">以后允许此前缀：<code>{{ prefixLabel }}</code><template v-if="explain"><br>重新打开易界后，这项授权仍然有效。</template></small>

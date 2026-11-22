@@ -327,7 +327,8 @@
         "request_conflict",
         "selection_stale",
         "execution_unavailable",
-        "temporarily_unavailable"
+        "temporarily_unavailable",
+        "permission_mode_unavailable"
       ]
     },
     "Error": {

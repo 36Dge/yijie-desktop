@@ -31,7 +31,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 49] = [
+const CATALOG: [CatalogEntry; 50] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -273,6 +273,11 @@ const CATALOG: [CatalogEntry; 49] = [
         name: "0049_kimi_k31_high_effort",
         sql: include_str!("../../migrations/chat/0049_kimi_k31_high_effort.sql"),
     },
+    CatalogEntry {
+        version: 50,
+        name: "0050_market_native_approval",
+        sql: include_str!("../../migrations/chat/0050_market_native_approval.sql"),
+    },
 ];
 
 // Preserve the existing activated-version surface; reader support is separate.
@@ -304,6 +309,7 @@ pub const MARKET_INITIAL_HOST_TURN_SCHEMA_VERSION: i64 = 46;
 pub const MARKET_DECISION_FACTS_SCHEMA_VERSION: i64 = 47;
 pub const BUILTIN_WEB_SELECTION_SCHEMA_VERSION:i64=48;
 pub const KIMI_HIGH_EFFORT_SCHEMA_VERSION: i64 = 49;
+pub const MARKET_NATIVE_APPROVAL_SCHEMA_VERSION: i64 = 50;
 pub const SCHEDULE_CHAT_WORKSPACE_SCHEMA_VERSION: i64 = 29;
 pub const MARKET_CONNECTORS_SCHEMA_VERSION: i64 = 30;
 pub const MARKET_SELECTION_SCHEMA_VERSION: i64 = 31;
@@ -371,6 +377,7 @@ pub(super) fn migrate_to_target(connection: &mut Connection, target: i64) -> Res
         MARKET_DECISION_FACTS_SCHEMA_VERSION,
         BUILTIN_WEB_SELECTION_SCHEMA_VERSION,
         KIMI_HIGH_EFFORT_SCHEMA_VERSION,
+        MARKET_NATIVE_APPROVAL_SCHEMA_VERSION,
     ]
     .contains(&target)
     {

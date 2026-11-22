@@ -235,14 +235,29 @@ impl ChatRepository {
                 return Err(ChatError::ConversationConflict);
             }
         }
-        let current_permission = self.permission_state(Some(pending.session))?.mode.as_str();
+        let current_permission = self
+            .permission_state(Some(pending.session))?
+            .authorized_mode()
+            .as_str();
+        let native_approval_version: Option<i64> = if self.schema_version()?
+            >= crate::chat::migrations::MARKET_NATIVE_APPROVAL_SCHEMA_VERSION
+        {
+            self.connection.query_row("SELECT native_approval_version FROM chat_market_submissions WHERE submission_operation_id=?1",
+                [pending.operation.to_string()], |row| row.get(0)).map_err(db_error)?
+        } else {
+            None
+        };
         let frozen_permission = match pending.permission_mode {
             wire::PermissionMode::Ask => "ask",
             wire::PermissionMode::Auto => "auto",
             wire::PermissionMode::Full => "full",
         };
         if current_permission != frozen_permission
-            || (!pending.snapshot.selection.is_empty() && frozen_permission != "ask")
+            || (native_approval_version.is_some()
+                && !admission.is_some_and(super::provider::ProviderAdmission::native_approvals))
+            || (!pending.snapshot.selection.is_empty()
+                && frozen_permission != "ask"
+                && native_approval_version != Some(1))
         {
             return Err(ChatError::OrchestrationUnavailable);
         }
@@ -279,12 +294,30 @@ impl ChatRepository {
             .map_err(|_| ChatError::OrchestrationUnavailable)?;
         }
         let services = bindings(self, &pending.snapshot.selection)?;
+        let native_approval_authority_operations = if native_approval_version == Some(1) {
+            let ids = services
+                .iter()
+                .map(|service| {
+                    super::store::approval_authority_operation(
+                        &self.connection,
+                        &self.scope,
+                        &service.reference.installation_id,
+                    )
+                    .map_err(|_| ChatError::ConversationConflict)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Some(ids)
+        } else {
+            None
+        };
         let cwd = self
             .resolve_schedule_project(&pending.project)?
             .to_str()
             .ok_or(ChatError::InvalidInput)?
             .to_owned();
         let body = wire::Submission {
+            native_approval_version,
+            native_approval_authority_operations,
             task_id: task.to_string(),
             local_session_id: pending.session.to_string(),
             agent_session_id: pending.agent_session.map(|id| id.to_string()),

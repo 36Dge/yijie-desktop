@@ -9,6 +9,7 @@ import type { CatalogEntry, Installation, MutationResult, Operation, Snapshot } 
 import { createMarketConnectorStoreDefinition } from "../../stores/market-connectors.store";
 import ConnectorMarketView from "./ConnectorMarketView.vue";
 import ConnectorInstalledList from "./ConnectorInstalledList.vue";
+import ConnectorApprovalRules from "./ConnectorApprovalRules.vue";
 import ConnectorDetailsDialog from "./ConnectorDetailsDialog.vue";
 import catalog from "../../../contracts/market-catalog.json";
 import { connectorIconUrl } from "../../icons/connector-icons";
@@ -243,4 +244,30 @@ it("shows saved enable intent while disconnected and allows global disable", asy
   expect(control.attributes("aria-checked")).toBe("true");
   await control.trigger("click");
   expect(wrapper.emitted("enabled-change")).toEqual([["sample", false]]);
+});
+
+it("lists paged native tool approvals and confirms revocation from the returned rules", async () => {
+  const first = { key: "a".repeat(64), tool: "product_search · US" };
+  const second = { key: "b".repeat(64), tool: "category_report · US" };
+  const read = vi.fn()
+    .mockResolvedValueOnce({ rules: [first], next: first.key })
+    .mockResolvedValueOnce({ rules: [second] })
+    .mockResolvedValueOnce({ rules: [second] });
+  const wrapper = mount(ConnectorApprovalRules, {
+    props: { serviceId: "sorftime", canManage: false, read }, attachTo: document.body,
+  });
+  wrappers.push(wrapper);
+  await button("查看长期工具授权").trigger("click");
+  await flushPromises();
+  expect(wrapper.get("ul").text()).toContain(first.tool);
+  expect(wrapper.find('[aria-label^="撤销 "]').exists()).toBe(false);
+  await button("查看更多").trigger("click");
+  await flushPromises();
+  expect(read).toHaveBeenLastCalledWith("sorftime", undefined, first.key);
+  expect(wrapper.findAll("li")).toHaveLength(2);
+  await wrapper.setProps({ canManage: true });
+  await wrapper.get('[aria-label="撤销 product_search · US 的长期授权"]').trigger("click");
+  await flushPromises();
+  expect(read).toHaveBeenLastCalledWith("sorftime", first.key, undefined);
+  expect(wrapper.findAll("li").map(item => item.get("span").text())).toEqual([second.tool]);
 });

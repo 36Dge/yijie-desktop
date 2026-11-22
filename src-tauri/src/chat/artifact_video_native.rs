@@ -690,6 +690,7 @@ fn map_chat_error(error: ChatError) -> ArtifactNativeCode {
         | ChatError::NativePickerUnavailable
         | ChatError::SidecarUnavailable
         | ChatError::OrchestrationUnavailable
+        | ChatError::MarketPermissionModeUnavailable
         | ChatError::CleanupIncomplete => ArtifactNativeCode::Unavailable,
     }
 }

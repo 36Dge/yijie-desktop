@@ -398,6 +398,13 @@ async fn decide(
         .find(|item| item.approval_id == request.payload.approval_id)
         .ok_or(Code::ApprovalNotFound)?;
     validate_approval(approval, &view, &scope, host.instance_nonce())?;
+    let offered = approval.persist_options.as_deref().unwrap_or_default();
+    match request.payload.decision {
+        wire::Decision::ApproveOnce | wire::Decision::Reject | wire::Decision::Cancel => {}
+        wire::Decision::ApproveSession if offered.iter().any(|s| s == "session") => {}
+        wire::Decision::ApproveAlways if offered.iter().any(|s| s == "always") => {}
+        _ => return Err(Code::PermissionDenied),
+    }
     if approval.revision != request.payload.expected_revision {
         return Err(Code::ApprovalStale);
     }
@@ -478,7 +485,7 @@ async fn decide(
     let confirmed = matches!(
         (response.data.decision, response.data.state),
         (
-            Some(wire::Decision::ApproveOnce),
+            Some(wire::Decision::ApproveOnce | wire::Decision::ApproveSession | wire::Decision::ApproveAlways),
             wire::ApprovalState::Approved
         ) | (Some(wire::Decision::Reject), wire::ApprovalState::Rejected)
             | (Some(wire::Decision::Cancel), wire::ApprovalState::Cancelled)
@@ -547,6 +554,117 @@ pub(crate) async fn chat_market_approval_decide_v1(
         data,
     })
     .map_err(|_| failure(&request, Code::TemporarilyUnavailable))
+}
+
+#[tauri::command]
+pub(crate) async fn chat_market_remembered_rules_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+) -> Result<Value, wire::NativeError> {
+    let decoded: wire::NativeRememberedRulesRequest = serde_json::from_value(request.clone())
+        .map_err(|_| failure(&request, Code::InvalidRequest))?;
+    let result = remembered_rules(&chat_runtime, decoded)
+        .await
+        .map_err(|code| failure(&request, code))?;
+    serde_json::to_value(result).map_err(|_| failure(&request, Code::TemporarilyUnavailable))
+}
+
+async fn remembered_rules(
+    runtime: &ChatRuntime,
+    request: wire::NativeRememberedRulesRequest,
+) -> Result<wire::NativeRememberedRulesResponse, Code> {
+    let (scope, manager) = authority(runtime)?;
+    let required: &[&str] = if request.payload.revoke.is_some() {
+        &["connector.read", "connector.manage"]
+    } else {
+        &["connector.read"]
+    };
+    let _guard = manager.market_admission_lock().await;
+    let current = authorize(&manager, &scope, &request.context_id, required)?;
+    let db = runtime.database().await.map_err(|_| Code::NotReady)?;
+    let reference = request.payload.reference.clone();
+    let expected_scope = scope.clone();
+    let (service_id, credential, authority_operation_id) = db
+        .call(move |repo| {
+            if repo.scope.owner_user_id != expected_scope.owner_user_id
+                || repo.scope.tenant_id != expected_scope.tenant_id
+            {
+                return Err(crate::chat::error::ChatError::ScopeDenied);
+            }
+            let item = super::store::find(
+                &repo.connection,
+                &expected_scope,
+                &super::catalog().catalog,
+                &reference.installation_id,
+            )
+            .map_err(|_| crate::chat::error::ChatError::NotFound)?;
+            if item.revision != reference.revision
+                || item.generation != reference.generation
+                || item.status != super::generated::InstallationStatus::Installed
+            {
+                return Err(crate::chat::error::ChatError::ConversationConflict);
+            }
+            let operation = super::store::approval_authority_operation(
+                &repo.connection,
+                &expected_scope,
+                &item.installation_id,
+            )
+            .map_err(|_| crate::chat::error::ChatError::NotFound)?;
+            Ok((item.service_id, item.credential_ref, operation))
+        })
+        .await
+        .map_err(|_| Code::SelectionStale)?;
+    let Some(credential_ref) = credential else {
+        authorize(&manager, &scope, &request.context_id, required)?;
+        if request.payload.revoke.is_some() {
+            return Err(Code::SelectionStale);
+        }
+        return Ok(wire::NativeRememberedRulesResponse {
+            schema_version: 1,
+            request_id: request.request_id,
+            data: wire::RememberedToolRules {
+                rules: Vec::new(),
+                next: None,
+            },
+        });
+    };
+    let host = runtime
+        .local_host_bridge()
+        .await
+        .map_err(|_| Code::NotReady)?;
+    let pipe = host
+        .market_control()
+        .filter(|p| p.native_approvals())
+        .ok_or(Code::NotReady)?;
+    let private = wire::RememberedRulesRequest {
+        schema_version: 1,
+        request_id: request.request_id.clone(),
+        method: "remembered_tool_rules".into(),
+        payload: wire::RememberedRulesPayload {
+            credential_ref,
+            authority_operation_id,
+            host_instance_id: host.instance_nonce().into(),
+            scope: current,
+            service_id,
+            reference: request.payload.reference,
+            after: request.payload.after,
+            revoke: request.payload.revoke,
+        },
+    };
+    let response: wire::RememberedRulesResponse = pipe
+        .request(&private.request_id, &private)
+        .await
+        .map_err(|e| match e {
+            ControlError::Rejected(e) => e.code,
+            ControlError::Busy => Code::Busy,
+            _ => Code::OperationUncertain,
+        })?;
+    authorize(&manager, &scope, &request.context_id, required)?;
+    Ok(wire::NativeRememberedRulesResponse {
+        schema_version: 1,
+        request_id: request.request_id,
+        data: response.data,
+    })
 }
 
 #[cfg(test)]

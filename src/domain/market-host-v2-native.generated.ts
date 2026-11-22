@@ -5,6 +5,8 @@ export type HttpsSchemasYijieAiMarketHostV2Native =
   | NativeObserveResponse
   | NativeApprovalDecideRequest
   | NativeApprovalDecideResponse
+  | NativeRememberedRulesRequest
+  | NativeRememberedRulesResponse
   | NativeError;
 export type CanonicalId = string;
 export type NativeId = string;
@@ -22,7 +24,20 @@ export type UnixMilliseconds = number;
 export type ReferencedSelectionDigest = string;
 export type ToolName = string;
 export type ArgsDigest = string;
-export type Decision = "approve_once" | "reject" | "cancel";
+/**
+ * Per-call owner decision. approve_* are explicit human choices; native_* record the correlated Codex policy decision and are not renderer actions.
+ */
+export type Decision =
+  | "approve_once"
+  | "reject"
+  | "cancel"
+  | "approve_session"
+  | "approve_always"
+  | "native_full"
+  | "native_auto"
+  | "native_session"
+  | "native_always"
+  | "native_auto_reject";
 /**
  * Gateway-owned result _meta[yijie.market.call], not supplier metadata. Capture the current frozen call and accepted decision atomically with admission. Null decisionReceipt means no accepted owner decision observed, not that no prompt occurred. admissionConsumed is only permission consumption, never HTTP delivery or provider success. Native Item identity/status remain authoritative. No credentialRef, capabilityRef, bearer, raw arguments or authority context.
  */
@@ -178,6 +193,12 @@ export interface MarketApproval {
   decision?: Decision;
   decisionExpiresAtUnixMs?: number;
   executionExpiresAtUnixMs?: number;
+  /**
+   * @minItems 1
+   * @maxItems 2
+   */
+  persistOptions?: ("session" | "always")[];
+  appliedPersist?: "session" | "always" | "unavailable";
   [k: string]: unknown;
 }
 /**
@@ -339,6 +360,35 @@ export interface NativeApprovalDecideResponse {
   data: MarketApproval;
   [k: string]: unknown;
 }
+export interface NativeRememberedRulesRequest {
+  schemaVersion: 1;
+  requestId: CanonicalId;
+  contextId: CanonicalId;
+  payload: NativeRememberedRulesPayload;
+}
+export interface NativeRememberedRulesPayload {
+  reference: SelectionRef;
+  revoke?: ArgsDigest;
+  after?: ArgsDigest;
+}
+export interface NativeRememberedRulesResponse {
+  schemaVersion: 1;
+  requestId: CanonicalId;
+  data: RememberedToolRules;
+  [k: string]: unknown;
+}
+export interface RememberedToolRules {
+  /**
+   * @maxItems 32
+   */
+  rules: RememberedToolRule[];
+  next?: ArgsDigest;
+  [k: string]: unknown;
+}
+export interface RememberedToolRule {
+  key: ArgsDigest;
+  tool: ToolName;
+}
 export interface NativeError {
   schemaVersion: 1;
   requestId?: CanonicalId;
@@ -347,4 +397,4 @@ export interface NativeError {
   [k: string]: unknown;
 }
 
-export const NATIVE_MARKET_COMMANDS=[{"command":"chat_market_observe_v1","request":"NativeObserveRequest","response":"NativeObserveResponse","requiredPermission":"task.read"},{"command":"chat_market_approval_decide_v1","request":"NativeApprovalDecideRequest","response":"NativeApprovalDecideResponse","requiredPermission":"task.read, task.create, connector.use"}] as const;
+export const NATIVE_MARKET_COMMANDS=[{"command":"chat_market_observe_v1","request":"NativeObserveRequest","response":"NativeObserveResponse","requiredPermission":"task.read"},{"command":"chat_market_approval_decide_v1","request":"NativeApprovalDecideRequest","response":"NativeApprovalDecideResponse","requiredPermission":"task.read, task.create, connector.use"},{"command":"chat_market_remembered_rules_v1","request":"NativeRememberedRulesRequest","response":"NativeRememberedRulesResponse","requiredPermission":"connector.read; revoke also requires connector.manage"}] as const;

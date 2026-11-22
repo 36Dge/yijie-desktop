@@ -4445,7 +4445,7 @@ fn map_chat_error(error: ChatError, request_id: Option<Uuid>) -> ChatIpcError {
         | ChatError::SecureStorageUnavailable => {
             ChatIpcError::new(request_id, "chat_storage_unavailable", true, "retry")
         }
-        ChatError::OrchestrationUnavailable => {
+        ChatError::OrchestrationUnavailable | ChatError::MarketPermissionModeUnavailable => {
             ChatIpcError::new(request_id, "chat_protocol_error", false, "resync")
         }
         ChatError::Disabled => ChatIpcError::temporarily_unavailable(request_id),

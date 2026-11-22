@@ -5,4 +5,6 @@ export declare const validateNativeObserveRequest:Validator<T.NativeObserveReque
 export declare const validateNativeObserveResponse:Validator<T.NativeObserveResponse>;
 export declare const validateNativeApprovalDecideRequest:Validator<T.NativeApprovalDecideRequest>;
 export declare const validateNativeApprovalDecideResponse:Validator<T.NativeApprovalDecideResponse>;
+export declare const validateNativeRememberedRulesRequest:Validator<T.NativeRememberedRulesRequest>;
+export declare const validateNativeRememberedRulesResponse:Validator<T.NativeRememberedRulesResponse>;
 export declare const validateNativeError:Validator<T.NativeError>;

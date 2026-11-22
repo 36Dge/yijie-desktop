@@ -13,7 +13,7 @@ function setup(client: MarketHostNativeClient, events = false, active = false) {
   wrappers.push(mount(defineComponent({ setup() { flow = useMarketChat(() => context.value, () => session.value, () => running.value, client, events ? () => nativeRevision.value : undefined); return () => null; } })));
   return { flow, context, session, running, nativeRevision };
 }
-function client(): MarketHostNativeClient { return { observe: vi.fn(async () => marketObservation()), decide: vi.fn(), submit: vi.fn() }; }
+function client(): MarketHostNativeClient { return { observe: vi.fn(async () => marketObservation()), decide: vi.fn(), rememberedRules: vi.fn(), submit: vi.fn() }; }
 afterEach(() => { wrappers.splice(0).forEach(w => w.unmount()); });
 describe("market approval observation", () => {
   it("clears an older completed tool when a lightweight read binds a new turn", async () => {

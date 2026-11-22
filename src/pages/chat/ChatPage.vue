@@ -763,10 +763,6 @@ function prepareConnectorSubmit(): boolean {
     return false;
   }
   if (connectorSelection.value.length === 0) return true;
-  if (permissions.state.value?.mode !== "ask") {
-    transientNotice.value = "连接器任务暂仅支持“请求批准”。请在权限菜单中手动切换后发送。";
-    return false;
-  }
   if (!connectors.selectionAvailable || connectorChips.value.some(chip => chip.unavailableReason)) {
     transientNotice.value = "所选连接器尚未就绪或已变化，请在管理连接器中检查后重新选择。";
     return false;

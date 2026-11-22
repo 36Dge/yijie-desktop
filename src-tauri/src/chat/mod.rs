@@ -1432,6 +1432,7 @@ fn storage_readiness_for_error(error: ChatError) -> ChatStorageReadiness {
         | ChatError::ConversationConflict
         | ChatError::ProjectionReconciliationFailed
         | ChatError::OrchestrationUnavailable
+        | ChatError::MarketPermissionModeUnavailable
         | ChatError::CleanupIncomplete => ChatStorageReadiness::Unavailable,
     }
 }

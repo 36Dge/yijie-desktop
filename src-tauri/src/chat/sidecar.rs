@@ -1186,12 +1186,14 @@ impl SidecarSupervisor {
                             .await;
                         let matches = response.is_ok_and(|response| {
                             let actual = response.data;
-                            actual.ready
+                            let bound = actual.ready
                                 && actual.host_instance_id == request.payload.host_instance_id
                                 && actual.native_process_epoch
                                     == request.payload.native_process_epoch
                                 && actual.owner_user_id == request.payload.owner_user_id
-                                && actual.tenant_id == request.payload.tenant_id
+                                && actual.tenant_id == request.payload.tenant_id;
+                            pipe.set_native_approvals(bound && actual.native_approval_version == Some(1));
+                            bound
                         });
                         if !matches {
                             pipe.close().await;

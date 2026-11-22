@@ -736,6 +736,25 @@ pub(super) fn provider_control_failure(
     Ok(current)
 }
 
+/// A normal startup probes an existing connection with a new live revision.
+/// The original management operation changes when its approved account or
+/// installation authority can change, including an explicit disable.
+pub(super) fn approval_authority_operation(
+    db: &Connection,
+    scope: &ChatScope,
+    installation: &str,
+) -> Result<String> {
+    sql(db.query_row(
+        "SELECT operation_id FROM chat_connector_operations
+         WHERE owner_user_id=?1 AND tenant_id=?2 AND installation_id=?3
+           AND json_extract(response_json,'$.operation.action')
+               IN ('install','configure','authorize','disable','uninstall')
+         ORDER BY rowid DESC LIMIT 1",
+        params![scope.owner_user_id, scope.tenant_id, installation],
+        |row| row.get(0),
+    ).optional())?.ok_or(Error::SelectionStale)
+}
+
 /// Only an explicit current Enable intent supplies a provider operation to
 /// poll. Auth receipts and historical readiness never activate an installation.
 pub(super) fn enabled_provider_operations(

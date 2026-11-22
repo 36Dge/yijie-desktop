@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 import { marketCallReceipt, marketDecisionFact, marketObservation, marketTestId as id } from "../../test/market-chat-fixture";
 import MarketChatActivity from "./MarketChatActivity.vue";
@@ -103,6 +103,27 @@ describe("market review and result presentation", () => {
     expect(result.text()).toContain("保留原生结果");
     expect(result.text()).toContain("已完成"); wrapper.unmount();
   });
+  it.each([
+    ["本会话允许此工具", "approve_session"],
+    ["始终允许此工具", "approve_always"],
+  ] as const)("submits only the offered native scope via %s", async (label, decision) => {
+    const observation = marketObservation();
+    const approval = observation.approvals!.requests[0]!;
+    approval.persistOptions = ["session", "always"];
+    const wrapper = mount(MarketChatActivity, { attachTo: document.body, props: {
+      observation, connected: true, refreshing: false, deciding: null, error: null, actionable: () => true,
+    } });
+    try {
+      await wrapper.get('[aria-label="更多允许选项"]').trigger("click");
+      await flushPromises();
+      const menu = document.querySelector('[role="menu"][aria-label="允许选项"]')!;
+      const options = [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+      expect(options.map(button => button.textContent?.trim())).toEqual(["允许一次", "本会话允许此工具", "始终允许此工具"]);
+      options.find(button => button.textContent?.trim() === label)!.click();
+      expect(wrapper.emitted("decision")).toEqual([[approval.approvalId, decision]]);
+    } finally { wrapper.unmount(); }
+  });
+
   it("shows the qualified review and requires an explicit decision", async () => {
     const observation = marketObservation();
     const wrapper = mount(MarketChatActivity, { props: { observation, liveNativeTurnId: observation.tools!.nativeTurnId,

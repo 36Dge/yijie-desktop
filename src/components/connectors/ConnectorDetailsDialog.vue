@@ -2,12 +2,13 @@
 import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, useId } from "vue";
 import { NAlert, NButton, NCard, NModal } from "naive-ui";
-import { connectorPrimaryAction, type ConnectorAction, type ConnectorView } from "../../domain/connector-ui";
+import { connectorPrimaryAction, type ReadConnectorRules, type ConnectorAction, type ConnectorView } from "../../domain/connector-ui";
 import YjIcon from "../yijie/YjIcon.vue";
 import YjLogo from "../yijie/YjLogo.vue";
+import ConnectorApprovalRules from "./ConnectorApprovalRules.vue";
 import ConnectorIcon from "./ConnectorIcon.vue";
 
-const props = defineProps<{ show: boolean; connector: ConnectorView | null; canManage: boolean; error?: string | null }>();
+const props = defineProps<{ show: boolean; connector: ConnectorView | null; canManage: boolean; readRules?: ReadConnectorRules; error?: string | null }>();
 defineEmits<{ "update:show": [show: boolean]; action: [action: ConnectorAction, id: string]; "after-leave": [] }>();
 const titleId = useId();
 const primary = computed(() => props.connector ? connectorPrimaryAction(props.connector) : null);
@@ -31,13 +32,14 @@ const title = computed(() => {
         <p class="connector-details__description">{{ connector.description }}</p>
         <div class="connector-details__principles">
           <div><YjIcon name="skillOperations" size="md" /><span><strong>扩展对话能力</strong><span>{{ connector.id === "kimi-web" ? "准备完成后，可直接在对话中选用，无需单独启用。" : "启用后，可在对话中选择此连接器。" }}</span></span></div>
-          <div><YjIcon name="shield" size="md" /><span><strong>遵循当前权限设置</strong><span>{{ connector.id === "kimi-web" ? "搜索或读取网页前，仍需批准本次操作。" : "授权连接不会替代任务中的操作审批。" }}</span></span></div>
-          <div><YjIcon name="settings" size="md" /><span><strong>随时管理连接</strong><span>{{ connector.id === "kimi-web" ? "停用或卸载会保留你的选择，不会删除模型凭据。" : "停用会保留配置和授权；卸载才会清除本机配置和凭据。" }}</span></span></div>
+          <div><YjIcon name="shield" size="md" /><span><strong>遵循当前权限设置</strong><span>{{ connector.id === "kimi-web" ? "搜索或读取网页时使用当前任务的审批模式。" : "授权连接不会替代任务中的操作审批。" }}</span></span></div>
+          <div><YjIcon name="settings" size="md" /><span><strong>随时管理连接</strong><span>{{ connector.id === "kimi-web" ? "停用或卸载会保留你的选择，不会删除模型凭据。" : "停用会撤销当前安装的工具执行权限。卸载可清除本机配置和凭据。" }}</span></span></div>
         </div>
         <p v-if="connector.configurationLabel" class="connector-details__configuration">{{ connector.configurationLabel }}</p>
         <NAlert v-if="connector.explanation && connector.explanation !== error" :type="connector.status.tone === 'error' ? 'error' : connector.status.tone === 'warning' ? 'warning' : 'info'" :bordered="false">{{ connector.explanation }}</NAlert>
         <NAlert v-if="error" type="error" :bordered="false" role="alert">{{ error }}</NAlert>
         <p v-if="!canManage" class="connector-details__configuration">当前没有安装、启停和卸载权限；账户授权按对应权限单独开放。</p>
+        <ConnectorApprovalRules v-if="show && connector.installed && readRules" :key="connector.id" :service-id="connector.id" :can-manage="canManage" :read="readRules" />
         <p v-if="connector.busy" class="connector-details__progress" role="status" aria-live="polite"><YjIcon name="loading" size="sm" />{{ connector.status.label }}</p>
       </div>
       <template #footer>

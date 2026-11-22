@@ -51,7 +51,8 @@ export type ErrorCode =
   | "request_conflict"
   | "selection_stale"
   | "execution_unavailable"
-  | "temporarily_unavailable";
+  | "temporarily_unavailable"
+  | "permission_mode_unavailable";
 
 /**
  * No service label or secret is accepted as authority. Native and Host revalidate exact scope, generation, ready state and connector.use before a versioned turn is admitted.

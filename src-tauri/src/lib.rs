@@ -542,6 +542,7 @@ pub fn run() {
         chat::experts::commands::chat_expert_binding_recover_v1,
         chat::connectors::observe::chat_market_observe_v1,
         chat::connectors::observe::chat_market_approval_decide_v1,
+        chat::connectors::observe::chat_market_remembered_rules_v1,
         chat::ipc::chat_create_session_v2,
         chat::ipc::chat_submit_turn_v2,
         chat::ipc::chat_list_sessions_v1,

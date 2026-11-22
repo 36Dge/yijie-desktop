@@ -1,3 +1,4 @@
+import type { RememberedToolRules } from "./market-host-v2-native.generated";
 /** Presentation only. The native adapter projects the generated contract into these views. */
 export type ConnectorAction = "install" | "enable" | "disable" | "configure" | "authorize" | "cancel" | "uninstall" | "retry" | "reopen";
 export type ConnectorTone = "neutral" | "success" | "warning" | "error";
@@ -73,3 +74,5 @@ export function connectorPrimaryAction(view: ConnectorView): Readonly<{ action: 
   if (view.actions.includes("enable")) return { action: "enable", label: `启用 ${view.name}` };
   return null;
 }
+
+export type ReadConnectorRules = (serviceId: string, revoke?: string, after?: string) => Promise<RememberedToolRules>;

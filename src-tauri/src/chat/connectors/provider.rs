@@ -837,6 +837,7 @@ mod tests {
     }
     fn status(op: &store::ProviderOperation, state: p::OperationState) -> p::ProviderStatus {
         p::ProviderStatus {
+            native_approval_version: None,
             operation_id: op.payload.operation_id.clone(),
             host_instance_id: op.payload.host_instance_id.clone(),
             scope: op.payload.scope.clone(),
@@ -1563,6 +1564,7 @@ mod tests {
         let (mut db, scope, item, host, authority) =
             setup_database(rusqlite::Connection::open(&path).unwrap());
         let enabled = qualified_enable(&mut db, &scope, &item, &host, authority.clone());
+        let account_operation = store::approval_authority_operation(&db, &scope, &item.installation_id).unwrap();
         let credential = enabled.payload.binding.credential_ref.clone();
         db.close().unwrap();
 
@@ -1626,6 +1628,7 @@ mod tests {
             operations[0].payload.operation_id,
             retry.payload.operation_id
         );
+        assert_eq!(store::approval_authority_operation(&db, &scope, &item.installation_id).unwrap(), account_operation);
         let disable = begin(
             &mut db,
             &scope,
@@ -1635,6 +1638,8 @@ mod tests {
             ui::OperationAction::Disable,
         );
         assert!(!disable.result.installation.desired_enabled);
+        assert_eq!(store::approval_authority_operation(&db, &scope, &item.installation_id).unwrap(), disable.payload.operation_id);
+        assert_ne!(account_operation, disable.payload.operation_id);
         assert!(
             !store::find(&db, &scope, &catalog().catalog, &item.installation_id)
                 .unwrap()
@@ -1642,6 +1647,122 @@ mod tests {
         );
         db.close().unwrap();
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(feature = "kimi-k31-pro-candidate")]
+    #[test]
+    fn feat157_native_approval_freezes_selected_mode_and_reopens_sql50() {
+        use crate::chat::authorization::ChatAuthorizationManager;
+        use crate::chat::connectors::selection::{tests::Fixture, ExecutionAdmission};
+        use crate::chat::error::ChatError;
+        use crate::chat::host_bridge::HostBridge;
+        use crate::chat::runtime_permissions::PermissionMode;
+        use crate::chat::sidecar::HostConnection;
+
+        let mut fixture = Fixture::new();
+        let scope = fixture.repo().scope.clone();
+        let manager = ChatAuthorizationManager::new(&scope).unwrap();
+        let nonce = Uuid::now_v7().to_string();
+        let control = super::super::control::MarketControl::from_test_io(
+            Box::new(tokio::io::sink()),
+            Box::new(tokio::io::empty()),
+        );
+        let host = HostBridge::from_connection(HostConnection {
+            port: 1,
+            token_path: std::env::temp_dir().join("feat157-unused-bearer"),
+            instance_nonce: nonce.clone(),
+        })
+        .unwrap()
+        .with_market_control(Some(control.clone()));
+        let authority = super::super::broker_generated::ScopeBinding {
+            owner_user_id: scope.owner_user_id.clone(),
+            tenant_id: scope.tenant_id.clone(),
+            native_process_epoch: manager.market_identity(nonce.clone()).native_process_epoch,
+            authorization_revision: 1,
+            authorization_expires_at_unix_ms: now().unwrap() * 1000 + 120_000,
+        };
+        let entry = catalog()
+            .catalog
+            .iter()
+            .find(|entry| entry.service_id == "tushareMcp")
+            .unwrap();
+        let item = store::install(
+            &mut fixture.repo().connection,
+            &scope,
+            entry,
+            1,
+            ui::InstallPayload {
+                service_id: entry.service_id.clone(),
+                operation_id: Uuid::now_v7().to_string(),
+                expected_revision: 0,
+            },
+            100,
+        )
+        .unwrap()
+        .installation;
+        let enabled = qualified_enable(
+            &mut fixture.repo().connection,
+            &scope,
+            &item,
+            &nonce,
+            authority.clone(),
+        );
+        let mut accepted = Vec::new();
+        for (mode, host_version, worker_version) in [
+            (PermissionMode::Ask, false, false),
+            (PermissionMode::Auto, true, false),
+            (PermissionMode::Full, false, true),
+            (PermissionMode::Ask, true, true),
+            (PermissionMode::Auto, true, true),
+            (PermissionMode::Full, true, true),
+        ] {
+            control.set_native_approvals(host_version);
+            let provider = ProviderAdmission {
+                authority: authority.clone(),
+                host_instance: nonce.clone(),
+                control: control.clone(),
+                deadline: std::time::Instant::now() + std::time::Duration::from_secs(10),
+                worker_native_approvals: worker_version,
+                bindings: vec![enabled.payload.binding.clone()],
+            };
+            let admission = ExecutionAdmission::from_host(&host, &manager, provider).unwrap();
+            fixture
+                .repo()
+                .set_permission_mode(None, mode, true)
+                .unwrap();
+            let mut request = fixture.request();
+            request.selection = vec![enabled.payload.binding.reference.clone()];
+            let result = fixture
+                .repo()
+                .market_submission_admitted(request.clone(), 1, admission);
+            if mode != PermissionMode::Ask && !(host_version && worker_version) {
+                assert!(matches!(
+                    result,
+                    Err(ChatError::MarketPermissionModeUnavailable)
+                ));
+                continue;
+            }
+            accepted.push((
+                request,
+                result.unwrap(),
+                mode,
+                host_version && worker_version,
+            ));
+        }
+        assert_eq!(accepted.len(), 4);
+        fixture.reopen();
+        assert_eq!(fixture.repo().schema_version().unwrap(), 50);
+        for (request, receipt, mode, paired) in accepted {
+            let row: (String, Option<i64>) = fixture.repo().connection.query_row(
+                "SELECT permission_mode,native_approval_version FROM chat_market_submissions WHERE submission_operation_id=?1",
+                [&request.operation_id], |r| Ok((r.get(0)?, r.get(1)?)),
+            ).unwrap();
+            assert_eq!(row, (mode.as_str().to_owned(), paired.then_some(1)));
+            assert_eq!(
+                fixture.repo().market_submission(request, 2).unwrap(),
+                receipt
+            );
+        }
     }
 
     #[tokio::test]
@@ -1676,6 +1797,7 @@ mod tests {
                 schema_version: 1,
                 request_id: request.request_id,
                 data: p::ProviderStatus {
+                    native_approval_version: None,
                     operation_id: request.payload.operation_id,
                     host_instance_id: request.payload.host_instance_id,
                     scope: request.payload.scope,
@@ -1825,6 +1947,7 @@ mod tests {
                 schema_version: 1,
                 request_id: request.request_id,
                 data: p::ProviderStatus {
+                    native_approval_version: None,
                     operation_id: request.payload.operation_id,
                     host_instance_id: request.payload.host_instance_id,
                     scope: request.payload.scope,
@@ -1963,6 +2086,7 @@ mod tests {
 /// pipe. Durable installation/operation rows merely identify what to query.
 #[derive(Clone)]
 pub(crate) struct ProviderAdmission {
+    worker_native_approvals: bool,
     authority: super::broker_generated::ScopeBinding,
     host_instance: String,
     bindings: Vec<super::provider_generated::ProviderBinding>,
@@ -1971,6 +2095,10 @@ pub(crate) struct ProviderAdmission {
 }
 
 impl ProviderAdmission {
+    pub(super) fn native_approvals(&self) -> bool {
+        cfg!(feature = "kimi-k31-pro-candidate") && self.worker_native_approvals && self.control.native_approvals()
+    }
+
     fn live(&self, scope: &ChatScope) -> bool {
         self.authority.owner_user_id == scope.owner_user_id
             && self.authority.tenant_id == scope.tenant_id
@@ -2057,6 +2185,7 @@ async fn poll_snapshot_admission(
                 // All proofs use the same captured authority and owned Host.
                 // Later observations must not extend an earlier proof's lease.
                 observed.deadline = observed.deadline.min(current.deadline);
+                observed.worker_native_approvals &= current.worker_native_approvals;
                 observed.bindings.extend(current.bindings);
             } else {
                 observed = Some(current);
@@ -2110,6 +2239,7 @@ async fn poll_admission(
     }
     let control = host.market_control().ok_or(Error::ExecutionUnavailable)?;
     let mut bindings = Vec::new();
+    let mut worker_native_approvals = !operations.is_empty();
     for mut operation in operations {
         if operation.payload.host_instance_id != host.instance_nonce()
             || operation.payload.scope.native_process_epoch != authority.native_process_epoch
@@ -2142,6 +2272,7 @@ async fn poll_admission(
         {
             return Err(Error::ExecutionUnavailable);
         }
+        worker_native_approvals &= current.native_approval_version == Some(1);
         bindings.push(current.binding);
     }
     if !control.is_open() {
@@ -2154,6 +2285,7 @@ async fn poll_admission(
         return Err(Error::ContextInvalid);
     }
     Ok(ProviderAdmission {
+        worker_native_approvals,
         authority,
         host_instance: host.instance_nonce().into(),
         bindings,

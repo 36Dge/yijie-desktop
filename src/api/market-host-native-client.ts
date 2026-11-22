@@ -9,7 +9,7 @@ const selectionValidators=kimiK31Candidate ? selectionValidatorsCurrent : select
 import legacySchema from "../../contracts/market-host-native.schema.json";
 import currentSchema from "../../contracts/market-host-v2-native.schema.json";
 const schema=kimiK31Candidate ? currentSchema : legacySchema;
-import type { Decision, ErrorCode, NativeApprovalDecidePayload, NativeObservation, MarketApproval, ToolsReadMode } from "../domain/market-host-v2-native.generated";
+import type { Decision, ErrorCode, NativeApprovalDecidePayload, NativeObservation, MarketApproval, RememberedToolRules, ToolsReadMode } from "../domain/market-host-v2-native.generated";
 import type { SubmitPayload, SubmissionReceipt } from "../domain/market-selection-v2.generated";
 
 type Transport = (command: string, args: { request: unknown }) => Promise<unknown>;
@@ -34,7 +34,7 @@ export class MarketChatError extends Error {
 export function marketChatErrorMessage(error: unknown): string {
   const code = error instanceof MarketChatError ? error.code : "temporarily_unavailable";
   switch (code) {
-    case "permission_mode_unavailable": return "连接器任务暂仅支持“请求批准”。请在权限菜单中手动切换后发送。";
+    case "permission_mode_unavailable": return "当前连接器执行端尚未接入所选权限模式。请更新客户端，或切换到“请求批准”后发送。";
     case "permission_denied": case "context_invalid": case "authority_mismatch": return "当前授权已变化，请刷新会话授权后重新核对。";
     case "approval_expired": case "approval_stale": case "approval_resolved": return "审批状态已变化，请刷新并查看当前结果。";
     case "selection_stale": return "连接器已变化，请重新选择。";
@@ -51,7 +51,8 @@ export function createMarketHostNativeClient(transport: Transport = invoke) {
   async function call(command: string, contextId: string, payload: unknown, mutation: boolean): Promise<unknown> {
     const requestId = crypto.randomUUID(); const request = { schemaVersion: 1, requestId, contextId, payload };
     const isObserve = command === "chat_market_observe_v1";
-    const validateRequest = isObserve ? validators.validateNativeObserveRequest : validators.validateNativeApprovalDecideRequest;
+    const isRules = command === "chat_market_remembered_rules_v1";
+    const validateRequest = isRules ? validators.validateNativeRememberedRulesRequest : isObserve ? validators.validateNativeObserveRequest : validators.validateNativeApprovalDecideRequest;
     if (!validateRequest(request)) throw new MarketChatError("invalid_request");
     let response: unknown;
     try { response = await transport(command, { request }); }
@@ -59,11 +60,14 @@ export function createMarketHostNativeClient(transport: Transport = invoke) {
       if (validators.validateNativeError(error) && error.requestId === requestId) throw new MarketChatError(error.code, error.code === "operation_uncertain");
       throw new MarketChatError(mutation ? "operation_uncertain" : "temporarily_unavailable", mutation);
     }
-    const validate = isObserve ? validators.validateNativeObserveResponse : validators.validateNativeApprovalDecideResponse;
+    const validate = isRules ? validators.validateNativeRememberedRulesResponse : isObserve ? validators.validateNativeObserveResponse : validators.validateNativeApprovalDecideResponse;
     if (!validate(response) || response.requestId !== requestId) throw new MarketChatError(mutation ? "operation_uncertain" : "not_ready", mutation);
-    return project(definitions[isObserve ? "NativeObservation" : "MarketApproval"]!, response.data);
+    return project(definitions[isRules ? "RememberedToolRules" : isObserve ? "NativeObservation" : "MarketApproval"]!, response.data);
   }
   return {
+    async rememberedRules(contextId: string, reference: { installationId: string; revision: number; generation: number }, revoke?: string, after?: string): Promise<RememberedToolRules> {
+      return await call("chat_market_remembered_rules_v1", contextId, { reference, ...(revoke ? { revoke } : {}), ...(after ? { after } : {}) }, !!revoke) as RememberedToolRules;
+    },
     async observe(contextId: string, sessionId: string, nativeTurnId?: string, toolsRead?: ToolsReadMode): Promise<NativeObservation> {
       const payload = { sessionId, ...(nativeTurnId ? { nativeTurnId } : {}) };
       const mode = legacyReadContext === contextId ? undefined : toolsRead;

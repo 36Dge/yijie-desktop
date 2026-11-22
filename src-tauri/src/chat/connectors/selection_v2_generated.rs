@@ -672,6 +672,8 @@ pub enum ErrorCode {
     ExecutionUnavailable,
     #[serde(rename = "temporarily_unavailable")]
     TemporarilyUnavailable,
+    #[serde(rename = "permission_mode_unavailable")]
+    PermissionModeUnavailable,
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", try_from = "ErrorWire")]

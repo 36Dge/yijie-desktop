@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useId, watch } from "vue";
 import { NAlert, NButton, NCard, NInput, NModal, NSkeleton } from "naive-ui";
-import { filterConnectors, type ConnectorAction, type ConnectorPageView } from "../../domain/connector-ui";
+import { filterConnectors, type ReadConnectorRules, type ConnectorAction, type ConnectorPageView } from "../../domain/connector-ui";
 import YjPage from "../yijie/YjPage.vue";
 import YjPageHeader from "../yijie/YjPageHeader.vue";
 import YjRefreshButton from "../yijie/YjRefreshButton.vue";
@@ -14,6 +14,7 @@ import ConnectorInstalledList from "./ConnectorInstalledList.vue";
 import ConnectorDetailsDialog from "./ConnectorDetailsDialog.vue";
 
 const props = withDefaults(defineProps<{
+  readRules?: ReadConnectorRules;
   model: ConnectorPageView;
   operationErrors?: Readonly<Record<string, string>>;
   canReturn?: boolean;
@@ -73,7 +74,7 @@ watch(() => props.model.phase, phase => { if (phase === "permission-denied") { d
         <div v-else class="connector-market__categories"><YjSection v-for="category in categories" :key="category.id" :title="category.label" :count="category.entries.length" :count-label="`${category.entries.length} 个连接器`"><ul class="connector-market__grid"><li v-for="entry in category.entries" :key="entry.id"><ConnectorCard :connector="entry" @open="openDetails" /></li></ul></YjSection></div>
       </section>
     </template>
-    <ConnectorDetailsDialog :show="detailsId !== null && details !== null" :connector="details" :can-manage="model.canManage" :error="detailsId ? operationErrors[detailsId] : null" @update:show="value => { if (!value) detailsId = null; }" @action="(action, id) => $emit('action', action, id)" @after-leave="restoreTrigger(detailsTrigger)" />
+    <ConnectorDetailsDialog :read-rules="readRules" :show="detailsId !== null && details !== null" :connector="details" :can-manage="model.canManage" :error="detailsId ? operationErrors[detailsId] : null" @update:show="value => { if (!value) detailsId = null; }" @action="(action, id) => $emit('action', action, id)" @after-leave="restoreTrigger(detailsTrigger)" />
     <NModal v-if="uninstallTarget" :show="uninstallId !== null" :mask-closable="true" :close-on-esc="true" @update:show="value => { if (!value) uninstallId = null; }" @after-leave="restoreTrigger(uninstallTrigger)">
       <NCard class="connector-market__uninstall" title="卸载连接器" role="dialog" aria-modal="true" aria-label="卸载连接器" :bordered="false">
         <p>确定卸载「{{ uninstallTarget.name }}」？本机安装、连接配置和所管凭据将被清理，已发送的任务记录会保留。</p>

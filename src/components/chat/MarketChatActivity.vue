@@ -27,8 +27,18 @@ const visibleTools = computed(() => (displayed.value?.tools?.items ?? []).filter
   return (item.state === "completed" || live) && !item.errorCode &&
     !hasWebRetrievalError(item.toolName, item.resultText) && !hasWebRetrievalError(item.toolName, item.structuredResultText);
 }));
-const decisionLabels = { approve_once: "已允许一次", reject: "已拒绝", cancel: "已取消本次" };
-const decisionIntents = { approve_once: "允许一次", reject: "拒绝", cancel: "取消本次" };
+const decisionLabels: Record<Decision, string> = {
+  approve_once: "已允许一次", reject: "已拒绝", cancel: "已取消本次",
+  approve_session: "已选择本会话允许", approve_always: "已选择始终允许",
+  native_full: "完全访问已允许", native_auto: "自动审核通过", native_auto_reject: "自动审核拒绝",
+  native_session: "按本会话授权执行", native_always: "按长期授权执行",
+};
+const decisionIntents: Record<Decision, string> = {
+  ...decisionLabels, approve_once: "允许一次", reject: "拒绝", cancel: "取消本次",
+  approve_session: "本会话允许此工具", approve_always: "始终允许此工具",
+};
+const remembered = computed(() => props.observation?.approvals?.requests.filter(a =>
+  a.appliedPersist && a.identity.nativeTurnId === props.liveNativeTurnId) ?? []);
 function decisionTime(timestamp: number): string {
   // Early candidates wrote seconds in the ms field. These facts cannot predate
   // the product (or 2001). Flag the date; never rewrite or guess audit values.
@@ -71,13 +81,18 @@ function callSourceName(turnId: string, identity: Pick<DecisionFact, "serviceId"
   <section v-if="observation?.managed || error" class="market-activity" aria-label="连接器调用" :aria-busy="refreshing" aria-live="polite">
     <p v-if="error" class="market-activity__notice" role="alert">{{ error }} <button class="yj-control" type="button" :disabled="refreshing || !!deciding" @click="$emit('refresh')">{{ refreshing ? '正在核对' : '刷新状态' }}</button></p>
     <ChatApprovalPrompt v-for="approval in pending" :key="approval.approvalId" :source="approvalName(approval)" icon="connector" :question="approval.review.title"
-      :submitting="deciding === approval.approvalId" :disabled="!actionable(approval)"
+      :persist-options="approval.persistOptions" :submitting="deciding === approval.approvalId" :disabled="!actionable(approval)"
+      @persist="scope => $emit('decision', approval.approvalId, scope === 'always' ? 'approve_always' : 'approve_session')"
       @reject="$emit('decision', approval.approvalId, 'reject')" @once="$emit('decision', approval.approvalId, 'approve_once')">
       <p>{{ approval.review.summary }}</p>
+      <p v-if="approval.persistOptions?.length" class="market-activity__meta">记住后，授权适用于当前连接账号的此工具和本次目标范围。</p>
       <pre v-if="approval.review.argumentsJson" aria-label="本次工具调用完整参数">{{ approval.review.argumentsJson }}</pre>
       <p class="market-activity__meta">{{ approval.review.risk === 'read' ? '读取数据' : '修改数据' }} · {{ approval.identity.toolName }} · {{ approval.decisionExpiresAtUnixMs ? '最晚批准时间' : '有效期至' }} {{ new Date(approval.decisionExpiresAtUnixMs ?? approval.expiresAtUnixMs).toLocaleTimeString('zh-CN') }}</p>
       <template #extra-action><button class="approval-secondary" type="button" :disabled="!actionable(approval)" @click="$emit('decision', approval.approvalId, 'cancel')">取消本次</button></template>
     </ChatApprovalPrompt>
+    <p v-for="approval in remembered" :key="approval.approvalId" class="market-activity__meta" role="status">
+      {{ approvalName(approval) }} · {{ approval.review.title }} · {{ approval.appliedPersist === "always" ? "已保存长期授权" : approval.appliedPersist === "session" ? "仅本会话有效" : "授权未保存" }}
+    </p>
     <label v-if="observation?.availableTurns?.length" class="market-activity__history">
       <span>工具调用记录</span>
       <select class="yj-control" aria-label="查看连接器调用轮次" :value="selectedTurnId ?? ''" @change="$emit('selectTurn', ($event.target as HTMLSelectElement).value || null)">

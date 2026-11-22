@@ -29,7 +29,7 @@ class State:
 def latest_case(body):
     users=[x for x in body.get('input',[]) if isinstance(x,dict) and x.get('role')=='user']
     text=json.dumps(users[-1] if users else {},ensure_ascii=False)
-    match=re.search(r'LOCAL_CASE_(REJECT|TWICE|DUAL|ERROR|SLOW|CANCEL)',text)
+    match=re.search(r'LOCAL_CASE_(REJECT|TWICE|DUAL|ERROR|SLOW|CANCEL|ONCE|SESSION_HIT|SESSION|ALWAYS|AFTER_RESTART|AFTER_REVOKE|SAVE_FOR_REINSTALL|NEW_INSTALLATION|FULL|GUARDIAN_ALLOW|GUARDIAN_DENY)\b',text)
     return match.group(1) if match else None
 
 def discovered_native_tool(body):
@@ -120,7 +120,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if call_record:
                 with state.lock:state.inflight-=1
     def model(self,body):
-        state=self.server.state;case=latest_case(body)
+        state=self.server.state
+        if (body.get('stream') is True and
+                ('risk_level' in body.get('instructions','') or '"outcome"' in json.dumps(body.get('text',{})))):
+            # Only the explicit local Guardian cases have a scripted model assessment.
+            review_input=json.dumps(body.get('input',[]))
+            markers=[outcome for outcome in ('allow','deny') if 'local-guardian_'+outcome in review_input]
+            if len(markers)!=1:
+                self.reply(400,{'error':'explicit local Guardian marker required'})
+                return
+            with state.lock:
+                state.requests+=1
+                if state.requests>64:
+                    self.reply(429,{'error':'bounded local sequence exhausted'})
+                    return
+            outcome=markers[0]
+            state.record({'event':'model_guardian_review','outcome':outcome})
+            self.model_item({'type':'message','role':'assistant','status':'completed','content':[{'type':'output_text','text':json.dumps({'outcome':outcome,'risk_level':'low','user_authorization':'high','rationale':'Ordinary local sample.'}),'annotations':[]}]})
+            return
+        case=latest_case(body)
         if case is None or body.get('stream') is not True:self.reply(400,{'error':'explicit local case required'});return
         meta=body.get('client_metadata',{});nested=meta.get('x-codex-turn-metadata','{}')
         try:nested=json.loads(nested) if isinstance(nested,str) else nested
@@ -136,19 +154,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
         state.record({'event':'model_protocol_request','turnId':turn,'case':case,'step':step})
         if state.requests>64 or step>5:self.reply(429,{'error':'bounded local sequence exhausted'});return
         call='call_'+uuid.uuid4().hex
+        direct=body.get('model')=='MiniMax-M3'
+        first_call=0 if direct else 1
         if running_cell:
             state.record({'event':'native_wait_used','turnId':turn,'cellId':running_cell})
             item={'type':'function_call','name':'wait','call_id':call,'arguments':json.dumps({'cell_id':running_cell,'yield_time_ms':20000,'max_tokens':3000})}
-        elif step==0:item={'type':'function_call','name':'tool_search','call_id':call,'arguments':json.dumps({'query':'本地连接器验收 local_sample','limit':1})}
-        elif step==1 or case=='TWICE' and step==2:
-            native_tool=discovered_native_tool(body)
+        elif not direct and step==0:
+            item={'type':'function_call','name':'tool_search','call_id':call,'arguments':json.dumps({'query':'本地连接器验收 local_sample','limit':1})}
+        elif step==first_call or (case=='TWICE' and step==first_call+1):
+            if direct:
+                native_tool=next((tool['name'] for tool in body.get('tools',[]) if tool.get('type')=='function'
+                    and tool.get('name','').startswith('mcp__yijie_market__')
+                    and 'market-local-verification' in tool.get('description','')),None)
+            else:
+                native_tool=discovered_native_tool(body)
             if not native_tool:
-                state.record({'event':'driver_failed','reason':'native_search_binding_missing','turnId':turn});self.reply(400,{'error':'native search binding unavailable'});return
+                state.record({'event':'driver_failed','reason':'native_binding_missing','turnId':turn})
+                self.reply(400,{'error':'native market binding unavailable'})
+                return
             scenario={'DUAL':'dual','ERROR':'error','SLOW':'slow','CANCEL':'slow'}.get(case,'structured')
             args={'scenario':scenario,'marker':'local-'+case.lower()}
             state.record({'event':'native_binding_used','turnId':turn,'name':native_tool})
-            item={'type':'function_call','name':'exec','call_id':call,'arguments':json.dumps({'input':'text(await tools['+json.dumps(native_tool)+']('+json.dumps(args)+'));'})}
+            item={'type':'function_call','name':native_tool if direct else 'exec','call_id':call,
+                  'arguments':json.dumps(args if direct else {'input':'text(await tools['+json.dumps(native_tool)+']('+json.dumps(args)+'));'})}
         else:item={'type':'message','role':'assistant','phase':'final_answer','status':'completed','content':[{'type':'output_text','text':'本地协议驱动已结束。是否批准、工具是否执行及结果状态，以界面中的真实工具记录为准。','annotations':[]}]}
+        self.model_item(item)
+
+    def model_item(self,item):
+        state=self.server.state
         rid='local_'+uuid.uuid4().hex;item['id']='item_'+rid
         events=[{'type':'response.created','response':{'id':rid,'status':'in_progress','output':[]}}, {'type':'response.output_item.added','output_index':0,'item':item}, {'type':'response.output_item.done','output_index':0,'item':item}, {'type':'response.completed','response':{'id':rid,'status':'completed','output':[item]}}]
         data=''.join('data: '+json.dumps(e,ensure_ascii=False)+'\n\n' for e in events).encode()

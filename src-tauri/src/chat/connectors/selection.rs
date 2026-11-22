@@ -363,10 +363,11 @@ impl ChatRepository {
             } else { false }
         } else { false };
         let permission = self.permission_state(session)?;
-        if !payload.selection.is_empty()
-            && permission.mode != crate::chat::runtime_permissions::PermissionMode::Ask
-        {
-            return Err(ChatError::OrchestrationUnavailable);
+        let native_approvals = !payload.selection.is_empty()
+            && admission.provider.as_ref().is_some_and(super::provider::ProviderAdmission::native_approvals);
+        if !payload.selection.is_empty() && (permission.mode != permission.authorized_mode()
+            || (permission.mode != crate::chat::runtime_permissions::PermissionMode::Ask && !native_approvals)) {
+            return Err(ChatError::MarketPermissionModeUnavailable);
         }
         let permission_mode = permission.authorized_mode().as_str();
         // Reject known stale references before idempotent projectless workspace
@@ -384,6 +385,9 @@ impl ChatRepository {
         let now = super::now().map_err(|_| ChatError::DatabaseUnavailable)?;
         let retired=payload.selection!=original_payload.selection;
         if retired{crate::chat::migrations::migrate_to_target(&mut self.connection,crate::chat::migrations::BUILTIN_WEB_SELECTION_SCHEMA_VERSION)?;}
+        if native_approvals {
+            crate::chat::migrations::migrate_to_target(&mut self.connection, crate::chat::migrations::MARKET_NATIVE_APPROVAL_SCHEMA_VERSION)?;
+        }
         let tx = self.connection.transaction().map_err(db_error)?;
         // Recheck under the same transaction as the existing outbox writer.
         if let Some(receipt) = replay(&tx, &self.scope, &original_payload, &request_digest)? {
@@ -448,6 +452,10 @@ impl ChatRepository {
         };
         receipt.validate().map_err(invalid)?;
         tx.execute("INSERT INTO chat_market_submissions(submission_operation_id,session_id,local_turn_id,turn_operation_id,format_version,request_digest,snapshot_json,display_json,receipt_json,created_at,authorization_revision,permission_mode,native_process_epoch) VALUES(?1,?2,?3,?4,1,?5,?6,?7,?8,?9,?10,?11,?12)",params![receipt.submission_operation_id,receipt.session_id,receipt.local_turn_id,receipt.turn_operation_id,request_digest,serde_json::to_string(&snapshot).map_err(invalid)?,serde_json::to_string(&display).map_err(invalid)?,serde_json::to_string(&receipt).map_err(invalid)?,now,i64::try_from(authorization_revision).map_err(invalid)?,permission_mode,admission.native_process_epoch]).map_err(db_error)?;
+        if native_approvals {
+            tx.execute("UPDATE chat_market_submissions SET native_approval_version=1 WHERE submission_operation_id=?1",
+                [&receipt.submission_operation_id]).map_err(db_error)?;
+        }
         if retired{tx.execute("INSERT INTO chat_builtin_web_selection_origins(submission_operation_id,normalization_version,original_selection_json) VALUES(?1,1,?2)",params![receipt.submission_operation_id,serde_json::to_string(&original_payload.selection).map_err(invalid)?]).map_err(db_error)?;}
         if initial_host_turn {
             tx.execute("INSERT INTO chat_market_initial_host_turns(operation_id,session_id,format_version,local_model_revision) VALUES(?1,?2,1,?3)",params![receipt.submission_operation_id,receipt.session_id,payload.intent.expected_revision]).map_err(db_error)?;
@@ -543,6 +551,7 @@ fn display_snapshot(
 
 fn submission_error(error: ChatError) -> wire::ErrorCode {
     match error {
+        ChatError::MarketPermissionModeUnavailable => wire::ErrorCode::PermissionModeUnavailable,
         ChatError::InvalidInput => wire::ErrorCode::InvalidRequest,
         ChatError::ConversationConflict => wire::ErrorCode::RequestConflict,
         ChatError::NotFound => wire::ErrorCode::NotFound,
@@ -553,6 +562,7 @@ fn submission_error(error: ChatError) -> wire::ErrorCode {
 
 fn expert_submission_error(error: ChatError) -> expert_wire::ErrorCode {
     match error {
+        ChatError::MarketPermissionModeUnavailable => expert_wire::ErrorCode::PermissionModeUnavailable,
         ChatError::InvalidInput => expert_wire::ErrorCode::InvalidRequest,
         ChatError::ConversationConflict => expert_wire::ErrorCode::RequestConflict,
         ChatError::NotFound => expert_wire::ErrorCode::NotFound,
@@ -908,7 +918,7 @@ pub(crate) async fn chat_market_submit_v1(
 
 #[cfg(test)]
 #[path = "selection_tests.rs"]
-mod tests;
+pub(super) mod tests;
 
 #[cfg(test)]
 #[path = "selection_expert_tests.rs"]

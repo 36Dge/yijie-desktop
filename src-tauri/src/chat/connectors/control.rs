@@ -26,6 +26,7 @@ struct Transport {
 }
 
 struct Inner {
+    native_approvals: AtomicBool,
     transport: Mutex<Option<Transport>>,
     closed: AtomicBool,
 }
@@ -79,6 +80,13 @@ impl Drop for Exchange<'_> {
 }
 
 impl MarketControl {
+    pub(crate) fn set_native_approvals(&self, enabled: bool) {
+        self.0.native_approvals.store(enabled, Ordering::Release);
+    }
+    pub(crate) fn native_approvals(&self) -> bool {
+        self.is_open() && self.0.native_approvals.load(Ordering::Acquire)
+    }
+
     pub(crate) fn new(input: ChildStdin, output: ChildStdout) -> Self {
         Self::from_io(Box::new(input), Box::new(output))
     }
@@ -90,6 +98,7 @@ impl MarketControl {
                 output: BufReader::new(output),
             })),
             closed: AtomicBool::new(false),
+            native_approvals: AtomicBool::new(false),
         }))
     }
 

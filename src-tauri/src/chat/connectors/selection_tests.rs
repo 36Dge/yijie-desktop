@@ -2,13 +2,13 @@ use super::*;
 use crate::chat::keychain::{DatabaseKey, ReceiptKey};
 use std::path::PathBuf;
 
-struct Fixture {
+pub(in crate::chat::connectors) struct Fixture {
     root: PathBuf,
     repo: Option<ChatRepository>,
     project: Uuid,
 }
 impl Fixture {
-    fn new() -> Self {
+    pub(in crate::chat::connectors) fn new() -> Self {
         let root = std::env::temp_dir().join(format!("feat157-selection-{}", Uuid::now_v7()));
         std::fs::create_dir(&root).unwrap();
         let scope = ChatScope::new(Uuid::now_v7().to_string(), Uuid::now_v7().to_string()).unwrap();
@@ -33,10 +33,23 @@ impl Fixture {
             project,
         }
     }
-    fn repo(&mut self) -> &mut ChatRepository {
+    pub(in crate::chat::connectors) fn repo(&mut self) -> &mut ChatRepository {
         self.repo.as_mut().unwrap()
     }
-    fn request(&self) -> wire::SubmitPayload {
+    pub(in crate::chat::connectors) fn reopen(&mut self) {
+        let scope = self.repo().scope.clone();
+        drop(self.repo.take());
+        self.repo = Some(
+            ChatRepository::open(
+                &self.root.join("chat"),
+                &DatabaseKey::from_bytes([157; 32]),
+                ReceiptKey::from_bytes([158; 32]),
+                scope,
+            )
+            .unwrap(),
+        );
+    }
+    pub(in crate::chat::connectors) fn request(&self) -> wire::SubmitPayload {
         serde_json::from_value(serde_json::json!({"operationId":Uuid::now_v7(),"projectId":self.project,"contentBlocks":[{"type":"text","text":"ordinary local submission"}],"intent":{"profileId":crate::chat::model_test_support::active_profile(),"expectedRevision":0},"selection":[]})).unwrap()
     }
     fn selection(&mut self, index: usize) -> management::SelectionRef {
@@ -165,17 +178,7 @@ fn market_replay_service(profile: &str, service: Option<&str>) {
         first
     );
     assert_eq!(counts(f.repo()), before);
-    let scope = f.repo().scope.clone();
-    drop(f.repo.take());
-    f.repo = Some(
-        ChatRepository::open(
-            &f.root.join("chat"),
-            &DatabaseKey::from_bytes([157; 32]),
-            ReceiptKey::from_bytes([158; 32]),
-            scope,
-        )
-        .unwrap(),
-    );
+    f.reopen();
     assert_eq!(f.repo().market_submission(request, 3).unwrap(), first);
     assert_eq!(counts(f.repo()), before);
 }
@@ -456,7 +459,7 @@ fn feat157_selection_sql31_preserves_sql30_installations_and_receipts() {
 }
 
 #[test]
-fn feat157_nonempty_selection_requires_explicit_ask_but_empty_preserves_modes() {
+fn feat157_unpaired_nonempty_selection_requires_explicit_ask_but_empty_preserves_modes() {
     use crate::chat::runtime_permissions::PermissionMode;
     for mode in [PermissionMode::Auto, PermissionMode::Full] {
         let mut f = Fixture::new();
@@ -467,7 +470,7 @@ fn feat157_nonempty_selection_requires_explicit_ask_but_empty_preserves_modes() 
         assert!(matches!(
             f.repo()
                 .freeze_market_submission(request, 1, ExecutionAdmission::test()),
-            Err(ChatError::OrchestrationUnavailable)
+            Err(ChatError::MarketPermissionModeUnavailable)
         ));
         assert_eq!(counts(f.repo()), before);
         let empty = f.request();

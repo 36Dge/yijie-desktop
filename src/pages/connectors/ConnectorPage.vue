@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { marketHostNativeClient, MarketChatError } from "../../api/market-host-native-client";
+import { kimiK31Candidate } from "../../api/chat-model-client";
 import ConnectorMarketView from "../../components/connectors/ConnectorMarketView.vue";
 import { useChatStore } from "../../stores/chat.store";
 import { useMarketConnectorStore } from "../../stores/market-connectors.store";
@@ -30,8 +32,19 @@ onBeforeUnmount(() => {
   window.removeEventListener("focus", refreshOnFocus);
   document.removeEventListener("visibilitychange", updateOperationObservation);
 });
+async function readRules(serviceId: string, revoke?: string, after?: string) {
+  const context = connectors.contextId;
+  const item = connectors.installation(serviceId);
+  if (!context || !item || (revoke && !connectors.canManage)) throw new MarketChatError("permission_denied");
+  const reference = { installationId: item.installationId, revision: item.revision, generation: item.generation };
+  const result = await marketHostNativeClient.rememberedRules(context, reference, revoke, after);
+  const current = connectors.installation(serviceId);
+  if (context !== connectors.contextId || current?.installationId !== item.installationId ||
+      current.revision !== item.revision || current.generation !== item.generation) throw new MarketChatError("selection_stale");
+  return result;
+}
 </script>
 
 <template>
-  <ConnectorMarketView :key="connectors.authorityScope ?? 'unbound'" :model="model" :operation-errors="connectors.operationErrors" :can-return="returnTo !== null" :open-service-id="openServiceId" @refresh="refresh" @action="connectors.execute" @back="returnTo && router.push(returnTo)" />
+  <ConnectorMarketView :key="connectors.authorityScope ?? 'unbound'" :model="model" :read-rules="kimiK31Candidate ? readRules : undefined" :operation-errors="connectors.operationErrors" :can-return="returnTo !== null" :open-service-id="openServiceId" @refresh="refresh" @action="connectors.execute" @back="returnTo && router.push(returnTo)" />
 </template>
