@@ -60,14 +60,11 @@ describe("WorkflowPage", () => {
       "结合销量、在途与交期，生成补货数量和发货计划",
       "海外买家评价洞察",
       "归纳评价中的体验问题，提炼产品与页面改进方向",
-      "3.2k",
-      "2.8k",
-      "1.9k",
-      "1.6k",
     ]) {
       expect(wrapper.text()).toContain(expected);
     }
 
+    expect(wrapper.get('[aria-label="推荐工作流列表"]').text()).not.toContain("次使用");
     expect(wrapper.get('[aria-label="我的工作流列表"]').text()).not.toContain("修改于");
     expect(wrapper.get('[aria-label="我的工作流列表"]').findAll("time")).toHaveLength(0);
     expect(wrapper.findAll(".recommended-workflow-card__flow")).toHaveLength(0);

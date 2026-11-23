@@ -78,7 +78,7 @@ function requestClose() { void router.push({ name: "workflows" }); }
       </YjEmpty>
     </div>
 
-    <NModal :show="confirmClose" preset="dialog" title="确认离开？" :show-icon="false"
+    <NModal v-if="confirmClose" show preset="dialog" title="确认离开？" :show-icon="false"
       style="width: min(var(--yj-layout-workflow-leave-width), calc(100vw - var(--yj-space-8)))"
       :mask-closable="false" :closable="false" @esc="decideClose(false)">
       <p class="workflow-local-workspace__leave-description">离开将丢失未保存的修改和本页节点配置。已提交的操作及运行记录不受影响。</p>

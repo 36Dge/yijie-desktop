@@ -51,7 +51,6 @@ describe("workflow showcase model", () => {
       badge: workflow.badge,
       description: workflow.description,
       nodes: workflow.nodes.map(({ label }) => label),
-      usage: workflow.usage,
       actions: workflow.actions,
     }))).toEqual([
       {
@@ -59,7 +58,6 @@ describe("workflow showcase model", () => {
         badge: "热门",
         description: "结合目标市场与搜索词，生成地道的多语言商品文案",
         nodes: ["商品卖点", "目标市场", "本地化文案"],
-        usage: "3.2k",
         actions: ["预览", "使用工作流"],
       },
       {
@@ -67,7 +65,6 @@ describe("workflow showcase model", () => {
         badge: "热门",
         description: "识别高消耗低转化词，整理否词与竞价调整建议",
         nodes: ["搜索词报告", "表现分析", "调整建议"],
-        usage: "2.8k",
         actions: ["预览", "使用工作流"],
       },
       {
@@ -75,7 +72,6 @@ describe("workflow showcase model", () => {
         badge: "推荐",
         description: "结合销量、在途与交期，生成补货数量和发货计划",
         nodes: ["库存与销量", "补货测算", "发货计划"],
-        usage: "1.9k",
         actions: ["预览", "使用工作流"],
       },
       {
@@ -83,7 +79,6 @@ describe("workflow showcase model", () => {
         badge: "推荐",
         description: "归纳评价中的体验问题，提炼产品与页面改进方向",
         nodes: ["买家评价", "主题归纳", "改进方向"],
-        usage: "1.6k",
         actions: ["预览", "使用工作流"],
       },
     ]);

@@ -139,9 +139,9 @@ Iconify / Simple Icons 只能作为经过审核的备用来源，不是默认来
 
 `exports/src/icons/registry.ts`、`exports/src/components/yijie/YjIcon.vue`、`docs/design/docs/design/09-implementation/03-yj-icon-code-scaffold.md`
 
-## 工作流卡片图标（2026-10-18 用户指定例外）
+## 工作流卡片插画（2026-11-23）
 
-工作流卡片与技能卡片采用相同的浅色圆角底、彩色实心图形。八张内置工作流使用逐个生成的专属图标，用户自建文本工作流使用统一的节点自动化图标。素材来自 Codex 内置生图工具，保存在 `src/assets/workflows/generated/`，并记录完整提示词和来源校验值；映射统一在 `src/icons/workflow-artwork.ts`。
+工作流卡片沿用专家页的角色头像风格。八个内置工作流各有独立插画，借助相机、价签、地球仪等道具区分用途。自建工作流使用拿着流程板的机器人。素材由 Codex 内置生图工具生成，原始来源、提示词与校验值记录在 `src/assets/workflows/`，按工作流 ID 通过 `src/icons/workflow-artwork.ts` 选择图片。
 
 卡片图片使用 48px（`--yj-space-12`）、`--yj-radius-lg`，亮暗主题沿用同一素材，空 alt 且 `aria-hidden`。这是用户明确要求的业务卡片视觉例外；按钮、状态、导航与流程节点图标仍使用原有 `YjIcon`。不新增依赖或远程资源。
 

@@ -9,6 +9,7 @@ describe("workflow overview projection", () => {
     expect(rows).toHaveLength(6);
     expect(rows[0]?.workflow.title).toBe("新流程");
     expect(rows[0]?.to).toBe("/workflows/101");
+    expect(rows[0]?.workflow.nodeCount).toBeUndefined();
     expect(rows[0]?.workflow).toMatchObject({ icon: "workflow", badge: "文本处理", description: expect.any(String), modifiedAt: expect.any(String) });
     expect(rows.slice(2).map(row => row.workflow)).toEqual(MY_WORKFLOWS);
     expect(rows.slice(2).every(row => row.example && row.to === undefined)).toBe(true);

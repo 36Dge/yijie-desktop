@@ -18,7 +18,7 @@ export interface MyWorkflow {
   readonly modifiedAt: string;
   readonly icon: YjIconName;
   readonly accent: WorkflowAccent;
-  readonly nodeCount: number;
+  readonly nodeCount?: number;
   readonly status: WorkflowPublicationStatus;
 }
 
@@ -38,7 +38,6 @@ export interface RecommendedWorkflow {
   readonly input: string;
   readonly output: string;
   readonly nodes: readonly RecommendedWorkflowNode[];
-  readonly usage: string;
   readonly actions: readonly ["预览", "使用工作流"];
 }
 
@@ -114,7 +113,6 @@ export const RECOMMENDED_WORKFLOWS: readonly RecommendedWorkflow[] = [
       { label: "目标市场", icon: "skillCrossBorderSelection", accent: "brand" },
       { label: "本地化文案", icon: "workflowLocalization", accent: "brand" },
     ],
-    usage: "3.2k",
     actions: ["预览", "使用工作流"],
   },
   {
@@ -131,7 +129,6 @@ export const RECOMMENDED_WORKFLOWS: readonly RecommendedWorkflow[] = [
       { label: "表现分析", icon: "skillResearch", accent: "brand" },
       { label: "调整建议", icon: "workflowAdOptimization", accent: "brand" },
     ],
-    usage: "2.8k",
     actions: ["预览", "使用工作流"],
   },
   {
@@ -148,7 +145,6 @@ export const RECOMMENDED_WORKFLOWS: readonly RecommendedWorkflow[] = [
       { label: "补货测算", icon: "workflowReplenishment", accent: "brand" },
       { label: "发货计划", icon: "skillDropshipping", accent: "brand" },
     ],
-    usage: "1.9k",
     actions: ["预览", "使用工作流"],
   },
   {
@@ -165,7 +161,6 @@ export const RECOMMENDED_WORKFLOWS: readonly RecommendedWorkflow[] = [
       { label: "主题归纳", icon: "skillContentBreakdown", accent: "brand" },
       { label: "改进方向", icon: "skillProductOptimization", accent: "brand" },
     ],
-    usage: "1.6k",
     actions: ["预览", "使用工作流"],
   },
 ];

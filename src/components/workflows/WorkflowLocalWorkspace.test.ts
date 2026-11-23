@@ -112,6 +112,7 @@ it("ignores retired history actions, protects page-only design and closes only a
   expect(wrapper.text()).toContain("离开将丢失未保存的修改");
   await button("继续编辑").trigger("click");
   await expect(stay).resolves.toBe(false);
+  expect(wrapper.findComponent(Dialog).exists()).toBe(false);
   expect(close).not.toHaveBeenCalled();
 
   const firstClose = leave();

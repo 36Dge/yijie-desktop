@@ -19,7 +19,7 @@ const WORKFLOW_ARTWORK: Readonly<Record<string, string>> = {
   "overseas-review-insights": overseasReviewInsights,
 };
 
-/** Built-in workflows have dedicated artwork; local text flows share an automation mark. */
+/** Built-in workflows have individual portraits. Local text flows share the illustrated assistant. */
 export function workflowCardArtwork(id: string): string {
   return Object.prototype.hasOwnProperty.call(WORKFLOW_ARTWORK, id) ? WORKFLOW_ARTWORK[id]! : customWorkflow;
 }

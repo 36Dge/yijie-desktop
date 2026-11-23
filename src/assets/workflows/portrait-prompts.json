@@ -1,0 +1,43 @@
+{
+  "generator": "Codex built-in image_gen",
+  "date": "2026-11-23",
+  "basePrompt": "Use case: illustration-story. One original production avatar tile for an ecommerce desktop app's workflow cards. Match the friendly illustrated expert directory look: a personable, stylized, slightly big-headed professional with a single unmistakable business prop, like a polished contemporary East Asian editorial character sticker. Square 1:1 full-bleed pastel color all the way to the four corners. The app rounds the corners. Clean expressive dark navy/chestnut linework, simple cel shading, restrained highlights, thoughtfully shaped hair and clothing, warm face and defined silhouette. Close crop from chest up, big head, engaging 3/4 or frontal pose with the dominant prop raised near one shoulder, face and prop legible even at 48 pixels, centered with a little breathing room. Gently deeper tonal disc behind the subject if helpful. Keep it crisp and graphic. One character, one prop. No writing, numbers, letters, UI chrome, logos, watermark, outer frame, multiple panels or busy scene.",
+  "assets": [
+    {
+      "id": "custom-workflow",
+      "subject": "An endearing small cream-and-blue desktop automaton with a single navy glass visor and two friendly amber eyes, adjusting one simple three-block flow diagram on a tiny angled board. Cornflower-blue and sky-blue backdrop, dark blue work jacket accents."
+    },
+    {
+      "id": "douyin-acquisition",
+      "subject": "A cheerful short-haired woman with a headset, speaking into a small coral handheld megaphone to reach new customers. Rich petrol-blue work shirt, soft mint-green background, mint and coral palette."
+    },
+    {
+      "id": "product-batch-image",
+      "subject": "A product photographer with tousled dark hair and a mustard knit beanie lifting a large recognizable teal camera beside his cheek. Saffron shirt, apricot-peach backdrop, warm orange and rich teal palette."
+    },
+    {
+      "id": "network-price-monitor",
+      "subject": "A thoughtful curly auburn-haired price analyst with small round glasses holding up a large emerald hanging price tag featuring one simple downward arrow. Cream collar, seafoam and sage background."
+    },
+    {
+      "id": "xiaohongshu-content",
+      "subject": "A warm young editorial illustrator with black hair in a high bun holding a raspberry-red open notebook at chest height, a pencil tucked behind her ear. Soft rose-pink background, blush and cherry palette."
+    },
+    {
+      "id": "listing-localization",
+      "subject": "A confident tan-skinned multilingual editor with a short wavy dark bob and teal scarf cradling a small recognizable blue globe in a brass stand next to her face. Sky blue and aquamarine background."
+    },
+    {
+      "id": "ad-search-term-optimization",
+      "subject": "A curious dark-skinned analyst with short curls in an ochre sweater, peering through a large circular magnifying glass in front of one eye; subtle glint on the glass, other eye visible. Golden yellow and buttercream background."
+    },
+    {
+      "id": "fba-replenishment-planning",
+      "subject": "A friendly logistics coordinator wearing a teal baseball cap and a cobalt work jacket, lifting a simple kraft shipping carton with a contrasting tape stripe against one shoulder. Periwinkle-blue and lavender background."
+    },
+    {
+      "id": "overseas-review-insights",
+      "subject": "A friendly silver-haired customer-researcher wearing rose glasses and a burgundy top, holding a large coral speech-bubble shaped card with a single cream star. Pale melon and salmon background."
+    }
+  ]
+}

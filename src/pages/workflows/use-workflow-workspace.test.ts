@@ -132,6 +132,19 @@ afterEach(() => {
 });
 
 describe("FEAT-153 normal workspace transitions", () => {
+  it("keeps the confirmed title when a pre-edit list response arrives after returning", async () => {
+    const native = nativeClient();
+    const oldList = deferred<WorkflowSchemas["WorkflowList"]>();
+    native.list.mockReturnValueOnce(oldList.promise).mockResolvedValueOnce({ items: [{ ...workflow(), name: "已确认的新名称" }] });
+    const state = workspaceHarness(native);
+    const earlier = state.refresh();
+    await vi.waitFor(() => expect(native.list).toHaveBeenCalledOnce());
+    await state.refresh();
+    oldList.resolve({ items: [workflow()] });
+    await earlier;
+    expect(state.workflows.value.map(row => row.name)).toEqual(["已确认的新名称"]);
+  });
+
   it("waits for the cancelled A open to close before allowing B to open", async () => {
     const native = nativeClient();
     const openingA = deferred<EditorOpenedView>();

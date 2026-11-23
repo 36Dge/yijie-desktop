@@ -32,7 +32,8 @@ export function useWorkflowWorkspace(native: WorkflowNativeClient = workflowNati
   let openingSettled = Promise.resolve();
 
   async function refresh(more = false) {
-    if (disposed || loading.value) return;
+    // A full read on return supersedes any list or page fetched before editing.
+    if (disposed || (more && loading.value)) return;
     const ticket = ++listGeneration;
     loading.value = true;
     error.value = null;

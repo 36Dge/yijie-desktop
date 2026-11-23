@@ -25,30 +25,32 @@ function select(key: string) {
 
 <template>
   <article class="workflow-summary-card workflow-showcase-card">
-    <header class="workflow-summary-card__header workflow-showcase-card__header">
-      <img class="workflow-summary-card__icon workflow-showcase-card__icon" :src="workflowCardArtwork(workflow.id)" alt="" aria-hidden="true" draggable="false" />
-      <span v-if="example" class="workflow-summary-card__example yj-badge">示例</span>
-      <NDropdown v-if="to || example" role="menu" aria-label="工作流操作" :options="menuOptions" trigger="click" placement="bottom-end"
-        :style="{ width: 'min(var(--yj-layout-workflow-menu-width), calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-8)))' }"
-        :show="menuVisible" @update:show="menuVisible = $event" @select="select">
-        <button ref="moreButton" type="button" class="workflow-summary-card__more workflow-showcase-control yj-control yj-control--icon"
-          :aria-label="`${workflow.title}，更多`" aria-haspopup="menu" :aria-expanded="menuVisible" @click.stop="moreButton?.focus()"><YjIcon name="more" size="sm" /></button>
-      </NDropdown>
+    <header class="workflow-showcase-card__header">
+      <img class="workflow-showcase-card__icon" :src="workflowCardArtwork(workflow.id)" alt="" aria-hidden="true" draggable="false" />
+      <div class="workflow-showcase-card__heading">
+        <div class="workflow-showcase-card__context">
+          <span>{{ workflow.badge }}</span>
+          <span v-if="workflow.nodeCount !== undefined" class="workflow-summary-card__nodes">{{ workflow.nodeCount }} 个节点</span>
+          <NDropdown v-if="to || example" role="menu" aria-label="工作流操作" :options="menuOptions" trigger="click" placement="bottom-end"
+            :style="{ width: 'min(var(--yj-layout-workflow-menu-width), calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-8)))' }"
+            :show="menuVisible" @update:show="menuVisible = $event" @select="select">
+            <button ref="moreButton" type="button" class="workflow-summary-card__more workflow-showcase-control yj-control yj-control--icon"
+              :aria-label="`${workflow.title}，更多`" aria-haspopup="menu" :aria-expanded="menuVisible" @click.stop="moreButton?.focus()"><YjIcon name="more" size="sm" /></button>
+          </NDropdown>
+        </div>
+        <h3 class="workflow-summary-card__title workflow-showcase-card__title">
+          <RouterLink v-if="to" :to="to" class="workflow-summary-card__link" :aria-label="`打开 ${workflow.title}`">{{ workflow.title }}</RouterLink>
+          <template v-else>{{ workflow.title }}</template>
+        </h3>
+      </div>
     </header>
-    <div class="workflow-summary-card__body workflow-showcase-card__body">
-      <h3 class="workflow-summary-card__title workflow-showcase-card__title">
-        <RouterLink v-if="to"  :to="to"  class="workflow-summary-card__link" :aria-label="`打开 ${workflow.title}`">{{ workflow.title }}</RouterLink>
-        <template v-else>{{ workflow.title }}</template>
-      </h3>
-      <p class="workflow-summary-card__description workflow-showcase-card__description" >{{ workflow.description }}</p>
-    </div>
-    <div class="workflow-summary-card__labels workflow-showcase-card__metadata" aria-label="工作流标签与节点数量">
-      <span class="workflow-summary-card__badge workflow-showcase-card__badge yj-badge">{{ workflow.badge }}</span>
-      <span class="workflow-summary-card__nodes">{{ workflow.nodeCount }} 个节点</span>
-    </div>
-    <footer class="workflow-summary-card__footer workflow-showcase-card__footer">
-      <span class="workflow-summary-card__status" :class="{ 'workflow-summary-card__status--published': published }">
-        <YjIcon :name="published ? 'check' : 'pending'" size="xs" />{{ published ? '已发布' : '未发布' }}
+    <p class="workflow-showcase-card__description">{{ workflow.description }}</p>
+    <footer class="workflow-showcase-card__footer">
+      <span class="workflow-summary-card__details">
+        <span class="workflow-summary-card__status" :class="{ 'workflow-summary-card__status--published': published }">
+          <YjIcon :name="published ? 'check' : 'pending'" size="xs" />{{ published ? '已发布' : '未发布' }}
+        </span>
+        <span v-if="example" class="workflow-showcase-card__badge">示例</span>
       </span>
       <RouterLink v-if="to" :to="to" class="workflow-summary-card__action workflow-card-action workflow-showcase-control yj-control"
         :aria-label="`${actionLabel}：${workflow.title}`"><YjIcon v-if="!published" name="edit" size="sm" />{{ actionLabel }}<YjIcon v-if="published" name="arrowRight" size="sm" /></RouterLink>
@@ -66,27 +68,38 @@ function select(key: string) {
 </template>
 
 <style scoped>
+.workflow-summary-card__title { word-break: normal; text-wrap: balance; }
 .workflow-summary-card__link { color: inherit; text-decoration: none; }
-.workflow-summary-card__link::after { position: absolute; inset: 0; content: ""; border-radius: var(--yj-radius-lg); }
+.workflow-summary-card__link::after { position: absolute; inset: 0; content: ""; border-radius: var(--yj-radius-xl); }
 .workflow-summary-card__link:focus-visible { outline: none; }
 .workflow-summary-card__link:focus-visible::after { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: calc(-1 * var(--yj-focus-ring-width)); }
-.workflow-summary-card__example { color: var(--yj-color-text-tertiary); border: var(--yj-border-width) solid var(--yj-color-border-subtle); }
 
 .workflow-summary-card__more {
   position: relative;
   z-index: var(--yj-z-workflow-card-action);
-  margin-left: auto;
+  margin-block: calc(-1 * var(--yj-space-1));
+  margin-inline: auto calc(-1 * var(--yj-space-1));
   flex: none;
   border: var(--yj-border-width) solid transparent;
-  color: var(--yj-color-text-secondary);
-  background: var(--yj-color-bg-card);
+  color: var(--yj-color-text-tertiary);
+  background: transparent;
 }
 
-.workflow-summary-card__more :deep(.yj-icon) {
-  color: inherit;
+.workflow-summary-card__details {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--yj-space-2);
+  min-width: 0;
+  color: var(--yj-color-text-tertiary);
+  font-size: var(--yj-font-size-caption);
+  line-height: var(--yj-line-height-caption);
 }
 
 .workflow-summary-card__nodes {
+  padding-inline-start: var(--yj-space-1);
+  border-inline-start: var(--yj-border-width) solid var(--yj-color-border-default);
+  color: var(--yj-color-text-tertiary);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -99,8 +112,6 @@ function select(key: string) {
   align-items: center;
   gap: var(--yj-space-1);
   color: var(--yj-color-text-secondary);
-  font-size: var(--yj-font-size-caption);
-  line-height: var(--yj-line-height-caption);
   white-space: nowrap;
 }
 
@@ -110,7 +121,6 @@ function select(key: string) {
   position: relative;
   z-index: var(--yj-z-workflow-card-action);
   margin-left: auto;
-  text-decoration: none;
 }
 
 .workflow-summary-card__notice {

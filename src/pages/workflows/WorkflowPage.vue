@@ -150,7 +150,7 @@ const sortOptions = [
           <span>{{ error.message }}</span>
           <button type="button" class="workflow-showcase-control yj-control" :disabled="loading" @click="state.refresh()">重新连接</button>
         </div>
-        <WorkflowCardRail :count="cards.length" :loading="workflowLocalUiEnabled && loading">
+        <WorkflowCardRail :loading="workflowLocalUiEnabled && loading">
           <li v-for="card in cards" :key="card.workflow.id"><WorkflowSummaryCard :workflow="card.workflow" :to="card.to" :example="card.example" @example-action="showExampleNotice" @edit="editWorkflow(card.workflow.id)" @delete="requestDelete(card.workflow.id, $event)" /></li>
         </WorkflowCardRail>
         <button v-if="workflowLocalUiEnabled && nextCursor" type="button" class="workflow-showcase-control yj-control" :disabled="loading" @click="state.refresh(true)">加载更多工作流</button>
