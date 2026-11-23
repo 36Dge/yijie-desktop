@@ -69,7 +69,7 @@ async function openConnectorMenu(wrapper: Awaited<ReturnType<typeof mountPage>>[
   await flushPromises();
   await new DOMWrapper(document.querySelector<HTMLElement>('[data-resource-menu="connectors"]')!).trigger("mouseenter");
   await flushPromises();
-  return new DOMWrapper(document.querySelector<HTMLElement>('.connector-menu__list [role="switch"]')!);
+  return new DOMWrapper(document.querySelector<HTMLElement>('.chat-resource-panel[aria-label="连接器"]')!);
 }
 
 const ready = { ...connectorInstallation, desiredEnabled: true, effectiveEnabled: true, connectionStatus: "ready" as const };
@@ -79,21 +79,28 @@ it.each([false, true])("changes only this conversation selection and keeps the d
   const { wrapper, router, store } = await mountPage(path, active, connectorSnapshot(ready));
   const global = vi.spyOn(marketConnectorClient, "setEnabled");
   const configure = vi.spyOn(marketConnectorClient, "configure");
-  await wrapper.get("textarea").setValue("保留当前未发送内容"); store.draftAttachments = [READY_ATTACHMENT];
-  const control = await openConnectorMenu(wrapper);
-  expect(control.attributes("aria-checked")).toBe("false");
-  await control.trigger("click"); await flushPromises();
-  expect(control.attributes("aria-checked")).toBe("true");
+  const input = wrapper.get("textarea");
+  await input.setValue("保留当前未发送内容"); store.draftAttachments = [READY_ATTACHMENT];
+  input.element.focus();
+  input.element.setSelectionRange(2, 2);
+  const menu = await openConnectorMenu(wrapper);
+  const row = menu.get('[role="checkbox"]');
+  expect(row.attributes("aria-checked")).toBe("false");
+  await row.trigger("click"); await flushPromises();
+  expect(wrapper.get('.chat-composer__add').attributes("aria-expanded")).toBe("false");
+  expect(document.activeElement).toBe(input.element);
+  expect(input.element.selectionStart).toBe(2);
   expect(wrapper.findAll(".chat-connector-chip__button")).toHaveLength(1);
   const drafts = useChatComposerDraftStore(), target = active ? `session:${SESSION_ID}` as const : "new";
   expect(drafts.selection(target)).toHaveLength(1);
   drafts.setSelection("session:other-conversation", drafts.selection(target));
-  await control.trigger("click"); await flushPromises();
+  const reopened = await openConnectorMenu(wrapper);
+  await reopened.get('[role="checkbox"][aria-checked="true"]').trigger("click"); await flushPromises();
   await useMarketConnectorStore().refresh(); await flushPromises();
   expect(drafts.selection(target)).toEqual([]);
   expect(drafts.selection("session:other-conversation")).toHaveLength(1);
   expect(useMarketConnectorStore().installation("sample")?.desiredEnabled).toBe(true);
-  expect(control.attributes("aria-checked")).toBe("false");
+  expect(wrapper.get('.chat-composer__add').attributes("aria-expanded")).toBe("false");
   expect(wrapper.findAll(".chat-connector-chip__button")).toHaveLength(0);
   expect(global).not.toHaveBeenCalled(); expect(configure).not.toHaveBeenCalled();
   expect(router.currentRoute.value.path).toBe(path);
@@ -103,21 +110,25 @@ it.each([false, true])("changes only this conversation selection and keeps the d
 
 it("preserves an explicit deselection across navigation back to the conversation", async () => {
   const { wrapper, router } = await mountPage("/chat", false, connectorSnapshot(ready));
-  const control = await openConnectorMenu(wrapper);
-  await control.trigger("click"); await flushPromises();
-  await control.trigger("click"); await flushPromises();
+  await (await openConnectorMenu(wrapper)).get('[role="checkbox"]').trigger("click"); await flushPromises();
+  await wrapper.get('.chat-connector-chip__button').trigger("click"); await flushPromises();
+  const popup = new DOMWrapper(document.querySelector<HTMLElement>('.chat-connector-popup')!);
+  await popup.get('[role="checkbox"][aria-checked="true"]').trigger("click"); await flushPromises();
+  expect(document.querySelector('.chat-connector-popup')).toBeNull();
+  expect(document.activeElement).toBe(wrapper.get("textarea").element);
   await router.push("/connectors"); await router.push("/chat"); await flushPromises();
   await useMarketConnectorStore().refresh(); await flushPromises();
   expect(useChatComposerDraftStore().selection("new")).toEqual([]);
   expect(useMarketConnectorStore().installation("sample")?.desiredEnabled).toBe(true);
 });
 
-it("takes unready connectors to management without a configuration side effect", async () => {
+it("keeps unready connectors out of the chooser and links to management", async () => {
   const { wrapper, router } = await mountPage("/chat");
   const configure = vi.spyOn(marketConnectorClient, "configure"), enable = vi.spyOn(marketConnectorClient, "setEnabled");
-  const control = await openConnectorMenu(wrapper);
-  expect(control.attributes("aria-disabled")).toBe("true");
-  await new DOMWrapper(document.querySelector<HTMLElement>('[data-connector-option]')!).trigger("click"); await flushPromises();
+  const menu = await openConnectorMenu(wrapper);
+  expect(menu.find('[role="checkbox"]').exists()).toBe(false);
+  expect(menu.text()).toContain("暂无已安装且启用的连接器");
+  await menu.get("footer button").trigger("click"); await flushPromises();
   expect(router.currentRoute.value.path).toBe("/connectors");
   expect(configure).not.toHaveBeenCalled(); expect(enable).not.toHaveBeenCalled();
   expect(useChatComposerDraftStore().selection("new")).toEqual([]);
@@ -125,7 +136,7 @@ it("takes unready connectors to management without a configuration side effect",
 
 it("warns for a selected connection loss and refreshes only its reference after recovery", async () => {
   const { wrapper } = await mountPage("/chat", false, connectorSnapshot(ready));
-  await (await openConnectorMenu(wrapper)).trigger("click"); await flushPromises();
+  await (await openConnectorMenu(wrapper)).get('[role="checkbox"]').trigger("click"); await flushPromises();
   vi.mocked(marketConnectorClient.snapshot).mockResolvedValue(connectorSnapshot({ ...ready, effectiveEnabled: false, connectionStatus: "failed", errorCode: "temporarily_unavailable" }));
   await useMarketConnectorStore().refresh(); await flushPromises();
   expect(wrapper.findAll(".chat-connector-chip__button--unavailable")).toHaveLength(1);
@@ -134,4 +145,25 @@ it("warns for a selected connection loss and refreshes only its reference after 
   await useMarketConnectorStore().refresh(); await flushPromises();
   expect(useChatComposerDraftStore().selection("new")[0]?.reference.revision).toBe(2);
   expect(wrapper.findAll(".chat-connector-chip__button--unavailable")).toHaveLength(0);
+});
+
+it("lets the user remove a disconnected choice from the draft while it is absent from the picker", async () => {
+  const { wrapper } = await mountPage("/chat", false, connectorSnapshot(ready));
+  await wrapper.get("textarea").setValue("整理这份资料");
+  await (await openConnectorMenu(wrapper)).get('[role="checkbox"]').trigger("click"); await flushPromises();
+  vi.mocked(marketConnectorClient.snapshot).mockResolvedValue(connectorSnapshot({ ...ready, effectiveEnabled: false, connectionStatus: "failed" }));
+  await useMarketConnectorStore().refresh(); await flushPromises();
+  expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
+  const menu = await openConnectorMenu(wrapper);
+  expect(menu.find('[role="checkbox"]').exists()).toBe(false);
+  await menu.trigger("keydown", { key: "Escape" }); await flushPromises();
+  await new DOMWrapper(document.querySelector<HTMLElement>('[data-resource-menu="connectors"]')!).trigger("keydown", { key: "Escape" });
+  await flushPromises();
+  await wrapper.get('[aria-label="取消选用 普通合成连接器"]').trigger("click"); await flushPromises();
+  expect(useChatComposerDraftStore().selection("new")).toEqual([]);
+  expect(wrapper.find(".chat-connector-chip__button").exists()).toBe(false);
+  expect(wrapper.find('[aria-label="取消选用 普通合成连接器"]').exists()).toBe(false);
+  expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeUndefined();
+  expect(wrapper.get("textarea").element.value).toBe("整理这份资料");
+  expect(useMarketConnectorStore().installation("sample")?.desiredEnabled).toBe(true);
 });

@@ -722,11 +722,12 @@ watch(
     if (JSON.stringify(current) !== JSON.stringify(next)) sharedDrafts.setSelection(composerDraftTargetKey.value, next);
   }, { immediate: true, deep: true },
 );
-function manageConnectors(serviceId?: string): void {
-  void router.push({ path: "/connectors", query: { from: routeSessionId.value ? `/chat/${routeSessionId.value}` : "/chat", ...(serviceId ? { service: serviceId } : {}) } });
+function manageConnectors(): void {
+  void router.push({ path: "/connectors", query: { from: routeSessionId.value ? `/chat/${routeSessionId.value}` : "/chat" } });
 }
+const connectorSelectionLocked = computed(() => modelBusy.value || submitting.value || Boolean(expertSubmission.value) || isDraftMode.value || chatStore.selectedAccessMode === "history-only");
 function connectorSelectionChange(id: string, selected: boolean): void {
-  if (modelBusy.value || submitting.value || expertSubmission.value || isDraftMode.value || chatStore.selectedAccessMode === "history-only") return;
+  if (connectorSelectionLocked.value) return;
   const current = connectorSelection.value;
   if (!selected) { sharedDrafts.setSelection(composerDraftTargetKey.value, current.filter(item => item.serviceId !== id)); return; }
   const entry = connectors.entries.find(item => item.id === id);
@@ -1452,6 +1453,8 @@ onBeforeUnmount(() => {
         :readiness="readiness"
         :text-only="isDraftMode"
         :connectors="connectorChips"
+        :connector-selection-disabled="connectorSelectionLocked"
+        @remove-connector="connectorSelectionChange($event, false)"
         :skills="skillChips"
         :skill-suggestions="skillSuggestions"
         @read-skill-suggestions="readSkillSuggestions"
@@ -1499,7 +1502,20 @@ onBeforeUnmount(() => {
           <ChatShopControl :model="shopPreview" :disabled="composerSubmissionState !== 'idle'" />
         </template>
         <template v-if="!isDraftMode && marketConnectorsEnabled" #connector-control="{ close }">
-          <ChatConnectorControl @close="close" :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :can-manage="connectors.canManage" :loading="connectors.refreshing" :error="connectors.error" :operation-errors="connectors.operationErrors" @retry="retryConnectorOperation" @refresh="connectors.refresh" @configure="manageConnectors" @selection-change="connectorSelectionChange" @manage="manageConnectors()" />
+          <ChatConnectorControl
+            :entries="connectors.entries"
+            :selected-ids="connectorSelection.map(item => item.serviceId)"
+            :disabled="connectorSelectionLocked"
+            :selection-available="connectors.selectionAvailable"
+            :loading="connectors.refreshing"
+            :error="connectors.error"
+            :operation-errors="connectors.operationErrors"
+            @selection-change="connectorSelectionChange"
+            @close="close"
+            @refresh="connectors.refresh"
+            @retry="retryConnectorOperation"
+            @manage="manageConnectors"
+          />
         </template>
         <template v-if="!isDraftMode && skillMarketplaceUiEnabled" #skill-control="{ close, select }">
           <ChatSkillControl :entries="skills.skills" :selected-ids="skillSelection.map(skill => skill.id)" :disabled="skillPickerDisabled" :loading="skills.phase === 'loading'" :refreshing="skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @select="select" @manage="manageSkills" @close="close" />
@@ -1731,6 +1747,8 @@ onBeforeUnmount(() => {
         :readiness="readiness"
         :text-only="isDraftMode"
         :connectors="connectorChips"
+        :connector-selection-disabled="connectorSelectionLocked"
+        @remove-connector="connectorSelectionChange($event, false)"
         :skills="skillChips"
         :skill-suggestions="skillSuggestions"
         @read-skill-suggestions="readSkillSuggestions"
@@ -1766,7 +1784,20 @@ onBeforeUnmount(() => {
           <ChatShopControl :model="shopPreview" :disabled="composerSubmissionState !== 'idle' || isStreaming || chatStore.selectedAccessMode === 'history-only'" />
         </template>
         <template v-if="!isDraftMode && marketConnectorsEnabled" #connector-control="{ close }">
-          <ChatConnectorControl @close="close" :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :can-manage="connectors.canManage" :loading="connectors.refreshing" :error="connectors.error" :operation-errors="connectors.operationErrors" @retry="retryConnectorOperation" @refresh="connectors.refresh" @configure="manageConnectors" @selection-change="connectorSelectionChange" @manage="manageConnectors()" />
+          <ChatConnectorControl
+            :entries="connectors.entries"
+            :selected-ids="connectorSelection.map(item => item.serviceId)"
+            :disabled="connectorSelectionLocked"
+            :selection-available="connectors.selectionAvailable"
+            :loading="connectors.refreshing"
+            :error="connectors.error"
+            :operation-errors="connectors.operationErrors"
+            @selection-change="connectorSelectionChange"
+            @close="close"
+            @refresh="connectors.refresh"
+            @retry="retryConnectorOperation"
+            @manage="manageConnectors"
+          />
         </template>
         <template v-if="!isDraftMode && skillMarketplaceUiEnabled" #skill-control="{ close, select }">
           <ChatSkillControl :entries="skills.skills" :selected-ids="skillSelection.map(skill => skill.id)" :disabled="skillPickerDisabled" :loading="skills.phase === 'loading'" :refreshing="skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @select="select" @manage="manageSkills" @close="close" />

@@ -29,7 +29,7 @@ describe("composer skills panel", () => {
     expect(wrapper.emitted("close")).toEqual([["selection"]]);
     await wrapper.setProps({ selectedIds: ['sample'] });
     expect(option.attributes('aria-checked')).toBe('true');
-    expect(wrapper.find('.skill-menu__check svg').exists()).toBe(true);
+    expect(option.find('.chat-resource-check svg').exists()).toBe(true);
     await option.trigger('click');
     expect(wrapper.emitted('select')).toHaveLength(2);
     expect(wrapper.emitted('close')).toHaveLength(2);

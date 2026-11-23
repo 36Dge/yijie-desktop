@@ -43,8 +43,7 @@ watch(() => props.entries.length, () => { void nextTick(measure); });
 onMounted(() => { window.addEventListener("resize", measure); window.addEventListener("scroll", measure, true); });
 onBeforeUnmount(() => {
   window.removeEventListener("resize", measure); window.removeEventListener("scroll", measure, true);
-  // Turning off the final connector removes this trigger group. Keep keyboard
-  // navigation in the composer rather than leaving focus on a detached switch.
+  // If a refresh removes the last chip while its popup is open, return focus to the composer.
   if (open.value && panel.value?.contains(document.activeElement)) {
     const add = group.value?.closest(".chat-composer")?.querySelector<HTMLButtonElement>(".chat-composer__add");
     void nextTick(() => { if (add?.isConnected && !add.disabled) add.focus({ preventScroll: true }); });

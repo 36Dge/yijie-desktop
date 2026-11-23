@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import YjTooltip from "../yijie/YjTooltip.vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
+import { NButton } from "naive-ui";
 import { useChatComposerCaret } from "../../composables/useChatComposerCaret";
 import type {
   ChatComposerFocusSnapshot,
@@ -52,6 +53,7 @@ const props = withDefaults(defineProps<{
   attachmentErrorCode?: string | null;
   dragActive?: boolean;
   connectors?: readonly ConnectorChipView[];
+  connectorSelectionDisabled?: boolean;
   skills?: readonly ChatSkillChip[];
   skillSuggestions?: ChatSkillSuggestionCatalog;
   expertsAvailable?: boolean;
@@ -80,6 +82,7 @@ const emit = defineEmits<{
   "remove-attachment": [attachmentId: string];
   "dismiss-attachment-import": [operationId: string];
   "unsupported-input": [message: string];
+  "remove-connector": [id: string];
   "remove-skill": [id: string];
   "insert-skill": [id: string, range: SkillSelectionRange, fromSlash: boolean];
   "edit-skill-draft": [text: string, positions: readonly SkillPosition[]];
@@ -91,7 +94,7 @@ defineSlots<{
   "shop-control"(): unknown;
   "expert-control"(): unknown;
   "expert-picker"(props: { close: () => void }): unknown;
-  "connector-control"(props: { close: () => void }): unknown;
+  "connector-control"(props: { close: (reason?: "selection") => Promise<void> }): unknown;
   "skill-control"(props: { close: (reason?: "selection") => Promise<void>; select: (id: string) => void }): unknown;
   "workspace-control"(): unknown;
   "permission-control"(): unknown;
@@ -170,11 +173,15 @@ const { position: caretPosition, refresh: refreshCaret, hide: hideCaret } =
 const selectionRemovalDisabled = computed(() =>
   submissionBusy.value || props.streaming || props.textLocked || !props.canSend,
 );
+const connectorSelectionLocked = computed(() =>
+  props.connectorSelectionDisabled || submissionBusy.value || props.streaming || props.textLocked,
+);
+const unavailableConnectors = computed(() => props.textOnly ? [] : props.connectors.filter(entry => entry.unavailableReason));
 const draftBlocksSend = computed(() =>
   submissionBusy.value || props.streaming || validationMessage.value !== null ||
   props.attachmentImporting || props.attachmentImportAttempt !== null ||
   props.attachments.some((attachment) => attachment.status !== "ready") ||
-  (!props.textOnly && props.connectors.some((connector) => Boolean(connector.unavailableReason))) ||
+  unavailableConnectors.value.length > 0 ||
   (!props.textOnly && props.skills.some((skill) => Boolean(skill.unavailableReason))) ||
   attachmentConstraintMessage.value !== null,
 );
@@ -366,16 +373,23 @@ function focusInput(): boolean {
 }
 defineExpose({ captureInputFocus, restoreInputFocus, focusInput });
 
-async function closeSkillPicker(close: () => Promise<void>, reason?: "selection"): Promise<void> {
-  // Let the menu finish restoring its trigger first, so it cannot steal the
-  // caret back after a successful skill selection. Cancellation keeps that focus.
+async function closeResourcePicker(close: () => Promise<void>, reason?: "selection", caret = pickerCaret): Promise<void> {
+  // The menu restores its trigger first. A selection then returns to the draft caret.
   await close();
   if (reason === "selection") {
     syncInputLayout();
-    if (pickerCaret) restoreInputFocus(pickerCaret);
+    if (caret) restoreInputFocus(caret);
     else focusInput();
   }
   pickerCaret = null;
+}
+
+async function removeUnavailableConnector(id: string): Promise<void> {
+  if (connectorSelectionLocked.value) return;
+  const caret = captureInputFocus();
+  emit("remove-connector", id);
+  await nextTick();
+  if (caret) restoreInputFocus(caret);
 }
 
 watch(
@@ -620,8 +634,8 @@ function handlePaste(event: ClipboardEvent): void {
               :experts-available="expertsAvailable"
               @pick-attachments="emit('pick-attachments')"
             >
-              <template #skills="{ close }"><slot name="skill-control" :select="selectPickerSkill" :close="(reason?: 'selection') => closeSkillPicker(close, reason)" /></template>
-              <template #connectors="{ close }"><slot name="connector-control" :close="close" /></template>
+              <template #skills="{ close }"><slot name="skill-control" :select="selectPickerSkill" :close="(reason?: 'selection') => closeResourcePicker(close, reason)" /></template>
+              <template #connectors="{ close }"><slot name="connector-control" :close="(reason?: 'selection') => closeResourcePicker(close, reason, captureInputFocus())" /></template>
               <template #experts="{ close }"><slot name="expert-picker" :close="close" /></template>
             </ChatAddControl>
             <slot v-if="!textOnly && mode === 'reply' && !compactLayout" name="permission-control">
@@ -639,8 +653,8 @@ function handlePaste(event: ClipboardEvent): void {
                 <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
               </button>
             </slot>
-            <ChatConnectorChips v-if="!textOnly && !compactLayout && connectors.length" :entries="connectors" :disabled="selectionRemovalDisabled || !$slots['connector-control']">
-              <template #default="{ close }"><slot name="connector-control" :close="close" /></template>
+            <ChatConnectorChips v-if="!textOnly && !compactLayout && connectors.length" :entries="connectors" :disabled="selectionRemovalDisabled || connectorSelectionDisabled || !$slots['connector-control']">
+              <template #default="{ close }"><slot name="connector-control" :close="(reason?: 'selection') => closeResourcePicker(close, reason, captureInputFocus())" /></template>
             </ChatConnectorChips>
             <slot v-if="!textOnly && !compactLayout" name="shop-control" />
             <slot v-if="!textOnly && !compactLayout" name="expert-control" />
@@ -755,9 +769,12 @@ function handlePaste(event: ClipboardEvent): void {
     <p v-if="attachmentConstraintMessage" class="chat-composer__validation" role="alert">
       {{ attachmentConstraintMessage }}
     </p>
-    <p v-if="!textOnly && connectors.some(connector => connector.unavailableReason)" class="chat-composer__validation" role="alert">
-      部分连接器暂不可用，请关闭对应开关或重新连接后发送。
-    </p>
+    <div v-if="unavailableConnectors.length" role="alert">
+      <p v-for="connector in unavailableConnectors" :key="connector.id" class="chat-composer__validation">
+        {{ connector.name }} 暂不可用（{{ connector.unavailableReason }}）
+        <NButton text size="small" :disabled="connectorSelectionLocked" :aria-label="`取消选用 ${connector.name}`" @click="removeUnavailableConnector(connector.id)">取消选用</NButton>
+      </p>
+    </div>
   </section>
 </template>
 
