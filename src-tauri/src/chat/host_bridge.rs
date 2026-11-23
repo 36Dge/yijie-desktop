@@ -43,10 +43,12 @@ const MAX_TURN_V2_ATTACHMENT_BYTES: usize = 10 * 1024 * 1024;
 const MAX_TURN_V2_FILE_CONTEXT_BYTES: usize = 256 * 1024;
 const MAX_ERROR_MESSAGE_BYTES: usize = 8 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-#[cfg(not(test))]
 // The Host emits healthy SSE heartbeats every 15 seconds. FEAT-134 v4 waits for two
 // complete heartbeat windows before treating an otherwise silent stream as recoverable.
-const EVENT_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(any(not(test), target_os = "macos"))]
+const LIVE_EVENT_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(not(test))]
+const EVENT_STREAM_IDLE_TIMEOUT: Duration = LIVE_EVENT_STREAM_IDLE_TIMEOUT;
 #[cfg(test)]
 const EVENT_STREAM_IDLE_TIMEOUT: Duration = Duration::from_millis(100);
 
@@ -117,6 +119,12 @@ impl Debug for HostEventStream {
 }
 
 impl HostEventStream {
+    #[cfg(all(test, target_os = "macos"))]
+    pub(super) fn use_live_idle_timeout(&mut self) {
+        // Cross-process acceptance uses the real Host and its heartbeat interval.
+        self.idle_timeout = self.idle_timeout.map(|_| LIVE_EVENT_STREAM_IDLE_TIMEOUT);
+    }
+
     pub async fn next_event(&mut self) -> Result<Option<HostEvent>, HostBridgeError> {
         match self.next_stream_event().await? {
             Some(HostStreamEvent::Native(_)) => Err(protocol_error()),
@@ -572,6 +580,9 @@ impl HostBridge {
         bridge.draft_admission = Some(admission);
         bridge
     }
+    pub(crate) fn scheduled_permission_mode(&self) -> Option<super::runtime_permissions::PermissionMode> {
+        self.schedule_admission.as_ref().map(|a| a.context.permission_mode)
+    }
     pub(crate) fn is_schedule_admitted(&self) -> bool {
         self.schedule_admission.is_some()
     }
@@ -772,19 +783,23 @@ impl HostBridge {
         include_choices: bool,
     ) -> Result<super::runtime_permissions::RuntimeApprovalSnapshot, HostBridgeError> {
         require_non_nil(session_id)?;
-        let versions: &[u8] = if include_choices { &[3, 2] } else { &[2] };
+        let versions: &[u8] = if include_choices { &[4, 3, 2] } else { &[2] };
         for &version in versions {
-            let response = self
+            let mut request = self
                 .authorized_request(
                     Method::GET,
                     &format!("/v{version}/agent-sessions/{session_id}/runtime-approvals"),
                 )
-                .await?
+                .await?;
+            if version == 4 {
+                request = request.query(&[("includePresentation", "true")]);
+            }
+            let response = request
                 .timeout(REQUEST_TIMEOUT)
                 .send()
                 .await
                 .map_err(|_| transport_error())?;
-            if version == 3 && response.status() == StatusCode::NOT_FOUND {
+            if version > 2 && response.status() == StatusCode::NOT_FOUND {
                 continue; // Older Host: read its original snapshot, without a broader choice.
             }
             if response.status() != StatusCode::OK {
@@ -793,7 +808,7 @@ impl HostBridge {
             let bytes = read_json_body(response).await?;
             let snapshot: super::runtime_permissions::RuntimeApprovalSnapshot =
                 serde_json::from_slice(&bytes).map_err(|_| protocol_error())?;
-            if snapshot.command_prefixes.is_some() != (version == 3) {
+            if snapshot.command_prefixes.is_some() != (version >= 3) || snapshot.native_choices.is_some() != (version == 4) {
                 return Err(protocol_error());
             }
             snapshot.validate().map_err(|_| protocol_error())?;
@@ -813,6 +828,7 @@ impl HostBridge {
         let version = match decision {
             "approve_once" | "reject" | "cancel" => 2,
             "approve_similar" => 3,
+            option if super::runtime_permissions::native_choice_handle(option) => 4,
             _ => return Err(protocol_error()),
         };
         let response = self
@@ -1007,7 +1023,9 @@ impl HostBridge {
         self.open_event_stream(
             session_id,
             cursor,
-            if super::artifact_media::files_enabled() || super::document_runtime::enabled() {
+            if super::artifact_media::extended_file_outputs_enabled()
+                || super::document_runtime::enabled()
+            {
                 12
             } else if super::artifact_media::enabled() {
                 9
@@ -2749,57 +2767,79 @@ mod tests {
         let session = Uuid::now_v7();
         let id = Uuid::now_v7();
         let row = serde_json::json!({"id":id,"kind":"command","status":"pending","summary":"git status","reason":"","scope":"/workspace"});
+        let prefix = serde_json::json!({"id":"native_1","label":"允许并保存命令前缀","kind":"command_prefix","detail":"[\"git\",\"status\"]"});
         let v3 = serde_json::json!({"requests":[row],"commandPrefixes":{id.to_string():["git","status"]}});
+        let mut v4 = v3.clone();
+        v4["nativeChoices"] = serde_json::json!({id.to_string():[{"id":"native_0","label":"允许一次","kind":"allow_once"},prefix]});
         let v2 = serde_json::json!({"requests":[row]});
         let mut receipt = row;
         receipt["status"] = "approved".into();
+        let ok = |body: &serde_json::Value| json_response("200 OK", &body.to_string());
+        let missing = || json_response("404 Not Found", "{}");
         let (port, server) = serve(vec![
             ready_response(NONCE),
-            json_response("200 OK", &v3.to_string()),
+            ok(&v4),
             ready_response(NONCE),
-            json_response("404 Not Found", "{}"),
+            missing(),
             ready_response(NONCE),
-            json_response("200 OK", &v2.to_string()),
+            ok(&v3),
             ready_response(NONCE),
-            json_response("200 OK", &receipt.to_string()),
+            missing(),
+            ready_response(NONCE),
+            missing(),
+            ready_response(NONCE),
+            ok(&v2),
+            ready_response(NONCE),
+            ok(&receipt),
+            ready_response(NONCE),
+            ok(&receipt),
         ])
         .await;
         let token = TestToken::new(0o600);
         let client = bridge(port, token.path.clone(), NONCE);
+        let current = client
+            .runtime_approval_snapshot(session, true)
+            .await
+            .unwrap();
+        let choices = current.native_choices.unwrap();
+        assert_eq!(choices[&id][1].kind.as_deref(), Some("command_prefix"));
         assert_eq!(
+            choices[&id][1].detail.as_deref(),
+            Some(r#"["git","status"]"#)
+        );
+        let older = client
+            .runtime_approval_snapshot(session, true)
+            .await
+            .unwrap();
+        assert_eq!(older.command_prefixes.unwrap()[&id], ["git", "status"]);
+        assert!(older.native_choices.is_none());
+        assert!(
             client
                 .runtime_approval_snapshot(session, true)
                 .await
                 .unwrap()
                 .command_prefixes
-                .unwrap()[&id],
-            ["git", "status"]
+                .is_none()
         );
-        assert!(client
-            .runtime_approval_snapshot(session, true)
-            .await
-            .unwrap()
-            .command_prefixes
-            .is_none());
-        assert_eq!(
-            client
-                .decide_runtime_approval(session, id, "approve_similar")
-                .await
-                .unwrap()
-                .id,
-            id
-        );
+        for decision in ["approve_similar", "native_1"] {
+            assert_eq!(
+                client
+                    .decide_runtime_approval(session, id, decision)
+                    .await
+                    .unwrap()
+                    .id,
+                id
+            );
+        }
         let calls = server.await.unwrap();
-        assert!(calls[1].starts_with(&format!(
-            "GET /v3/agent-sessions/{session}/runtime-approvals "
-        )));
-        assert!(calls[5].starts_with(&format!(
-            "GET /v2/agent-sessions/{session}/runtime-approvals "
-        )));
-        assert!(calls[7].starts_with(&format!(
-            "POST /v3/agent-sessions/{session}/runtime-approvals/{id} "
-        )));
-        assert!(calls[7].ends_with(r#"{"decision":"approve_similar"}"#));
+        let path = format!("agent-sessions/{session}/runtime-approvals");
+        assert!(calls[1].starts_with(&format!("GET /v4/{path}?includePresentation=true ")));
+        assert!(calls[5].starts_with(&format!("GET /v3/{path} ")));
+        assert!(calls[11].starts_with(&format!("GET /v2/{path} ")));
+        assert!(calls[13].starts_with(&format!("POST /v3/{path}/{id} ")));
+        assert!(calls[13].ends_with(r#"{"decision":"approve_similar"}"#));
+        assert!(calls[15].starts_with(&format!("POST /v4/{path}/{id} ")));
+        assert!(calls[15].ends_with(r#"{"decision":"native_1"}"#));
     }
 
     #[cfg(feature = "kimi-k31-pro-candidate")]

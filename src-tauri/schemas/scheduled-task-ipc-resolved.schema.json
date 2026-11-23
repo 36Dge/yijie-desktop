@@ -3925,7 +3925,9 @@
         "permission_mode": {
           "type": "string",
           "enum": [
-            "ask"
+            "ask",
+            "auto",
+            "full"
           ]
         },
         "delivery_state": {

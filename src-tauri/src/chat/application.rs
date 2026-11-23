@@ -2376,13 +2376,13 @@ impl ConversationApplication {
                     )
                     .await
                 } else if host.is_schedule_admitted() || super::runtime_permissions::enabled() {
-                    let mode = if host.is_schedule_admitted() {
-                        super::runtime_permissions::PermissionMode::Ask
+                    let mode = if let Some(mode) = host.scheduled_permission_mode() {
+                        mode
                     } else {
                         self.database
                             .permission_state(Some(dispatch.session_id))
                             .await?
-                            .mode
+                            .authorized_mode()
                     };
                     self.lifecycle.validate(epoch)?;
                     host.start_permission_turn(

@@ -205,4 +205,8 @@ impl std::fmt::Debug for RunView {
 pub enum RunViewPermissionMode {
     #[serde(rename = "ask")]
     Ask,
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "full")]
+    Full,
 }

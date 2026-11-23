@@ -23,3 +23,14 @@ it("binds prefix choices only to a pending command in the same snapshot and acce
     expect(() => parseApprovalSnapshot({ requests: rows, commandPrefixes })).toThrow();
   }
 });
+
+it("retains each native handle and its optional display scope across refreshes", () => {
+  const row={id:approval.id,kind:"command",summary:"echo sample",scope:"",reason:"",status:"pending"};
+  const choices=[
+    {id:"native_0",label:"允许一次",kind:"allow_once"},
+    {id:"native_1",label:"同一前缀",kind:"command_prefix",detail:'["echo","sample"]'},
+    {id:"native_2",label:"来自新版的选项",kind:"future_option"},
+  ];
+  const offered=parseApprovalSnapshot({requests:[row],nativeChoices:{[row.id]:choices}})[0]?.nativeChoices;
+  expect(offered).toEqual([choices[0],choices[1],{id:"native_2",label:"来自新版的选项"}]);
+});

@@ -12,11 +12,7 @@ pub enum PermissionMode {
 
 impl PermissionMode {
     pub(super) fn new_chat_default() -> Self {
-        if enabled() {
-            Self::Full
-        } else {
-            Self::Ask
-        }
+        if enabled() { Self::Full } else { Self::Ask }
     }
 
     pub fn as_str(self) -> &'static str {
@@ -69,9 +65,31 @@ pub struct RuntimeApproval {
     pub mcp: Option<super::native_conversation_generated::McpApprovalScope>,
 }
 
+// Only a local handle leaves the callback owner; executable response JSON
+// and rule payloads cannot be supplied by the renderer.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeApprovalOption {
+    pub id: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+pub fn native_choice_handle(value: &str) -> bool {
+    value
+        .strip_prefix("native_")
+        .and_then(|s| s.parse::<u8>().ok().map(|n| (s, n)))
+        .is_some_and(|(s, n)| n < 128 && n.to_string() == s)
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RuntimeApprovalSnapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_choices: Option<std::collections::BTreeMap<uuid::Uuid, Vec<NativeApprovalOption>>>,
     pub requests: Vec<RuntimeApproval>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command_prefixes: Option<std::collections::BTreeMap<uuid::Uuid, Vec<String>>>,
@@ -99,7 +117,6 @@ impl RuntimeApprovalSnapshot {
                 None => item.kind != "mcp",
             };
             if !mcp_valid
-                || (item.status == "cancelled" && item.kind != "mcp")
                 || item.id.is_nil()
                 || !ids.insert(item.id)
                 || ![
@@ -134,6 +151,28 @@ impl RuntimeApprovalSnapshot {
                     || prefix.is_empty()
                     || prefix.len() > 64
                     || prefix.iter().any(|arg| arg.is_empty() || arg.len() > 256)
+                {
+                    return Err(ChatError::OrchestrationUnavailable);
+                }
+            }
+        }
+        if let Some(choices) = &self.native_choices {
+            for (id, offers) in choices {
+                let mut unique = std::collections::HashSet::new();
+                if !self
+                    .requests
+                    .iter()
+                    .any(|r| r.id == *id && r.status == "pending")
+                    || offers.is_empty()
+                    || offers.len() > 128
+                    || offers.iter().any(|o| {
+                        !native_choice_handle(&o.id)
+                            || !unique.insert(&o.id)
+                            || o.label.is_empty()
+                            || o.label.len() > 16384
+                            || o.kind.as_deref().is_some_and(|s| s.len() > 64)
+                            || o.detail.as_deref().is_some_and(|s| s.len() > 4096)
+                    })
                 {
                     return Err(ChatError::OrchestrationUnavailable);
                 }

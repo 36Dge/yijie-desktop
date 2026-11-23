@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "contract_version": "0.2.0",
+  "contract_version": "0.3.0",
   "mode": "local_worktree_candidate",
   "release": false,
   "repository": "https://github.com/36Dge/yijie-contracts.git",
@@ -16,7 +16,7 @@
     },
     {
       "path": "jsonschema/scheduled-tasks/execution-v1.schema.json",
-      "sha256": "4975d434c861326b55873c5d00e5ff84935451fe5516e6a85794811c665ccf14"
+      "sha256": "c13e155493f82faccebd4c3dc2250eba178e5a19e882b362f6c81e096fc143e4"
     },
     {
       "path": "jsonschema/scheduled-tasks/plan-storage-v1.schema.json",
@@ -42,15 +42,15 @@
   "generated": [
     {
       "path": "sdks/rust/scheduled-execution/types.gen.rs",
-      "sha256": "2edc059c2a2ac2b77210f3005ce0602d78a06b7f687924e5b400fd2dd66e87c2"
+      "sha256": "54ad66a37776f5e2436a7beb7d8c0a61d50b4e9700b8f402c215b8af078ca876"
     },
     {
       "path": "sdks/typescript/src/jsonschema/scheduled-execution.gen.ts",
-      "sha256": "38e9782a18f34e4341b3e4bd63b23ff3c9e05625e513c6c75a5589c1e65e1564"
+      "sha256": "35392f81b19bd8d19d05048110b13b05b4236af9834d2c2ce1119f24ee19dd39"
     },
     {
       "path": "sdks/jsonschema/scheduled-execution.schema.json",
-      "sha256": "708220eca75c148878256029b3bdccbe7c8e4555de02162fa77bdc9c60efc393"
+      "sha256": "3b62b11cc21bdcf77a46525f30d5eefc726422a758559156b1743569b405fcd8"
     }
   ],
   "generators": {

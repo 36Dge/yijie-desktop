@@ -58,7 +58,7 @@ fn existing_run(
 // A local placeholder whose first create was provably never attempted is not
 // an established dedicated Runtime chat. A newly confirmed run gets a new
 // create operation; old cancelled history/outbox remains immutable and blocked.
-fn dedicated_target(
+pub(super) fn dedicated_target(
     db: &rusqlite::Connection,
     scope: &crate::chat::database::ChatScope,
     plan: &str,
@@ -104,10 +104,7 @@ impl ChatRepository {
             TargetMode::NewChatEachRun => None,
         };
         if let Some(chat) = conversation {
-            let (project,mode):(String,String)=self.connection.query_row("SELECT s.project_id,COALESCE(t.mode,'ask') FROM chat_sessions s JOIN chat_projects p ON p.id=s.project_id LEFT JOIN chat_task_permissions t ON t.session_id=s.id WHERE s.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3 AND p.removed_at IS NULL AND NOT EXISTS(SELECT 1 FROM chat_deletion_jobs d WHERE d.session_id=s.id)",params![chat,self.scope.owner_user_id,self.scope.tenant_id],|r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(|_|Error::StorageUnavailable)?.ok_or(Error::TargetUnavailable)?;
-            if mode != "ask" {
-                return Err(Error::PermissionDenied);
-            }
+            let project: String = self.connection.query_row("SELECT s.project_id FROM chat_sessions s JOIN chat_projects p ON p.id=s.project_id AND p.owner_user_id=s.owner_user_id AND p.tenant_id=s.tenant_id WHERE s.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3 AND p.removed_at IS NULL AND NOT EXISTS(SELECT 1 FROM chat_deletion_jobs d WHERE d.session_id=s.id)",params![chat,self.scope.owner_user_id,self.scope.tenant_id],|r|r.get(0)).optional().map_err(|_|Error::StorageUnavailable)?.ok_or(Error::TargetUnavailable)?;
             let directory = self
                 .resolve_schedule_project(&project)
                 .map_err(chat_error)?;
@@ -270,7 +267,7 @@ impl ChatRepository {
             return Err(Error::TargetUnavailable);
         }
         if let Some(chat) = &target.conversation {
-            let matches:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM chat_sessions s JOIN chat_projects p ON p.id=s.project_id LEFT JOIN chat_task_permissions t ON t.session_id=s.id WHERE s.id=?1 AND s.project_id=?2 AND s.owner_user_id=?3 AND s.tenant_id=?4 AND p.removed_at IS NULL AND COALESCE(t.mode,'ask')='ask' AND NOT EXISTS(SELECT 1 FROM chat_deletion_jobs d WHERE d.session_id=s.id))",params![chat,target.project,scope.owner_user_id,scope.tenant_id],|r|r.get(0)).map_err(|_|Error::StorageUnavailable)?;
+            let matches:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM chat_sessions s JOIN chat_projects p ON p.id=s.project_id WHERE s.id=?1 AND s.project_id=?2 AND s.owner_user_id=?3 AND s.tenant_id=?4 AND p.removed_at IS NULL AND NOT EXISTS(SELECT 1 FROM chat_deletion_jobs d WHERE d.session_id=s.id))",params![chat,target.project,scope.owner_user_id,scope.tenant_id],|r|r.get(0)).map_err(|_|Error::StorageUnavailable)?;
             if !matches {
                 return Err(Error::TargetUnavailable);
             }
@@ -307,6 +304,7 @@ impl ChatRepository {
             draft: false,
             market: false,
             scheduled: Some(ScheduledEnqueue {
+                permission_mode: PermissionMode::parse(&word(&run.permission_mode)?).map_err(|_| Error::FormatUnsupported)?,
                 run_id: &run.run_id,
                 operation_id: operation,
             }),

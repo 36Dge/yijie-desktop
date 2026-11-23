@@ -985,7 +985,7 @@ fn canonical_video_save_name(display_name: Option<&str>) -> Result<String, Artif
     {
         Ok(name.to_owned())
     } else {
-        Ok(format!("{name}.mp4"))
+        Ok(super::artifact_native::bounded_save_name(name, "mp4"))
     }
 }
 

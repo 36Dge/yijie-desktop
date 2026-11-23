@@ -117,7 +117,7 @@ App 或后续任务子进程；标准 bundler 的输出限于 `.local/developmen
 
 - 原身份 `com.yijie.ai`，原 Native `~/Library/Application Support/com.yijie.ai/demo-fast-v1`。
 - 原 Host/Runtime 为本仓 `.local/demo-fast/host-home`、`codex-home`；原模型 key 文件、连接器配置、会话、专家安装和授权继续复用。
-- Kimi K3.1 Pro / MiniMax、连接器、专家、现有媒体、日常计划和工作流采用现有 daily/media 配置。保留 daily SQL41 及现有文件候选限制，不新增迁移或候选能力。
+- Kimi K3.1 Pro / MiniMax、连接器、专家、日常计划和工作流使用 daily/media 配置。自 2026-11-23 起，日常客户端默认通过 v12 接收聊天产物，包括 Word、PPT 和 Markdown。已有 v9 客户端继续使用其兼容接口。产物接收与可选的文档生成环境分别配置。
 - 原生输出固定为 `.local/development/target`，Host/媒体适配器为 `.local/development/bin`，worker 编译输出为 `.local/development/worker-target`。worker 使用现有 canonical 内容寻址发布目录和 manifest，不覆盖受审 Runtime。
 - 复用 `.local/build-cache/feat162-v1` 的有界中间缓存及构建互斥锁。前端修改不创建 generation、不生成 `.app` 安装包、不创建数据全量备份、不伪造打包回执或激活记录。
 - Vite 绑定 localhost:1420，HMR 使用已有 localhost:1421。工作流仍使用 127.0.0.1:18888。无新增外部目标、Tauri capability 或原生 command。

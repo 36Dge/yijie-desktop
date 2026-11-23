@@ -983,6 +983,13 @@ async fn pick_native_save_target(
     Err(ArtifactNativeCode::DialogUnavailable)
 }
 
+pub(super) fn bounded_save_name(stem: &str, extension: &str) -> String {
+    if stem.len() + 1 + extension.len() > 255 {
+        return format!("artifact.{extension}");
+    }
+    format!("{stem}.{extension}")
+}
+
 fn canonical_save_name(
     display_name: Option<&str>,
     media_type: &str,
@@ -1008,7 +1015,7 @@ fn canonical_save_name(
     if media_type == "image/jpeg" && existing.as_deref() == Some("jpeg") {
         return Ok(name.to_owned());
     }
-    Ok(format!("{name}.{extension}"))
+    Ok(bounded_save_name(name, extension))
 }
 
 fn validate_target_extension(target: &Path, media_type: &str) -> Result<(), ArtifactNativeCode> {

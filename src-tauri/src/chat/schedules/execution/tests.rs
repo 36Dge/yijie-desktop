@@ -138,6 +138,104 @@ fn idle_chat(repo: &mut ChatRepository, root: &Path) -> PendingConversation {
 }
 
 #[test]
+fn scheduled_grant_and_reserved_run_keep_the_confirmed_native_mode() {
+    use super::super::execution_generated::RunViewPermissionMode as RunMode;
+    use crate::chat::migrations::{
+        MARKET_NATIVE_APPROVAL_SCHEMA_VERSION, SCHEDULE_PERMISSION_SCHEMA_VERSION,
+        migrate_to_target,
+    };
+    let n = now().unwrap();
+    for (selected, expected) in [
+        (PermissionMode::Ask, RunMode::Ask),
+        (PermissionMode::Auto, RunMode::Auto),
+        (PermissionMode::Full, RunMode::Full),
+    ] {
+        let root = Temp::new();
+        let mut repo = open(&root.0, ScheduleStorageMode::ExecutionFoundation);
+        migrate_to_target(&mut repo.connection, SCHEDULE_PERMISSION_SCHEMA_VERSION).unwrap();
+        repo.set_permission_mode(None, selected, selected == PermissionMode::Full)
+            .unwrap();
+        let (authority, _, grant) = grant_plan(&mut repo, n);
+        repo.set_permission_mode(None, PermissionMode::Ask, false)
+            .unwrap();
+        let run = reserve(
+            &mut repo,
+            &authority,
+            &grant,
+            &Uuid::now_v7().to_string(),
+            n,
+        )
+        .unwrap();
+        assert_eq!(run.permission_mode, expected);
+    }
+    let root = Temp::new();
+    let mut repo = open(&root.0, ScheduleStorageMode::ExecutionFoundation);
+    migrate_to_target(&mut repo.connection, MARKET_NATIVE_APPROVAL_SCHEMA_VERSION).unwrap();
+    let (authority, _, grant) = grant_plan(&mut repo, n);
+    let request = Uuid::now_v7().to_string();
+    let run = reserve(&mut repo, &authority, &grant, &request, n).unwrap();
+    migrate_to_target(&mut repo.connection, SCHEDULE_PERMISSION_SCHEMA_VERSION).unwrap();
+    let saved: String = repo
+        .connection
+        .query_row(
+            "SELECT permission_mode FROM chat_scheduled_grants WHERE grant_id=?1",
+            [&grant.grant_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(saved, "ask");
+    assert_eq!(
+        reserve(&mut repo, &authority, &grant, &request, n).unwrap(),
+        run
+    );
+}
+
+#[test]
+fn changing_a_target_chat_permission_requires_matching_schedule_consent() {
+    use crate::chat::migrations::{SCHEDULE_PERMISSION_SCHEMA_VERSION, migrate_to_target};
+    let root = Temp::new();
+    let n = now().unwrap();
+    let mut repo = open(&root.0, ScheduleStorageMode::ExecutionFoundation);
+    // An ordinary existing chat with no active turn in this isolated store.
+    let project = project(&mut repo, &root.0);
+    let session = Uuid::now_v7();
+    repo.connection.execute(
+        "INSERT INTO chat_sessions(id,owner_user_id,tenant_id,project_id,title,title_source,title_job_status,created_at,last_activity_at)
+         VALUES(?1,?2,?3,?4,'普通聊天','fallback','not_started',?5,?5)",
+         params![session.to_string(),repo.scope.owner_user_id,repo.scope.tenant_id,project.to_string(),n],
+    ).unwrap();
+    let mut request = request();
+    request.definition.target = TargetReference {
+        mode: TargetMode::ExistingChat,
+        conversation_id: Some(session.to_string()),
+    };
+    let plan = repo.save_schedule(request, n).unwrap();
+    let authority = ScheduleAuthority::local(n).unwrap();
+    let grant = repo
+        .confirm_schedule_grant(&authority, confirmation(&plan, n), n)
+        .unwrap();
+    let state = repo.permission_state(Some(session)).unwrap();
+    assert!(
+        !state.busy,
+        "ordinary target must have completed its prior turn"
+    );
+    repo.set_permission_mode(Some(session), PermissionMode::Full, true)
+        .unwrap();
+    migrate_to_target(&mut repo.connection, SCHEDULE_PERMISSION_SCHEMA_VERSION).unwrap();
+    assert_eq!(
+        reserve(
+            &mut repo,
+            &authority,
+            &grant,
+            &Uuid::now_v7().to_string(),
+            n
+        ),
+        Err(Error::GrantStale)
+    );
+    assert_eq!(count(&repo, "chat_scheduled_runs"), 0);
+}
+
+#[test]
 fn feat155_3a_reader_15_16_17_and_disabled_writer_preserve_old_chat() {
     let root = Temp::new();
     let n = now().unwrap();
@@ -300,7 +398,7 @@ fn feat155_3a_reservation_atomic_rollback_duplicate_and_quota() {
     assert_eq!(count(&r, "chat_scheduled_reservation"), 1);
     assert_eq!(count(&r, "chat_sessions"), 0);
     assert_eq!(count(&r, "chat_outbox"), 0);
-    assert_eq!(run.permission_mode, RunViewPermissionMode::Ask);
+    assert_eq!(run.permission_mode, super::super::execution_generated::RunViewPermissionMode::Ask);
     assert_eq!(
         run.delivery_state,
         super::super::execution_generated::DeliveryState::Reserved

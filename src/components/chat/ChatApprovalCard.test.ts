@@ -82,7 +82,7 @@ describe("ChatApprovalCard", () => {
       .toBe(String(status === "submitting" || status === "reconciling"));
 
     const decisions = wrapper.findAll(".chat-approval-card__button");
-    expect(decisions.map((button) => button.text())).toEqual(["允许一次", "取消本轮"]);
+    expect(decisions.map((button) => button.text())).toEqual(["取消本轮", "允许一次"]);
     expect(decisions.every((button) => button.attributes("type") === "button")).toBe(true);
     expect(decisions.every((button) => button.attributes("disabled") !== undefined))
       .toBe(!actionable);
@@ -123,6 +123,20 @@ describe("ChatApprovalCard", () => {
     wrapper.unmount();
   });
 
+  it("offers only the original single-use decision in the legacy task menu", async () => {
+    const wrapper = mount(ChatApprovalCard, { attachTo: document.body, props: {
+      approvalRequestId: APPROVAL_REQUEST_ID, status: "pending", expiresAt: EXPIRES_AT, actionable: true,
+    } });
+    try {
+      await wrapper.get('[aria-haspopup="menu"]').trigger("click"); await flushPromises();
+      const buttons = document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]');
+      expect([...buttons].map(button => button.textContent?.trim())).toEqual(["允许一次"]);
+      expect(wrapper.emitted("decision")).toBeUndefined();
+      buttons[0]!.click();
+      expect(wrapper.emitted("decision")).toEqual([[{ approvalRequestId: APPROVAL_REQUEST_ID, decision: "accept_once" }]]);
+    } finally { wrapper.unmount(); }
+  });
+
   it("unlocks only after fresh parent authority, including the same pending request", async () => {
     const wrapper = mount(ChatApprovalCard, {
       props: {
@@ -132,7 +146,7 @@ describe("ChatApprovalCard", () => {
         actionable: true,
       },
     });
-    const accept = wrapper.findAll(".chat-approval-card__button")[0]!;
+    const accept = wrapper.get('button[data-choice="accept_once"]');
     await accept.trigger("click");
     expect(accept.attributes("disabled")).toBeDefined();
 
@@ -167,7 +181,7 @@ describe("ChatApprovalCard", () => {
     });
     const buttons = wrapper.findAll(".chat-approval-card__button");
     expect(buttons.every((button) => button.attributes("disabled") !== undefined)).toBe(true);
-    await buttons[0]!.trigger("click");
+    await wrapper.get('button[data-choice="accept_once"]').trigger("click");
     expect(wrapper.emitted("decision")).toBeUndefined();
 
     await wrapper.setProps({ actionable: true });
@@ -187,7 +201,7 @@ describe("ChatApprovalCard", () => {
         actionable: true,
       },
     });
-    const accept = wrapper.findAll(".chat-approval-card__button")[0]!;
+    const accept = wrapper.get('button[data-choice="accept_once"]');
     (accept.element as HTMLButtonElement).focus();
     await wrapper.setProps({ status: "submitting" });
     expect(document.activeElement).toBe(accept.element);

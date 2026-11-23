@@ -223,7 +223,7 @@ describe("ChatTimeline", () => {
     });
     const buttons = wrapper.findAll(".chat-approval-card__button");
     expect(buttons.every((button) => button.attributes("disabled") === undefined)).toBe(true);
-    await buttons[0]!.trigger("click");
+    await wrapper.get('button[data-choice="accept_once"]').trigger("click");
 
     expect(wrapper.emitted("approval-decision")).toEqual([[{
       itemIdentity: timeline.turns[0]!.items[0]!.identity,

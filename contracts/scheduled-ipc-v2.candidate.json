@@ -31,15 +31,15 @@
     },
     {
       "path": "contracts/scheduled-execution.schema.json",
-      "sha256": "708220eca75c148878256029b3bdccbe7c8e4555de02162fa77bdc9c60efc393"
+      "sha256": "3b62b11cc21bdcf77a46525f30d5eefc726422a758559156b1743569b405fcd8"
     },
     {
       "path": "src-tauri/src/chat/schedules/execution_generated.rs",
-      "sha256": "2edc059c2a2ac2b77210f3005ce0602d78a06b7f687924e5b400fd2dd66e87c2"
+      "sha256": "54ad66a37776f5e2436a7beb7d8c0a61d50b4e9700b8f402c215b8af078ca876"
     },
     {
       "path": "src/domain/scheduled-execution.generated.ts",
-      "sha256": "38e9782a18f34e4341b3e4bd63b23ff3c9e05625e513c6c75a5589c1e65e1564"
+      "sha256": "35392f81b19bd8d19d05048110b13b05b4236af9834d2c2ce1119f24ee19dd39"
     },
     {
       "path": "contracts/scheduled-draft.schema.json",
@@ -65,7 +65,7 @@
     },
     {
       "path": "src/api/generated/scheduled-task-ipc-v2-validator.gen.js",
-      "sha256": "9deffcb30423f3fd71b499ccb3b0d42d83001cdf5986be620615b32fff803d35"
+      "sha256": "c41637bf3dca0bc84e2eeb2b37fdbcd9207a6c79aa2f37e50190383e20d3db29"
     },
     {
       "path": "src/api/generated/scheduled-task-ipc-v2-validator.gen.d.ts",
@@ -73,7 +73,7 @@
     },
     {
       "path": "src-tauri/schemas/scheduled-task-ipc-v2-resolved.schema.json",
-      "sha256": "48d527572d9157bff01582d3d30c5bd45994e612f65a8e102c12d4bfdc7e86a0"
+      "sha256": "bc6a9b88b41b7f77ebc97bd594d46800524717de5b8e7b307c8e8d01f232146e"
     }
   ]
 }

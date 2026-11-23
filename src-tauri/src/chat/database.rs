@@ -746,6 +746,7 @@ pub struct ChatRepository {
 
 #[derive(Clone, Copy)]
 pub(super) struct ScheduledEnqueue<'a> {
+    pub permission_mode: PermissionMode,
     pub run_id: &'a str,
     pub operation_id: Uuid,
 }
@@ -941,6 +942,7 @@ impl ChatRepository {
                 migrations::BUILTIN_WEB_SELECTION_SCHEMA_VERSION,
                 migrations::KIMI_HIGH_EFFORT_SCHEMA_VERSION,
                 migrations::MARKET_NATIVE_APPROVAL_SCHEMA_VERSION,
+                migrations::SCHEDULE_PERMISSION_SCHEMA_VERSION,
             ]
             .contains(&version)
             {
@@ -1050,6 +1052,9 @@ impl ChatRepository {
                 &mut connection,
                 migrations::KIMI_HIGH_EFFORT_SCHEMA_VERSION,
             )?;
+            if super::runtime_permissions::enabled() {
+                migrations::migrate_to_target(&mut connection, migrations::SCHEDULE_PERMISSION_SCHEMA_VERSION)?;
+            }
         }
         protect_database_files(&database_path)?;
         let mut repository = Self {
@@ -2636,10 +2641,11 @@ impl ChatRepository {
             )
             .map_err(map_constraint_or_database)?;
         if context.scheduled.is_some() || context.draft {
+            let mode = context.scheduled.map_or(PermissionMode::Ask, |run| run.permission_mode);
             transaction
                 .execute(
-                    "INSERT INTO chat_task_permissions(session_id,mode) VALUES(?1,'ask')",
-                    [session_id.to_string()],
+                    "INSERT INTO chat_task_permissions(session_id,mode) VALUES(?1,?2)",
+                    params![session_id.to_string(),mode.as_str()],
                 )
                 .map_err(map_sqlite_error)?;
         } else {
@@ -4719,23 +4725,9 @@ impl ChatRepository {
     }
 
     pub fn permission_state(&self, session_id: Option<Uuid>) -> Result<PermissionState, ChatError> {
-        let mut state = draft_permission(
-            &self.connection,
-            &self.scope.owner_user_id,
-            &self.scope.tenant_id,
-        )?;
+        let mut state = task_permission(&self.connection, &self.scope, session_id.map(|id| id.to_string()).as_deref())?;
         if let Some(id) = session_id {
             self.session_summary(id)?;
-            let stored: Option<String> = self
-                .connection
-                .query_row(
-                    "SELECT mode FROM chat_task_permissions WHERE session_id=?1",
-                    [id.to_string()],
-                    |r| r.get(0),
-                )
-                .optional()
-                .map_err(map_sqlite_error)?;
-            state.mode = PermissionMode::parse(stored.as_deref().unwrap_or("ask"))?;
             state.busy = self.connection.query_row(&super::schedules::recovery::coordination_sql(&self.connection,"SELECT EXISTS(SELECT 1 FROM chat_turns WHERE session_id=?1 AND status IN ('queued','streaming','stopping'))")?,[id.to_string()],|r|r.get(0)).map_err(map_sqlite_error)?;
             state.busy |= self.deletion_status_for_session(id)?.is_some();
         }
@@ -9318,6 +9310,21 @@ fn draft_permission(
         full_access_confirmed,
         busy: false,
     })
+}
+
+pub(super) fn task_permission(
+    db: &Connection,
+    scope: &ChatScope,
+    session: Option<&str>,
+) -> Result<PermissionState, ChatError> {
+    let mut state = draft_permission(db, &scope.owner_user_id, &scope.tenant_id)?;
+    if let Some(session) = session {
+        let stored: String = db.query_row("SELECT COALESCE(m.mode,'ask') FROM chat_sessions s LEFT JOIN chat_task_permissions m ON m.session_id=s.id WHERE s.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3",
+            params![session,scope.owner_user_id,scope.tenant_id], |row| row.get(0))
+            .optional().map_err(map_sqlite_error)?.ok_or(ChatError::NotFound)?;
+        state.mode = PermissionMode::parse(&stored)?;
+    }
+    Ok(state)
 }
 
 fn persist_new_task_permission(

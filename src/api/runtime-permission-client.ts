@@ -1,12 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ChatPermissionState, PermissionMode } from "./generated/chat-permission-state.gen";
 import type { components } from "./generated/runtime-permissions-v2.gen";
+import type { components as nativeOptions } from "./generated/runtime-approvals-v4.gen";
 import type { components as approvalChoices } from "./generated/runtime-approvals-v3.gen";
 
 export type { ChatPermissionState, PermissionMode };
 type CommandPrefix = approvalChoices["schemas"]["RuntimeApprovalChoices"]["commandPrefixes"][string];
-export type RuntimeApproval = components["schemas"]["RuntimeApproval"] & { commandPrefix?: CommandPrefix };
-export type RuntimeApprovalDecision = components["schemas"]["RuntimeApprovalDecision"]["decision"] | approvalChoices["schemas"]["SimilarCommandDecision"]["decision"];
+export type NativeApprovalOption = nativeOptions["schemas"]["NativeApprovalOption"];
+const nativeKinds: ReadonlySet<string> = new Set<NonNullable<NativeApprovalOption["kind"]>>([
+  "allow_once", "command_prefix", "allow_scope", "decline", "cancel", "deny_rule",
+]);
+export type RuntimeApproval = components["schemas"]["RuntimeApproval"] & { commandPrefix?: CommandPrefix; nativeChoices?: readonly NativeApprovalOption[] };
+export type RuntimeApprovalDecision = components["schemas"]["RuntimeApprovalDecision"]["decision"] | approvalChoices["schemas"]["SimilarCommandDecision"]["decision"] | `native_${number}`;
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("审批数据暂不可用，请重试。");
@@ -24,12 +29,12 @@ export function parseRuntimeApproval(value: unknown): RuntimeApproval {
   if (typeof v.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v.id) ||
     !["command", "file_change", "permissions", "auto_review", "mcp"].includes(v.kind as string) ||
     !["pending", "approved", "rejected", "unavailable", "cancelled"].includes(v.status as string) ||
-    [v.summary, v.scope, v.reason].some((text) => typeof text !== "string" || text.length > 4096)) throw new Error("审批状态暂不可用，请重试。");
+    [v.summary, v.scope, v.reason].some((text) => typeof text !== "string" || text.length > 16384)) throw new Error("审批状态暂不可用，请重试。");
   if (Object.keys(v).some((key) => !["id", "kind", "summary", "scope", "reason", "status", "mcp"].includes(key))) throw new Error("审批字段暂不支持。");
   if (v.kind === "mcp") {
     const scope = record(v.mcp);
     if (Object.keys(scope).length !== 4 || scope.server !== "sorftime" || scope.tool !== "product_detail" || scope.marketplace !== "US" || typeof scope.asin !== "string" || !/^[A-Z0-9]{10}$/.test(scope.asin)) throw new Error("工具审批范围不可用。");
-  } else if (v.mcp != null || v.status === "cancelled") throw new Error("审批范围不匹配。");
+  } else if (v.mcp != null) throw new Error("审批范围不匹配。");
   return v as unknown as RuntimeApproval;
 }
 
@@ -45,6 +50,26 @@ export function parseApprovalSnapshot(value: unknown): RuntimeApproval[] {
       if (request?.kind !== "command" || request.status !== "pending" || !Array.isArray(prefix) || !prefix.length || prefix.length > 64 ||
         !prefix.every((arg): arg is string => typeof arg === "string" && arg.length > 0 && arg.length <= 256)) throw new Error("命令审批范围不可用。");
       byId.set(id, { ...request, commandPrefix: prefix });
+    }
+  }
+  if (snapshot.nativeChoices !== undefined) {
+    for (const [id, raw] of Object.entries(record(snapshot.nativeChoices))) {
+      const request = byId.get(id);
+      if (!request || request.status !== "pending" || !Array.isArray(raw) || raw.length < 1 || raw.length > 128) throw new Error("原生审批选项不可用。");
+      const choices = raw.map((item, index) => {
+        const choice = record(item);
+        if (choice.id !== `native_${index}` || typeof choice.label !== "string" || !choice.label.length || choice.label.length > 16384) throw new Error("原生审批选项无效。");
+        const option: NativeApprovalOption = { id: choice.id, label: choice.label };
+        if (typeof choice.kind === "string" && nativeKinds.has(choice.kind)) {
+          option.kind = choice.kind as NonNullable<NativeApprovalOption["kind"]>;
+        }
+        if (choice.detail !== undefined) {
+          if (typeof choice.detail !== "string" || choice.detail.length > 4096) throw new Error("原生审批范围无效。");
+          option.detail = choice.detail;
+        }
+        return option;
+      });
+      byId.set(id, { ...request, nativeChoices: choices });
     }
   }
   return [...byId.values()];

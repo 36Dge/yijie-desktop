@@ -17,8 +17,14 @@ import uuid
 PROFILE=json.loads((Path(__file__).resolve().parents[1]/"contracts/market-local-acceptance.json").read_text())
 TOOL="m_"+hashlib.sha256((PROFILE["provider"]["serviceId"]+"\n"+PROFILE["tool"]["name"]).encode()).hexdigest()[:60]
 
+# This optional second tool records a harmless marker in the local sample ledger.
+# Omitting hints lets the real MCP approval policy decide an unclassified operation.
+RECORD_TOOL = {k:v for k,v in PROFILE["tool"].items() if k not in ("name","description","annotations")}
+RECORD_TOOL.update(name="local_record_sample", description="在本地验收服务中记录本次样本标记并返回该记录。")
+
 class State:
-    def __init__(self,output):
+    def __init__(self,output,approval_modes):
+        self.approval_modes=approval_modes
         self.lock=threading.RLock();self.output=output;self.calls=[];self.steps={};self.requests=0;self.servers=[];self.inflight=0
     def record(self,value):
         with self.lock:
@@ -29,10 +35,10 @@ class State:
 def latest_case(body):
     users=[x for x in body.get('input',[]) if isinstance(x,dict) and x.get('role')=='user']
     text=json.dumps(users[-1] if users else {},ensure_ascii=False)
-    match=re.search(r'LOCAL_CASE_(REJECT|TWICE|DUAL|ERROR|SLOW|CANCEL|ONCE|SESSION_HIT|SESSION|ALWAYS|AFTER_RESTART|AFTER_REVOKE|SAVE_FOR_REINSTALL|NEW_INSTALLATION|FULL|GUARDIAN_ALLOW|GUARDIAN_DENY)\b',text)
+    match=re.search(r'LOCAL_CASE_(NATIVE_READ|REJECT|TWICE|DUAL|ERROR|SLOW|CANCEL|ONCE|SESSION_HIT|SESSION|ALWAYS|AFTER_RESTART|AFTER_REVOKE|SAVE_FOR_REINSTALL|NEW_INSTALLATION|FULL|GUARDIAN_ALLOW|GUARDIAN_DENY)\b',text)
     return match.group(1) if match else None
 
-def discovered_native_tool(body):
+def discovered_native_tool(body,requested):
     # Use the real native search output. Codex owns name normalization and may
     # shorten a long MCP name; the worker's raw tool name is not a JS binding.
     for item in reversed(body.get('input',[])):
@@ -45,7 +51,7 @@ def discovered_native_tool(body):
         for namespace in value.get('tools',[]):
             if namespace.get('type')!='namespace' or namespace.get('name')!='mcp__yijie_market':continue
             for tool in namespace.get('tools',[]):
-                if 'market-local-verification' not in tool.get('description',''):continue
+                if 'market-local-verification' not in tool.get('description','') or requested not in tool.get('description',''):continue
                 name=namespace['name']+'__'+tool.get('name','')
                 if re.fullmatch(r'[A-Za-z0-9_]{1,128}',name):return name
     return None
@@ -96,13 +102,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         state.record({'event':'mcp_request','method':method})
         if request_id is None:self.reply(202);return
         if method=='initialize':result={'protocolVersion':'2025-11-25','capabilities':{'tools':{}},'serverInfo':{'name':'ordinary-local-acceptance','version':'1.0.0'}}
-        elif method=='tools/list':result={'tools':[PROFILE['tool']]}
+        elif method=='tools/list':result={'tools':[PROFILE['tool'],RECORD_TOOL] if state.approval_modes else [PROFILE['tool']]}
         elif method=='ping':result={}
         elif method=='tools/call':
             params=body.get('params',{});args=params.get('arguments',{})
-            if params.get('name')!='local_sample' or set(args)!={'scenario','marker'} or args['scenario'] not in ['structured','dual','error','slow'] or not isinstance(args['marker'],str) or not 1<=len(args['marker'])<=48:self.reply(400);return
+            if params.get('name') not in (['local_sample','local_record_sample'] if state.approval_modes else ['local_sample']) or set(args)!={'scenario','marker'} or args['scenario'] not in ['structured','dual','error','slow'] or not isinstance(args['marker'],str) or not 1<=len(args['marker'])<=48:self.reply(400);return
             with state.lock:
-                call={'serial':len(state.calls)+1,'scenario':args['scenario'],'marker':args['marker'],'source':'ordinary-local-sample'};state.calls.append(call);state.inflight+=1
+                call={'serial':len(state.calls)+1,'scenario':args['scenario'],'marker':args['marker'],'source':'ordinary-local-sample','tool':params['name']};state.calls.append(call);state.inflight+=1
             call_record=call
             state.record({'event':'tool_received',**call})
             if args['scenario']=='slow':time.sleep(12)
@@ -139,6 +145,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.model_item({'type':'message','role':'assistant','status':'completed','content':[{'type':'output_text','text':json.dumps({'outcome':outcome,'risk_level':'low','user_authorization':'high','rationale':'Ordinary local sample.'}),'annotations':[]}]})
             return
         case=latest_case(body)
+        requested='local_record_sample' if state.approval_modes and case!='NATIVE_READ' else 'local_sample'
         if case is None or body.get('stream') is not True:self.reply(400,{'error':'explicit local case required'});return
         meta=body.get('client_metadata',{});nested=meta.get('x-codex-turn-metadata','{}')
         try:nested=json.loads(nested) if isinstance(nested,str) else nested
@@ -160,14 +167,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             state.record({'event':'native_wait_used','turnId':turn,'cellId':running_cell})
             item={'type':'function_call','name':'wait','call_id':call,'arguments':json.dumps({'cell_id':running_cell,'yield_time_ms':20000,'max_tokens':3000})}
         elif not direct and step==0:
-            item={'type':'function_call','name':'tool_search','call_id':call,'arguments':json.dumps({'query':'本地连接器验收 local_sample','limit':1})}
+            item={'type':'function_call','name':'tool_search','call_id':call,'arguments':json.dumps({'query':'本地连接器验收 '+requested,'limit':1})}
         elif step==first_call or (case=='TWICE' and step==first_call+1):
             if direct:
                 native_tool=next((tool['name'] for tool in body.get('tools',[]) if tool.get('type')=='function'
                     and tool.get('name','').startswith('mcp__yijie_market__')
-                    and 'market-local-verification' in tool.get('description','')),None)
+                    and 'market-local-verification' in tool.get('description','') and requested in tool.get('description','')),None)
             else:
-                native_tool=discovered_native_tool(body)
+                native_tool=discovered_native_tool(body,requested)
             if not native_tool:
                 state.record({'event':'driver_failed','reason':'native_binding_missing','turnId':turn})
                 self.reply(400,{'error':'native market binding unavailable'})
@@ -190,8 +197,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except (BrokenPipeError,ConnectionResetError):state.record({'event':'model_protocol_client_closed','turnId':turn})
 
 def main():
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--output',required=True,type=Path);args=parser.parse_args()
-    args.output.mkdir(parents=True,exist_ok=True,mode=0o700);state=State(args.output)
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--output',required=True,type=Path);parser.add_argument('--approval-modes',action='store_true',help='Advertise the ordinary marker-recording tool alongside the read-only sample.');args=parser.parse_args()
+    args.output.mkdir(parents=True,exist_ok=True,mode=0o700);state=State(args.output,args.approval_modes)
     state.record({'event':'peer_start','profileSha256':hashlib.sha256(json.dumps(PROFILE,sort_keys=True,ensure_ascii=False).encode()).hexdigest(),'scriptSha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest()})
     for port in [18083,18085]:
         server=http.server.ThreadingHTTPServer(('127.0.0.1',port),Handler);server.state=state;state.servers.append(server)

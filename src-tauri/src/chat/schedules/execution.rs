@@ -1,13 +1,14 @@
 //! Native execution service. Explicit candidate triggers reuse the original outbox.
 use super::execution_generated::{
     ExecutionErrorCode as Error, GrantConfirmation, GrantState, GrantView, RunView,
-    RunViewPermissionMode, ScheduleCapability, WorkspaceReference, WorkspaceSource,
+    ScheduleCapability, WorkspaceReference, WorkspaceSource,
 };
 use super::generated::{PlanState, PlanView, TargetMode, TargetState};
 use super::{execution_guard as guard, store::read_plan};
 use crate::chat::{
     authorization::{ChatAction, ChatAuthorizationManager},
-    database::{ChatRepository, ChatScope},
+    database::{ChatRepository, ChatScope, task_permission},
+    runtime_permissions::PermissionMode,
     worker::DatabaseWorker,
 };
 use crate::native_auth::NativeAuthRuntime;
@@ -138,18 +139,13 @@ fn workspace(
         return Err(Error::TargetUnavailable);
     }
     if let Some(chat) = &p.definition.target.conversation_id {
-        let found:Option<(String,String)>=db.query_row(
-            "SELECT s.project_id,COALESCE(t.mode,'ask') FROM chat_sessions s
+        let project: String = db.query_row(
+            "SELECT s.project_id FROM chat_sessions s
              JOIN chat_projects p ON p.id=s.project_id AND p.owner_user_id=s.owner_user_id AND p.tenant_id=s.tenant_id
-             LEFT JOIN chat_task_permissions t ON t.session_id=s.id
              WHERE s.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3 AND p.removed_at IS NULL
                AND NOT EXISTS(SELECT 1 FROM chat_deletion_jobs d WHERE d.session_id=s.id)",
-            params![chat,scope.owner_user_id,scope.tenant_id],|r|Ok((r.get(0)?,r.get(1)?)))
-            .optional().map_err(|_|Error::StorageUnavailable)?;
-        let (project, mode) = found.ok_or(Error::TargetUnavailable)?;
-        if mode != "ask" {
-            return Err(Error::PermissionDenied);
-        }
+            params![chat,scope.owner_user_id,scope.tenant_id],|r|r.get(0))
+            .optional().map_err(|_|Error::StorageUnavailable)?.ok_or(Error::TargetUnavailable)?;
         id(&project)?;
         return super::workspace::reference(db, scope, &project)
             .map_err(|_| Error::TargetUnavailable);
@@ -163,6 +159,77 @@ fn workspace(
         resource_id: p.plan_id.clone(),
     })
 }
+fn supports_grant_modes(db: &Connection) -> Result<bool, Error> {
+    let version: i64 = db
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .map_err(|_| Error::StorageUnavailable)?;
+    Ok(version >= crate::chat::migrations::SCHEDULE_PERMISSION_SCHEMA_VERSION)
+}
+
+fn permission_target(
+    db: &Connection,
+    scope: &ChatScope,
+    plan: &PlanView,
+) -> Result<Option<String>, Error> {
+    if let Some(chat) = &plan.definition.target.conversation_id {
+        return Ok(Some(chat.clone()));
+    }
+    if plan.definition.target.mode == TargetMode::DedicatedChat && directories_present(db)? {
+        return preparation::dedicated_target(db, scope, &plan.plan_id).map(Option::flatten);
+    }
+    Ok(None)
+}
+
+fn directories_present(db: &Connection) -> Result<bool, Error> {
+    db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='chat_scheduled_target_bindings' AND type='table')",[],|r|r.get(0)).map_err(|_| Error::StorageUnavailable)
+}
+
+fn freeze_grant_mode(
+    db: &Connection,
+    scope: &ChatScope,
+    plan: &PlanView,
+    grant_id: &str,
+) -> Result<(), Error> {
+    let chat = permission_target(db, scope, plan)?;
+    let state =
+        task_permission(db, scope, chat.as_deref()).map_err(|_| Error::TargetUnavailable)?;
+    let mode = state.authorized_mode();
+    if supports_grant_modes(db)? {
+        let changed = db.execute("UPDATE chat_scheduled_grants SET permission_mode=?1 WHERE grant_id=?2 AND owner_user_id=?3 AND tenant_id=?4",
+            params![mode.as_str(),grant_id,scope.owner_user_id,scope.tenant_id]).map_err(|_| Error::StorageUnavailable)?;
+        if changed != 1 {
+            return Err(Error::GrantMissing);
+        }
+    } else if chat.is_some() && mode != PermissionMode::Ask {
+        return Err(Error::PermissionDenied);
+    }
+    Ok(())
+}
+
+fn frozen_grant_mode(
+    db: &Connection,
+    scope: &ChatScope,
+    plan: &PlanView,
+    grant_id: &str,
+) -> Result<PermissionMode, Error> {
+    let mode = if supports_grant_modes(db)? {
+        let value: String = db.query_row("SELECT permission_mode FROM chat_scheduled_grants WHERE grant_id=?1 AND owner_user_id=?2 AND tenant_id=?3",
+            params![grant_id,scope.owner_user_id,scope.tenant_id],|r|r.get(0)).map_err(|_|Error::GrantMissing)?;
+        PermissionMode::parse(&value).map_err(|_| Error::FormatUnsupported)?
+    } else {
+        PermissionMode::Ask
+    };
+    if let Some(chat) = permission_target(db, scope, plan)? {
+        let current = task_permission(db, scope, Some(&chat))
+            .map_err(|_| Error::TargetUnavailable)?
+            .authorized_mode();
+        if current != mode {
+            return Err(Error::GrantStale);
+        }
+    }
+    Ok(mode)
+}
+
 fn definition_digest(p: &PlanView, w: &WorkspaceReference) -> Result<String, Error> {
     Ok(digest(&encode(&(
         p.revision,
@@ -247,6 +314,7 @@ fn validate_grant(
     let p = plan(db, scope, &g.plan_id)?;
     super::model_retirement::require_execution(db, scope, &p)?;
     let w = workspace(db, scope, &p)?;
+    frozen_grant_mode(db, scope, &p, grant_id)?;
     if definition_digest(&p, &w)? != g.definition_digest || w != g.workspace {
         return Err(Error::GrantStale);
     }
@@ -309,6 +377,7 @@ impl ChatRepository {
         let w = workspace(&tx, &scope, &p)?;
         let gid = Uuid::now_v7().to_string();
         tx.execute("INSERT INTO chat_scheduled_grants(grant_id,owner_user_id,tenant_id,request_id,request_digest,plan_id,plan_revision,authorization_revision,definition_digest,workspace_source,workspace_id,max_runs,expires_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",params![gid,scope.owner_user_id,scope.tenant_id,request.request_id,hash,p.plan_id,p.revision,a.revision,definition_digest(&p,&w)?,word(&w.source)?,w.resource_id,request.max_runs,request.expires_at]).map_err(|_|Error::StorageUnavailable)?;
+        freeze_grant_mode(&tx, &scope, &p, &gid)?;
         tx.execute("UPDATE chat_scheduled_plans SET authorization_ref=?1,authorization_expires_at=?2 WHERE plan_id=?3 AND owner_user_id=?4 AND tenant_id=?5 AND revision=?6",params![gid,request.expires_at,p.plan_id,scope.owner_user_id,scope.tenant_id,p.revision]).map_err(|_|Error::StorageUnavailable)?;
         let view = grant(&tx, &scope, &gid, now)?;
         super::ipc::commit_deadline(deadline)?;
@@ -344,8 +413,8 @@ fn read_run_base(db: &Connection, scope: &ChatScope, run_id: &str) -> Result<Run
         return Err(Error::StorageUnavailable);
     }
     let snapshot: PlanView = read(json)?;
-    let result=db.query_row("SELECT plan_id,plan_revision,schedule_epoch,request_id,operation_id,trigger_source,original_run_id,logical_slot,grant_id,workspace_source,workspace_id,delivery_state,native_outcome,needs_attention FROM chat_scheduled_runs WHERE run_id=?1 AND owner_user_id=?2 AND tenant_id=?3",params![run_id,scope.owner_user_id,scope.tenant_id],|r|{
-        Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,Option<String>>(6)?,r.get::<_,Option<String>>(7)?,r.get::<_,String>(8)?,r.get::<_,String>(9)?,r.get::<_,String>(10)?,r.get::<_,String>(11)?,r.get::<_,String>(12)?,r.get::<_,bool>(13)?))
+    let result=db.query_row("SELECT plan_id,plan_revision,schedule_epoch,request_id,operation_id,trigger_source,original_run_id,logical_slot,grant_id,workspace_source,workspace_id,delivery_state,native_outcome,needs_attention,permission_mode FROM chat_scheduled_runs WHERE run_id=?1 AND owner_user_id=?2 AND tenant_id=?3",params![run_id,scope.owner_user_id,scope.tenant_id],|r|{
+        Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,Option<String>>(6)?,r.get::<_,Option<String>>(7)?,r.get::<_,String>(8)?,r.get::<_,String>(9)?,r.get::<_,String>(10)?,r.get::<_,String>(11)?,r.get::<_,String>(12)?,r.get::<_,bool>(13)?,r.get::<_,String>(14)?))
     }).map_err(|_|Error::StorageUnavailable)?;
     if snapshot.plan_id != result.0
         || snapshot.revision != result.1
@@ -369,7 +438,7 @@ fn read_run_base(db: &Connection, scope: &ChatScope, run_id: &str) -> Result<Run
             source: enum_value(result.9)?,
             resource_id: result.10,
         },
-        permission_mode: RunViewPermissionMode::Ask,
+        permission_mode: enum_value(result.14)?,
         delivery_state: enum_value(result.11)?,
         native_outcome: enum_value(result.12)?,
         needs_attention: result.13,
@@ -433,7 +502,8 @@ fn reserve_trigger(
     let run = Uuid::now_v7().to_string();
     let operation = Uuid::now_v7().to_string();
     let snapshot = encode(&p)?;
-    tx.execute("INSERT INTO chat_scheduled_runs(run_id,owner_user_id,tenant_id,format_version,plan_id,plan_revision,schedule_epoch,request_id,request_digest,operation_id,trigger_source,original_run_id,logical_slot,grant_id,snapshot_json,snapshot_digest,workspace_source,workspace_id,permission_mode,delivery_state,native_outcome,needs_attention) VALUES(?1,?2,?3,1,?4,?5,?6,?7,?8,?9,?15,?16,?17,?10,?11,?12,?13,?14,'ask','reserved','unobserved',0)",params![run,scope.owner_user_id,scope.tenant_id,p.plan_id,p.revision,p.schedule_epoch,request_id,hash,operation,grant_id,snapshot,digest(&snapshot),word(&g.workspace.source)?,g.workspace.resource_id,trigger.word(),trigger.original(),trigger.slot()]).map_err(|_|Error::StorageUnavailable)?;
+    let mode = frozen_grant_mode(tx,scope,&p,grant_id)?;
+    tx.execute("INSERT INTO chat_scheduled_runs(run_id,owner_user_id,tenant_id,format_version,plan_id,plan_revision,schedule_epoch,request_id,request_digest,operation_id,trigger_source,original_run_id,logical_slot,grant_id,snapshot_json,snapshot_digest,workspace_source,workspace_id,permission_mode,delivery_state,native_outcome,needs_attention) VALUES(?1,?2,?3,1,?4,?5,?6,?7,?8,?9,?15,?16,?17,?10,?11,?12,?13,?14,?18,'reserved','unobserved',0)",params![run,scope.owner_user_id,scope.tenant_id,p.plan_id,p.revision,p.schedule_epoch,request_id,hash,operation,grant_id,snapshot,digest(&snapshot),word(&g.workspace.source)?,g.workspace.resource_id,trigger.word(),trigger.original(),trigger.slot(),mode.as_str()]).map_err(|_|Error::StorageUnavailable)?;
     tx.execute(
         "INSERT INTO chat_scheduled_reservation(singleton,run_id) VALUES(1,?1)",
         [&run],

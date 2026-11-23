@@ -290,7 +290,7 @@ describe("ChatTurnGroup", () => {
     const buttons = wrapper.findAll(".chat-approval-card__button");
     expect(buttons.every((button) => button.attributes("disabled") === undefined)).toBe(true);
 
-    await buttons[1]!.trigger("click");
+    await wrapper.get('button[data-choice="cancel_current_turn"]').trigger("click");
     expect(wrapper.emitted("approval-decision")).toEqual([[{
       itemIdentity: turn.items[0]!.identity,
       threadId: THREAD_ID,

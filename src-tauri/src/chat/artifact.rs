@@ -3142,6 +3142,11 @@ fn civil_from_days(days_since_epoch: i64) -> Result<(i64, i64, i64), ChatError> 
 }
 
 #[cfg(test)]
+#[cfg(target_os = "macos")]
+#[path = "workspace_publish_native_test.rs"]
+mod workspace_publish_native_test;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::chat::{ChatScope, DatabaseKey, ReceiptKey};

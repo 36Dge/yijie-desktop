@@ -10410,8 +10410,8 @@ pub async fn chat_decide_runtime_approval_v2(
     require_runtime_permissions(r.request_id)?;
     let (app, _, manager) = applications(&chat_runtime, r.request_id).await?;
     authorize(&manager, r.context_id, ChatAction::SubmitTurn, r.request_id)?;
-    if !["approve_once", "reject", "cancel", "approve_similar"]
-        .contains(&r.payload.decision.as_str())
+    if !["approve_once", "reject", "cancel", "approve_similar"].contains(&r.payload.decision.as_str())
+        && !super::runtime_permissions::native_choice_handle(&r.payload.decision)
     {
         return Err(map_chat_error(ChatError::InvalidInput, Some(r.request_id)));
     }

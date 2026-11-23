@@ -1024,15 +1024,18 @@ pub(super) fn canonical_file_save_name(
     {
         return Err(ArtifactNativeCode::IntegrityFailed);
     }
-    if Path::new(name)
-        .extension()
-        .and_then(|value| value.to_str())
-        .is_some_and(|value| value.eq_ignore_ascii_case(extension))
-    {
-        Ok(name.to_owned())
-    } else {
-        Ok(format!("{name}.{extension}"))
+    if let Some(suffix) = Path::new(name).extension().and_then(|s| s.to_str()) {
+        if suffix.eq_ignore_ascii_case(extension) {
+            return Ok(name.to_owned());
+        }
+        if (extension == "html" && suffix.eq_ignore_ascii_case("htm"))
+            || (extension == "md" && suffix.eq_ignore_ascii_case("markdown"))
+        {
+            let stem = &name[..name.len() - suffix.len() - 1];
+            return Ok(super::artifact_native::bounded_save_name(stem, extension));
+        }
     }
+    Ok(super::artifact_native::bounded_save_name(name, extension))
 }
 
 pub(super) fn normalized_file_target(
@@ -1299,6 +1302,30 @@ fn verified_stale_file_temp(path: &Path, process_epoch: Uuid) -> bool {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn workspace_publish_save_names_use_one_suffix_and_fit_byte_limit() {
+        for (name, mime, expected) in [
+            ("说明.HTM", "text/html", "说明.html"),
+            ("说明.Markdown", "text/markdown", "说明.md"),
+            (
+                "计划",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "计划.pptx",
+            ),
+            ("报告 v1.2", "application/pdf", "报告 v1.2.pdf"),
+        ] {
+            assert_eq!(
+                canonical_file_save_name(Some(name), mime),
+                Ok(expected.to_owned())
+            );
+        }
+        let edge = "a".repeat(251) + ".htm";
+        assert_eq!(
+            canonical_file_save_name(Some(&edge), "text/html"),
+            Ok("artifact.html".into())
+        );
+    }
 
     #[test]
     fn feat165_normal_markdown_preview_and_office_save() {

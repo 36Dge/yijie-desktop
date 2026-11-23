@@ -186,8 +186,8 @@ describe("ChatCommandItem", () => {
     await wrapper.setProps({ canDecideApproval: true });
     expect(wrapper.get(".chat-approval-card__status").text()).toContain("等待确认");
     expect(buttons.every((button) => button.attributes("disabled") === undefined)).toBe(true);
-    await buttons[0]!.trigger("click");
-    await buttons[0]!.trigger("click");
+    await wrapper.get('button[data-choice="accept_once"]').trigger("click");
+    await wrapper.get('button[data-choice="accept_once"]').trigger("click");
     expect(wrapper.emitted("approval-decision")).toEqual([[{
       itemIdentity: "timeline-command-demo",
       threadId: "thread-demo",

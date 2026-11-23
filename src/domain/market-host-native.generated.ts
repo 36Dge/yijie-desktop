@@ -37,7 +37,9 @@ export type Decision =
   | "native_auto"
   | "native_session"
   | "native_always"
-  | "native_auto_reject";
+  | "native_auto_reject"
+  | "native_runtime"
+  | "native_runtime_reject";
 /**
  * Gateway-owned result _meta[yijie.market.call], not supplier metadata. Capture the current frozen call and accepted decision atomically with admission. Null decisionReceipt means no accepted owner decision observed, not that no prompt occurred. admissionConsumed is only permission consumption, never HTTP delivery or provider success. Native Item identity/status remain authoritative. No credentialRef, capabilityRef, bearer, raw arguments or authority context.
  */

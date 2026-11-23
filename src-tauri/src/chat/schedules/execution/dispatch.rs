@@ -20,6 +20,7 @@ fn denied(_: Error) -> ChatError {
 pub(crate) struct Context {
     run: String,
     kind: String,
+    pub(crate) permission_mode: PermissionMode,
     project: String,
     pub(crate) task: Option<Uuid>,
     pub(crate) session: Option<Uuid>,
@@ -73,7 +74,7 @@ pub(crate) fn validate_operation(
         AND r.trigger_source IN ('manual','automatic','rerun') AND r.delivery_state IN ('reserved','sending')
         AND r.native_outcome='unobserved' AND b.target_deleted=0 AND t.scheduled_quiescent=0
         AND t.status='queued' AND t.runtime_turn_id IS NULL AND COALESCE(t.submission_status,'queued')='queued'
-        AND w.removed_at IS NULL AND m.mode='ask' AND o.payload_version=2
+        AND w.removed_at IS NULL AND m.mode=r.permission_mode AND o.payload_version=2
         AND ((?4=1 AND o.state='inflight') OR (?4=0 AND o.state IN ('pending','inflight')))
         AND ((o.kind='create_session' AND b.create_operation_id=o.operation_id AND e.create_attempt='never'
                 AND s.agent_session_id IS NULL AND s.runtime_thread_id IS NULL)
@@ -90,7 +91,9 @@ pub(crate) fn validate_operation(
     let p = plan(db, scope, &r.plan_id).map_err(denied)?;
     super::super::model_retirement::require_execution(db, scope, &p).map_err(denied)?;
     let w = workspace(db, scope, &p).map_err(denied)?;
-    if matches!(g.state, GrantState::Expired | GrantState::Stale)
+    let permission_mode = frozen_grant_mode(db,scope,&p,&g.grant_id).map_err(denied)?;
+    if word(&r.permission_mode).map_err(denied)? != permission_mode.as_str()
+        || matches!(g.state, GrantState::Expired | GrantState::Stale)
         || g.authorization_revision != a.revision
         || g.plan_revision != r.plan_revision
         || p.revision != r.plan_revision
@@ -125,6 +128,7 @@ pub(crate) fn validate_operation(
             .transpose()
     };
     Ok(Context {
+        permission_mode,
         run,
         kind,
         project,
@@ -338,7 +342,7 @@ impl Admission {
             payload["cwd"].as_str() == self.directory.to_str()
                 && payload["request_id"] == self.operation.to_string()
         } else {
-            payload["permission_mode"] == "ask"
+            payload["permission_mode"] == c.permission_mode.as_str()
                 && payload["turn"]["operation_id"] == self.operation.to_string()
         };
         if !valid_body {

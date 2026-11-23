@@ -3,7 +3,7 @@
   "feature": "FEAT-174",
   "mode": "local_worktree_candidate",
   "release": false,
-  "skills_base_commit": "a4abcb8d0fdfa142b5c05ea26d24e6ebc93b2dd1",
+  "skills_base_commit": "ed3614f3d6aea41a84be1ebc7221bd5b74874465",
   "producer_sha256": "ff9a194e151b0c9826e997c4e02f9f0e8f247d7b9e18d40dcb542e227952a307",
   "presentation_sha256": "71196180c4153707708721f017751d0c991f238bbc50f1758959caae42274049",
   "files": {

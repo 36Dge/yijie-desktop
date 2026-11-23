@@ -5,6 +5,8 @@ import { parseStrictRfc3339EpochNanoseconds } from "../../domain/rfc3339";
 import type { YjIconName } from "../../icons/registry";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatCopyAction from "./ChatCopyAction.vue";
+import ChatApprovalActions from "./ChatApprovalActions.vue";
+import type { NativeApprovalOption } from "../../api/runtime-permission-client";
 
 defineOptions({ inheritAttrs: false });
 
@@ -63,6 +65,16 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   decision: [request: ChatApprovalDecisionRequest];
 }>();
+
+const actions = ref<InstanceType<typeof ChatApprovalActions> | null>(null);
+const choices = [
+  { id: "accept_once", kind: "allow_once", label: "允许一次" },
+  { id: "cancel_current_turn", kind: "cancel", label: "取消本轮" },
+] as const satisfies readonly NativeApprovalOption[];
+
+function selectChoice(id: string) {
+  if (id === "accept_once" || id === "cancel_current_turn") decide(id);
+}
 
 const actionLabel = "检查当前工作区是否为 Git 仓库";
 const workspaceLabel = "当前工作区";
@@ -287,6 +299,7 @@ function decide(decision: ChatApprovalDecision): void {
 <template>
   <section
     ref="cardElement"
+    @keydown="actions?.cardKeys($event)"
     class="chat-approval-card"
     :class="`chat-approval-card--${status}`"
     :aria-labelledby="titleId"
@@ -341,24 +354,7 @@ function decide(decision: ChatApprovalDecision): void {
         “允许一次”仅适用于本次只读检查；“取消本轮”会停止当前轮。
       </p>
 
-      <div class="chat-approval-card__actions" role="group" aria-label="确认决定">
-        <button
-          class="chat-approval-card__button chat-approval-card__button--primary yj-control yj-control--regular"
-          type="button"
-          :disabled="!decisionEnabled"
-          @click="decide('accept_once')"
-        >
-          允许一次
-        </button>
-        <button
-          class="chat-approval-card__button chat-approval-card__button--secondary yj-control yj-control--regular"
-          type="button"
-          :disabled="!decisionEnabled"
-          @click="decide('cancel_current_turn')"
-        >
-          取消本轮
-        </button>
-      </div>
+      <ChatApprovalActions ref="actions" :choices="choices" :disabled="!decisionEnabled" @select="selectChoice" />
 
       <span
         class="chat-approval-card__announcement"
@@ -508,55 +504,7 @@ function decide(decision: ChatApprovalDecision): void {
   color: var(--yj-color-text-primary);
 }
 
-.chat-approval-card__actions {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: var(--yj-space-2);
-}
-
-.chat-approval-card__button {
-  border: var(--yj-border-width) solid transparent;
-}
-
-.chat-approval-card__button--primary {
-  color: var(--yj-color-text-on-accent);
-  background: var(--yj-color-brand-primary);
-}
-
-.chat-approval-card__button--primary:hover:not(:disabled) {
-  background: var(--yj-color-brand-hover);
-}
-
-.chat-approval-card__button--primary:active:not(:disabled) {
-  background: var(--yj-color-brand-active);
-}
-
-.chat-approval-card__button--secondary {
-  border-color: var(--yj-color-border-default);
-  color: var(--yj-color-text-primary);
-  background: var(--yj-color-bg-card);
-}
-
-.chat-approval-card__button--secondary:hover:not(:disabled) {
-  border-color: var(--yj-color-border-control-hover);
-  background: var(--yj-color-control-hover);
-}
-
-.chat-approval-card__button--secondary:active:not(:disabled) {
-  border-color: var(--yj-color-border-control-hover);
-  background: var(--yj-color-control-pressed);
-}
-
-.chat-approval-card__button:disabled {
-  border-color: var(--yj-color-border-subtle);
-  color: var(--yj-color-text-disabled);
-  background: var(--yj-color-control-disabled-bg);
-  cursor: default;
-}
-
-.chat-approval-card__button:focus-visible {
+.chat-approval-card:focus-visible {
   outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
 }
@@ -581,11 +529,6 @@ function decide(decision: ChatApprovalDecision): void {
 
   .chat-approval-card__status {
     justify-content: flex-start;
-  }
-
-  .chat-approval-card__actions,
-  .chat-approval-card__button {
-    width: 100%;
   }
 }
 </style>

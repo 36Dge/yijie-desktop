@@ -374,6 +374,7 @@ impl ChatRepository {
         p.authorization_expires_at = Some(request.expires_at);
         store::write_plan(&tx, &scope, &p, clock).map_err(plan_error)?;
         tx.execute("INSERT INTO chat_scheduled_grants(grant_id,owner_user_id,tenant_id,request_id,request_digest,plan_id,plan_revision,authorization_revision,definition_digest,workspace_source,workspace_id,max_runs,expires_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",params![gid,scope.owner_user_id,scope.tenant_id,request.request_id,hash,p.plan_id,p.revision,a.revision,definition_digest(&p,&w)?,word(&w.source)?,w.resource_id,request.max_runs,request.expires_at]).map_err(|_|Error::StorageUnavailable)?;
+        freeze_grant_mode(&tx, &scope, &p, &gid)?;
         tx.execute(
             "INSERT INTO chat_scheduled_enable_receipts(grant_id,format_version) VALUES(?1,1)",
             [&gid],
@@ -403,8 +404,8 @@ impl ChatRepository {
 }
 
 fn validate_automatic_target(tx: &Transaction<'_>, p: &PlanView) -> Result<(), Error> {
-    let ask:bool=tx.query_row("SELECT NOT EXISTS(SELECT 1 FROM chat_scheduled_target_bindings b LEFT JOIN chat_sessions s ON s.id=b.conversation_id AND s.owner_user_id=b.owner_user_id AND s.tenant_id=b.tenant_id LEFT JOIN chat_projects w ON w.id=s.project_id AND w.owner_user_id=s.owner_user_id AND w.tenant_id=s.tenant_id LEFT JOIN chat_task_permissions m ON m.session_id=s.id WHERE b.plan_id=?1 AND (b.conversation_id IS NULL OR s.id IS NULL OR w.id IS NULL OR w.removed_at IS NOT NULL OR COALESCE(m.mode,'ask')!='ask' OR EXISTS(SELECT 1 FROM chat_deletion_jobs d WHERE d.session_id=s.id)))",[&p.plan_id],|r|r.get(0)).map_err(|_|Error::StorageUnavailable)?;
-    if !ask {
+    let available:bool=tx.query_row("SELECT NOT EXISTS(SELECT 1 FROM chat_scheduled_target_bindings b LEFT JOIN chat_sessions s ON s.id=b.conversation_id AND s.owner_user_id=b.owner_user_id AND s.tenant_id=b.tenant_id LEFT JOIN chat_projects w ON w.id=s.project_id AND w.owner_user_id=s.owner_user_id AND w.tenant_id=s.tenant_id WHERE b.plan_id=?1 AND (b.conversation_id IS NULL OR s.id IS NULL OR w.id IS NULL OR w.removed_at IS NOT NULL OR EXISTS(SELECT 1 FROM chat_deletion_jobs d WHERE d.session_id=s.id)))",[&p.plan_id],|r|r.get(0)).map_err(|_|Error::StorageUnavailable)?;
+    if !available {
         return Err(Error::TargetUnavailable);
     }
     Ok(())
@@ -448,6 +449,7 @@ pub(in crate::chat::schedules) fn activate_default(
     p.authorization_expires_at = Some(expires);
     store::write_plan(tx, scope, p, clock).map_err(plan_error)?;
     tx.execute("INSERT INTO chat_scheduled_grants(grant_id,owner_user_id,tenant_id,request_id,request_digest,plan_id,plan_revision,authorization_revision,definition_digest,workspace_source,workspace_id,max_runs,expires_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",params![gid,scope.owner_user_id,scope.tenant_id,request,digest(&encode(&("default-enable/1", &p.plan_id, p.revision))?),p.plan_id,p.revision,authority.revision,definition_digest(p,&w)?,word(&w.source)?,w.resource_id,max_runs,expires]).map_err(|_|Error::StorageUnavailable)?;
+    freeze_grant_mode(tx, scope, p, &gid)?;
     tx.execute("INSERT INTO chat_scheduled_enable_receipts(grant_id,format_version,automatic_consent_version) VALUES(?1,1,1)", [&gid]).map_err(|_|Error::StorageUnavailable)?;
     tx.execute(
         "UPDATE chat_scheduled_plans SET future_hold=NULL WHERE plan_id=?1",

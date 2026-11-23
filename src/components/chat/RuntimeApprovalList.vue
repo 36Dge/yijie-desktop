@@ -23,9 +23,9 @@ const sources = {
 <template>
   <section v-if="current" class="runtime-approvals" aria-label="待处理审批" aria-live="polite">
     <ChatApprovalPrompt v-for="request in pending.slice(0, 1)" :key="request.id" :source="sources[request.kind].name" :icon="sources[request.kind].icon"
-      :question="request.reason || sources[request.kind].question" :command-prefix="request.commandPrefix"
+      :question="request.reason || sources[request.kind].question" :command-prefix="request.commandPrefix" :native-choices="request.nativeChoices"
       :disabled="!!deciding || !connected" :submitting="deciding === request.id"
-      @once="$emit('decision', request.id, 'approve_once')" @similar="$emit('decision', request.id, 'approve_similar')" @reject="$emit('decision', request.id, 'reject')">
+      @native="id => $emit('decision', request.id, id as `native_${number}`)" @once="$emit('decision', request.id, 'approve_once')" @similar="$emit('decision', request.id, 'approve_similar')" @reject="$emit('decision', request.id, 'reject')">
       <template #context>
         <span v-if="pending.length > 1">待处理 {{ pending.length }} 项</span>
         <button v-if="request.kind === 'command' && request.scope && !request.scope.includes('\n')" type="button" class="runtime-approvals__scope-toggle" :aria-expanded="scopeOpen" @click="scopeOpen = !scopeOpen">工作目录</button>

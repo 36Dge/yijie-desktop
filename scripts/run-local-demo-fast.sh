@@ -623,6 +623,7 @@ node scripts/check-native-conversation.mjs --require-committed
 node scripts/check-native-mcp.mjs --require-committed
 if [[ "${YIJIE_RUNTIME_PERMISSIONS_ENABLED:-false}" == "true" ]]; then
   node "$workspace_root/yijie-contracts/scripts/sync-runtime-approval-choices.mjs" --check
+  node "$workspace_root/yijie-contracts/scripts/sync-runtime-native-options.mjs" --check
 fi
 if [[ "$YIJIE_FEAT169_NATIVE_TOOLS" == true ]]; then
   node scripts/check-native-process.mjs --candidate

@@ -15,12 +15,14 @@ pub fn enabled() -> bool {
         && std::env::var("YIJIE_LOCAL_PROFILE").as_deref() == Ok("demo_fast")
 }
 
-// FEAT-165 is an isolated K3.1 file-reader candidate. The existing daily
-// profile retains media/v9 and SQL41 until that separate migration is approved.
-// Do not remove the database's independent daily migration guard.
+// The daily build includes the v12 output reader and its paired Host.
+pub(super) fn extended_file_outputs_enabled() -> bool {
+    enabled() && cfg!(feature = "kimi-k31-pro-candidate")
+}
+
+// The FEAT-165 input and database candidate has a separate deployment scope.
 pub fn files_enabled() -> bool {
-    enabled()
-        && cfg!(feature = "kimi-k31-pro-candidate")
+    extended_file_outputs_enabled()
         && std::env::var("YIJIE_FEAT164_DAILY").as_deref() != Ok("true")
 }
 

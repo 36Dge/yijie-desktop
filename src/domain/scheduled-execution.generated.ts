@@ -48,4 +48,4 @@ export interface RunView {
   native_outcome: NativeOutcome;
   needs_attention: boolean;
 }
-export type RunViewPermissionMode = "ask";
+export type RunViewPermissionMode = "ask" | "auto" | "full";

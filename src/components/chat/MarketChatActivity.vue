@@ -30,12 +30,14 @@ const visibleTools = computed(() => (displayed.value?.tools?.items ?? []).filter
 }));
 const decisionLabels: Record<Decision, string> = {
   approve_once: "已允许一次", reject: "已拒绝", cancel: "已取消本次",
+  native_runtime: "原生策略已放行", native_runtime_reject: "原生策略未放行",
   approve_session: "已选择本会话允许", approve_always: "已选择始终允许",
   native_full: "完全访问已允许", native_auto: "自动审核通过", native_auto_reject: "自动审核拒绝",
   native_session: "按本会话授权执行", native_always: "按长期授权执行",
 };
 const decisionIntents: Record<Decision, string> = {
   ...decisionLabels, approve_once: "允许一次", reject: "拒绝", cancel: "取消本次",
+  native_runtime: "原生策略放行", native_runtime_reject: "原生策略未放行",
   approve_session: "本会话允许此工具", approve_always: "始终允许此工具",
 };
 const remembered = computed(() => props.observation?.approvals?.requests.filter(a =>
@@ -88,7 +90,7 @@ function callSourceName(turnId: string, identity: Pick<DecisionFact, "serviceId"
       <p>{{ approval.review.summary }}</p>
       <p v-if="approval.persistOptions?.length" class="market-activity__meta">记住后，授权适用于当前连接账号的此工具和本次目标范围。</p>
       <pre v-if="approval.review.argumentsJson" aria-label="本次工具调用完整参数">{{ approval.review.argumentsJson }}</pre>
-      <p class="market-activity__meta">{{ approval.review.risk === 'read' ? '读取数据' : '修改数据' }} · {{ approval.identity.toolName }} · {{ approval.decisionExpiresAtUnixMs ? '最晚批准时间' : '有效期至' }} {{ new Date(approval.decisionExpiresAtUnixMs ?? approval.expiresAtUnixMs).toLocaleTimeString('zh-CN') }}</p>
+      <p class="market-activity__meta">{{ approval.review.risk === 'read' ? '读取数据' : '可能修改数据' }} · {{ approval.identity.toolName }} · {{ approval.decisionExpiresAtUnixMs ? '最晚批准时间' : '有效期至' }} {{ new Date(approval.decisionExpiresAtUnixMs ?? approval.expiresAtUnixMs).toLocaleTimeString('zh-CN') }}</p>
       <template #extra-action><button class="approval-secondary" type="button" :disabled="!actionable(approval)" @click="$emit('decision', approval.approvalId, 'cancel')">取消本次</button></template>
     </ChatApprovalPrompt>
     <p v-for="approval in remembered" :key="approval.approvalId" class="market-activity__meta" role="status">

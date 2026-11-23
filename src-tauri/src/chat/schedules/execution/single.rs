@@ -179,6 +179,7 @@ impl ChatRepository {
         let w = workspace(&tx, &scope, &p)?;
         let gid = Uuid::now_v7().to_string();
         tx.execute("INSERT INTO chat_scheduled_grants(grant_id,owner_user_id,tenant_id,request_id,request_digest,plan_id,plan_revision,authorization_revision,definition_digest,workspace_source,workspace_id,max_runs,expires_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,1,?12)",params![gid,scope.owner_user_id,scope.tenant_id,req.request_id,hash,p.plan_id,p.revision,a.revision,definition_digest(&p,&w)?,word(&w.source)?,w.resource_id,req.expires_at]).map_err(|_|Error::StorageUnavailable)?;
+        freeze_grant_mode(&tx, &scope, &p, &gid)?;
         tx.execute("INSERT INTO chat_scheduled_single_run_grants(grant_id,format_version,trigger_source,original_run_id) VALUES(?1,1,?2,?3)",params![gid,word(&input.kind)?,original]).map_err(|_|Error::StorageUnavailable)?;
         let out = result(&tx, &scope, &gid, n)?;
         super::super::ipc::commit_deadline(deadline)?;
