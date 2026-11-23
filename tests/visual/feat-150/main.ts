@@ -1,8 +1,6 @@
-import axe from "axe-core";
 import type { AxeResults } from "axe-core";
-import { createApp } from "vue";
+import { createApp, h } from "vue";
 import { createMemoryHistory, createRouter } from "vue-router";
-import StorePage from "../../../src/pages/store/StorePage.vue";
 import "../../../src/styles/variables.css";
 import "../../../src/styles/main.css";
 import StoreVisualHarness from "./StoreVisualHarness.vue";
@@ -14,8 +12,8 @@ document.documentElement.dataset.theme = dark ? "dark" : "light";
 const router = createRouter({
   history: createMemoryHistory(),
   routes: [
-    { path: "/store", component: StorePage },
-    { path: "/chat", component: { template: "<div>新建任务</div>" } },
+    { path: "/store", component: () => import("../../../src/pages/store/StorePage.vue") },
+    { path: "/chat", component: { render: () => h("h1", "新建任务") } },
     { path: "/workflows", component: { template: "<div>工作流</div>" } },
     {
       path: "/scheduled-tasks",
@@ -25,7 +23,7 @@ const router = createRouter({
     { path: "/settings", component: { template: "<div>设置</div>" } },
   ],
 });
-await router.push("/store");
+await router.push(query.get("from") === "chat" ? "/chat" : "/store");
 await router.isReady();
 
 declare global {
@@ -35,6 +33,7 @@ declare global {
 }
 
 window.__FEAT150_RUN_AXE__ = async () => {
+  const { default: axe } = await import("axe-core");
   await new Promise<void>((resolve) =>
     requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
   );
@@ -69,7 +68,9 @@ function saveAxeResults(results: AxeResults) {
   });
   axeEvidence.dataset.ready = "true";
 }
-void window.__FEAT150_RUN_AXE__().then(saveAxeResults);
+if (router.currentRoute.value.path === "/store") {
+  void window.__FEAT150_RUN_AXE__().then(saveAxeResults);
+}
 
 // Explicit visual-harness control; absent from the product and normal preview.
 if (query.get("audit") === "1") {

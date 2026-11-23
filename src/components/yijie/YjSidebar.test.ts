@@ -5,12 +5,18 @@ import axe from "axe-core";
 import { defineComponent } from "vue";
 import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter } from "vue-router";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveNavigationVisibility } from "../../authorization/app-permission-policy";
 import type { KnownCapability } from "../../domain/permissions";
 import { resolveAppNavigation } from "../../navigation/app-nav";
 import { useChatStore } from "../../stores/chat.store";
 import YjSidebar from "./YjSidebar.vue";
+
+const loadChartEngine = vi.hoisted(() => vi.fn());
+vi.mock("echarts/core", async (loadOriginal) => {
+  loadChartEngine();
+  return loadOriginal();
+});
 
 async function mountSidebar(capabilities: readonly KnownCapability[]) {
   const pinia = createPinia();
@@ -39,7 +45,7 @@ async function mountSidebar(capabilities: readonly KnownCapability[]) {
     routes: [
       { path: "/chat", component: defineComponent({ template: "<div />" }) },
       { path: "/chat/:sessionId", component: defineComponent({ template: "<div />" }) },
-      { path: "/store", component: defineComponent({ template: "<div />" }) },
+      { path: "/store", component: () => import("../../pages/store/StorePage.vue") },
       { path: "/workflows", component: defineComponent({ template: "<div />" }) },
       { path: "/plugins", component: defineComponent({ template: "<div />" }) },
       { path: "/connectors", component: defineComponent({ template: "<div />" }) },
@@ -93,13 +99,16 @@ describe("YjSidebar permission rendering", () => {
     expect(wrapper.find('[aria-label="技能，即将开放"]').exists()).toBe(false);
   });
 
-  it("FEAT-150 renders the allowed store showcase as an enabled selected route", async () => {
+  it("opens the allowed store route from the sidebar before loading its chart engine", async () => {
     const wrapper = await mountSidebar(["store.read"]);
-    await wrapper.setProps({ currentPath: "/store" });
-    const storeLink = wrapper.findAll("a").find((link) => link.text().includes("我的店铺"));
+    const storeLink = wrapper.get('a[href="/store"]');
 
-    expect(storeLink?.attributes("href")).toBe("/store");
-    expect(storeLink?.attributes("aria-current")).toBe("page");
+    expect(storeLink.text()).toBe("我的店铺");
+    await storeLink.trigger("click");
+    await vi.waitFor(() => expect(wrapper.vm.$route.path).toBe("/store"));
+    expect(loadChartEngine).not.toHaveBeenCalled();
+    await wrapper.setProps({ currentPath: wrapper.vm.$route.path });
+    expect(storeLink.attributes("aria-current")).toBe("page");
     expect(wrapper.find('[aria-label="我的店铺，即将开放"]').exists()).toBe(false);
   });
 

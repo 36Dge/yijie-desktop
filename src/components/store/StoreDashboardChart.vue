@@ -8,37 +8,13 @@ import {
   useId,
   watch,
 } from "vue";
-import { BarChart, LineChart, PieChart, ScatterChart } from "echarts/charts";
-import {
-  AriaComponent,
-  GridComponent,
-  LegendComponent,
-  MarkLineComponent,
-  TitleComponent,
-  TooltipComponent,
-} from "echarts/components";
-import { init, use } from "echarts/core";
-import { SVGRenderer } from "echarts/renderers";
+import type { EChartsType } from "echarts/core";
 import type { EChartsOption } from "echarts";
 import { createArtifactReportEChartsTheme } from "../../design/theme/echarts-theme";
 import {
   dashboardProducts,
   dashboardStats,
 } from "../../domain/store-dashboard";
-
-use([
-  BarChart,
-  LineChart,
-  PieChart,
-  ScatterChart,
-  AriaComponent,
-  GridComponent,
-  LegendComponent,
-  MarkLineComponent,
-  TitleComponent,
-  TooltipComponent,
-  SVGRenderer,
-]);
 
 const props = withDefaults(
   defineProps<{
@@ -82,7 +58,7 @@ const loading = ref(true);
 const selectedSeries = ref([true, true]);
 const tableId = useId();
 const summaryId = useId();
-let chart: ReturnType<typeof init> | null = null;
+let chart: EChartsType | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let themeObserver: MutationObserver | null = null;
 let motionQuery: MediaQueryList | null = null;
@@ -684,10 +660,13 @@ function failChart(): void {
   destroyChart();
 }
 
-function draw(): void {
+async function draw(): Promise<void> {
   if (disposed || !chartElement.value || runtimeFailed.value) return;
+  const current = ++renderEpoch;
   try {
     if (!chart) {
+      const { init } = await import("./store-chart-runtime");
+      if (current !== renderEpoch || !chartElement.value) return;
       chart = init(
         chartElement.value,
         createArtifactReportEChartsTheme(token),
@@ -701,7 +680,7 @@ function draw(): void {
     chart.setOption(option(), { notMerge: true });
     loading.value = false;
   } catch {
-    failChart();
+    if (current === renderEpoch) failChart();
   }
 }
 
@@ -709,6 +688,7 @@ async function rebuild(): Promise<void> {
   const epoch = ++renderEpoch;
   destroyChart();
   runtimeFailed.value = false;
+  loading.value = true;
   await nextTick();
   if (disposed || epoch !== renderEpoch) return;
   draw();

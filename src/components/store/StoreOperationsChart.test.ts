@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { flushPromises, mount } from "@vue/test-utils";
+import { mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EChartsOption } from "echarts";
 import StoreOperationsChart from "./StoreOperationsChart.vue";
@@ -71,7 +71,7 @@ afterEach(() => {
 describe("StoreOperationsChart", () => {
   it("keeps opportunity percentage and effort stable while scaling the estimated dollar value", async () => {
     const wrapper = mountChart({ kind: "opportunities", label: "增长机会分布", factor: 1, period: 30 });
-    await flushPromises();
+    await vi.dynamicImportSettled();
     expect(wrapper.get("caption").text()).toContain("最近 30 天");
     expect(wrapper.findAll("thead th").map((cell) => cell.text())).toEqual(["增长机会", "预估提升", "投入时长", "预估价值（USD）"]);
     expect(wrapper.findAll("tbody tr")).toHaveLength(6);
@@ -89,7 +89,7 @@ describe("StoreOperationsChart", () => {
 
   it("keeps sentiment counts balanced and emits positive counts for the left-facing concern bars", async () => {
     const wrapper = mountChart({ kind: "sentiment", label: "客户声音", factor: 1 });
-    await flushPromises();
+    await vi.dynamicImportSettled();
     const total = () => wrapper.findAll("tbody tr").reduce((sum, row) => sum + row.findAll("td").slice(0, 3).reduce((count, cell) => count + Number(cell.text()), 0), 0);
     expect(total()).toBe(186);
     chartClick(0, 2);
@@ -103,7 +103,7 @@ describe("StoreOperationsChart", () => {
 
   it("keeps coverage percentages independent of sales scale and prevents hiding every series", async () => {
     const wrapper = mountChart({ kind: "coverage", label: "能力覆盖", factor: 1 });
-    await flushPromises();
+    await vi.dynamicImportSettled();
     const table = wrapper.get("table").text();
     await wrapper.setProps({ factor: 0.15 });
     expect(wrapper.get("table").text()).toBe(table);
@@ -121,7 +121,7 @@ describe("StoreOperationsChart", () => {
 
   it("uses supplied spark values without rescaling and announces the last observation's unit", async () => {
     const wrapper = mountChart({ kind: "spark", label: "转化率", metric: "conversion", factor: 0.27, period: 7, sparkValues: [2.8, 3.1, 3.84], sparkUnit: "%" });
-    await flushPromises();
+    await vi.dynamicImportSettled();
     expect(wrapper.find("details").exists()).toBe(false);
     expect(wrapper.get(".ops-chart__sr-only").text()).toContain("3.84%");
     const series = lastOption().series;
@@ -134,7 +134,7 @@ describe("StoreOperationsChart", () => {
 
   it("updates the existing chart and releases observers, motion listeners and renderer on normal unmount", async () => {
     const wrapper = mountChart({ kind: "sentiment", label: "客户声音" });
-    await flushPromises();
+    await vi.dynamicImportSettled();
     expect(mocks.init).toHaveBeenCalledTimes(1);
     await wrapper.setProps({ period: 90, factor: 3 });
     expect(mocks.instance.setOption).toHaveBeenCalledTimes(2);
@@ -144,5 +144,13 @@ describe("StoreOperationsChart", () => {
     expect(mocks.instance.dispose).toHaveBeenCalledTimes(1);
     expect(ChartResizeObserver.instances[0].disconnect).toHaveBeenCalledOnce();
     expect(mocks.removeMotionListener).toHaveBeenCalledOnce();
+  });
+
+  it("skips chart creation after the user leaves during the initial module load", async () => {
+    const wrapper = mountChart({ kind: "sentiment", label: "客户声音" });
+    wrapper.unmount();
+    wrappers.splice(wrappers.indexOf(wrapper), 1);
+    await vi.dynamicImportSettled();
+    expect(mocks.init).not.toHaveBeenCalled();
   });
 });

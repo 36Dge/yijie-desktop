@@ -8,37 +8,9 @@ import {
   useId,
   watch,
 } from "vue";
-import { BarChart, LineChart, RadarChart, ScatterChart } from "echarts/charts";
-import {
-  AriaComponent,
-  GridComponent,
-  LegendComponent,
-  MarkAreaComponent,
-  MarkLineComponent,
-  RadarComponent,
-  TooltipComponent,
-} from "echarts/components";
-import { init, use } from "echarts/core";
-import { SVGRenderer } from "echarts/renderers";
-import { LabelLayout } from "echarts/features";
+import type { EChartsType } from "echarts/core";
 import type { EChartsOption } from "echarts";
 import { createArtifactReportEChartsTheme } from "../../design/theme/echarts-theme";
-
-use([
-  BarChart,
-  LineChart,
-  RadarChart,
-  ScatterChart,
-  AriaComponent,
-  GridComponent,
-  LegendComponent,
-  MarkAreaComponent,
-  MarkLineComponent,
-  RadarComponent,
-  TooltipComponent,
-  SVGRenderer,
-  LabelLayout,
-]);
 
 const props = withDefaults(
   defineProps<{
@@ -75,7 +47,7 @@ const failed = ref(false);
 const summaryId = useId();
 const tableId = useId();
 const visibleSeries = ref([true, true]);
-let chart: ReturnType<typeof init> | null = null;
+let chart: EChartsType | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let themeObserver: MutationObserver | null = null;
 let motionQuery: MediaQueryList | null = null;
@@ -629,10 +601,13 @@ function disposeChart(): void {
   chart?.dispose();
   chart = null;
 }
-function render(): void {
+async function render(): Promise<void> {
   if (disposed || failed.value || !chartElement.value) return;
+  const current = ++epoch;
   try {
     if (!chart) {
+      const { init } = await import("./store-chart-runtime");
+      if (current !== epoch || !chartElement.value) return;
       chart = init(
         chartElement.value,
         createArtifactReportEChartsTheme(token),
@@ -664,6 +639,7 @@ function render(): void {
     }
     chart.setOption(option(), { notMerge: true });
   } catch {
+    if (current !== epoch) return;
     failed.value = true;
     disposeChart();
   }
