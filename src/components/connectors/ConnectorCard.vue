@@ -13,10 +13,20 @@ defineEmits<{ open: [id: string] }>();
     <span class="connector-card__copy">
       <strong >{{ connector.name }}</strong>
       <span class="connector-card__description">{{ connector.description }}</span>
-      <span v-if="connector.installed || connector.status.tone === 'warning' || connector.status.tone === 'error'" class="connector-card__status" :class="`connector-card__status--${connector.status.tone}`">{{ connector.status.label }}</span>
+      <span
+        v-if="(connector.installed && connector.status.label !== '已启用')
+          || connector.status.tone === 'warning' || connector.status.tone === 'error'"
+        class="connector-card__status"
+        :class="`connector-card__status--${connector.status.tone}`"
+      >{{ connector.status.label }}</span>
     </span>
     <span class="connector-card__indicator" :class="{ 'connector-card__indicator--enabled': connector.enabled, 'connector-card__indicator--add': !connector.installed && !connector.busy }" aria-hidden="true">
-      <YjIcon :name="connector.busy ? 'loading' : connector.enabled ? 'permissionCheck' : connector.installed ? 'pending' : 'plus'" :size="!connector.installed && !connector.busy ? 'lg' : 'sm'" :class="{ 'connector-card__busy': connector.busy }" />
+      <YjIcon
+        :name="connector.busy ? 'loading' : connector.enabled ? 'permissionCheck' : connector.installed ? 'pending' : 'plus'"
+        :size="!connector.installed && !connector.busy ? 'lg' : 'sm'"
+        :stroke-width="connector.enabled && !connector.busy ? 2.4 : undefined"
+        :class="{ 'connector-card__busy': connector.busy }"
+      />
     </span>
   </button>
 </template>
@@ -35,7 +45,8 @@ defineEmits<{ open: [id: string] }>();
 .connector-card__indicator--add { width: var(--yj-control-height-md); height: var(--yj-control-height-md); border-radius: var(--yj-radius-full); color: var(--yj-color-text-primary); transition: color var(--yj-motion-fast) var(--yj-ease-standard), background-color var(--yj-motion-fast) var(--yj-ease-standard); }
 .connector-card:is(:hover, :focus-visible) .connector-card__indicator--add { background: var(--yj-color-brand-primary); color: var(--yj-color-on-brand); }
 .connector-card:active .connector-card__indicator--add { background: var(--yj-color-brand-active); }
-.connector-card__indicator--enabled { color: var(--yj-color-semantic-success-ink); }
+.connector-card__indicator--enabled { color: var(--yj-color-chat-skill-mention); }
+.connector-card[aria-busy="true"] .connector-card__indicator--enabled { color: var(--yj-color-semantic-success-ink); }
 .connector-card__indicator :deep(.yj-icon) { color: inherit; }
 .connector-card__busy { animation: connector-card-spin var(--yj-motion-connector-loading) linear infinite; }
 @keyframes connector-card-spin { to { transform: rotate(360deg); } }

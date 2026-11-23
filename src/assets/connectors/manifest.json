@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "source": "FEAT-157 user-provided icons; source bytes preserved except documented SVG whitespace normalization",
+  "source": "FEAT-157 user-provided icons with per-item notes for modified artwork",
   "items": [
     {
       "iconAssetId": "cue",
@@ -362,7 +362,9 @@
       "iconAssetId": "sorftime",
       "file": "sorftime.svg",
       "mimeType": "image/svg+xml",
-      "sha256": "d2f2d0c9315815939b4ea20bea952f77f1622d4d68a81ed9e9a2eb17b3295f25"
+      "sha256": "76c0fdbc505554cffd692f792d940cd4bfdae68e26458602d1156cf3cbe24b65",
+      "sourceSha256": "a06b43fbd03bbe7d01f6d16a06fcaf59fcbbfeafa8eab6661cba1fa676a01fde",
+      "normalization": "Redrawn from the supplied PNG using its sampled sRGB colors on a white 240 by 240 SVG canvas."
     }
   ]
 }

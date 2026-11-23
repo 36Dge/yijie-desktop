@@ -180,7 +180,11 @@ describe("independent OAuth authorization entry", () => {
 
 describe("cross-border catalog", () => {
   it("renders twelve cross-border icons with category search and the existing detail entry", async () => {
-    const data: Snapshot = { ...snapshot([]), catalogRevision: catalog.catalogRevision, catalog: catalog.catalog as CatalogEntry[] };
+    const enabledSorftime: Installation = {
+      ...installed, serviceId: "sorftime", desiredEnabled: true, effectiveEnabled: true,
+      configurationStatus: "configured", authorizationStatus: "not_required", connectionStatus: "ready",
+    };
+    const data: Snapshot = { ...snapshot([enabledSorftime]), catalogRevision: catalog.catalogRevision, catalog: catalog.catalog as CatalogEntry[] };
     const entries = connectorViews(data);
     const cross = entries.filter(entry => entry.categoryId === "cross_border_ecommerce");
     expect(entries).toHaveLength(61);
@@ -190,6 +194,9 @@ describe("cross-border catalog", () => {
     expect(wrapper.findAll(".connector-card")).toHaveLength(61);
     await wrapper.get("input").setValue("跨境电商");
     expect(wrapper.findAll(".connector-card")).toHaveLength(12);
+    const sorftime = wrapper.get('button[aria-label="Sorftime，已启用，查看详情"]');
+    expect(sorftime.text()).not.toContain("已启用");
+    expect(sorftime.get(".connector-card__indicator--enabled svg").attributes("stroke-width")).toBe("2.4");
     for (const entry of cross) {
       expect(connectorIconUrl(entry.iconAssetId)).toBeTruthy();
       expect(wrapper.findAll(".connector-card img").some(img => img.attributes("src") === connectorIconUrl(entry.iconAssetId))).toBe(true);
