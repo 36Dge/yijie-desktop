@@ -384,10 +384,7 @@ pub(super) async fn handle(
         .await
         .map_err(|_| Error::TemporarilyUnavailable)??
     };
-    if op.payload.host_instance_id != host_id
-        || op.payload.scope.native_process_epoch != authority.native_process_epoch
-        || op.payload.scope.authorization_revision != authority.authorization_revision
-    {
+    if op.owner_changed(&authority, Some(&host_id)) {
         return Err(Error::OutcomeUnknown);
     }
     if let Action::Cancel(ref cancel) | Action::Reopen(ref cancel) = action {
@@ -729,6 +726,7 @@ pub(crate) fn preflight(
 #[cfg(test)]
 mod tests {
     use super::super::provider_generated as p;
+    use super::super::startup::actions;
     use super::*;
     #[test]
     fn browser_recovery_requires_a_live_auth_page_and_current_credential_permission() {
@@ -1469,12 +1467,10 @@ mod tests {
 
     #[test]
     fn startup_restores_prepared_connection_once_and_respects_later_explicit_disable() {
-        let (mut db, scope, unconfigured, host, authority) = setup();
-        assert!(
-            super::super::startup::actions(&db, &scope, vec![unconfigured])
-                .unwrap()
-                .is_empty()
-        );
+        let (mut db, scope, _, host, authority) = setup();
+        assert!(actions(&mut db, &scope, &authority, Some(&host))
+            .unwrap()
+            .is_empty());
         let entry = catalog()
             .catalog
             .iter()
@@ -1494,7 +1490,7 @@ mod tests {
         )
         .unwrap()
         .installation;
-        let plan = super::super::startup::actions(&db, &scope, vec![item.clone()]).unwrap();
+        let plan = actions(&mut db, &scope, &authority, Some(&host)).unwrap();
         assert_eq!(plan.len(), 1);
         let action = &plan[0];
         assert!(action.desired_enabled);
@@ -1519,8 +1515,7 @@ mod tests {
             },
         )
         .unwrap();
-        let pending = store::find(&db, &scope, &catalog().catalog, &item.installation_id).unwrap();
-        assert!(super::super::startup::actions(&db, &scope, vec![pending])
+        assert!(actions(&mut db, &scope, &authority, Some(&host))
             .unwrap()
             .is_empty());
         let mut connected = status(&prepared, p::OperationState::Succeeded);
@@ -1529,7 +1524,7 @@ mod tests {
         let enabled = store::finish_provider(&mut db, &scope, &prepared, connected, 102).unwrap();
         let saved = store::find(&db, &scope, &catalog().catalog, &item.installation_id).unwrap();
         assert!(saved.desired_enabled && !saved.effective_enabled);
-        let next_boot = super::super::startup::actions(&db, &scope, vec![saved.clone()]).unwrap();
+        let next_boot = actions(&mut db, &scope, &authority, Some(&host)).unwrap();
         assert_eq!(next_boot.len(), 1);
         assert_ne!(next_boot[0].operation_id, action.operation_id);
         let suspended = begin(
@@ -1537,7 +1532,7 @@ mod tests {
             &scope,
             &saved,
             &host,
-            authority,
+            authority.clone(),
             ui::OperationAction::Disable,
         );
         let mut stopped = status(&suspended, p::OperationState::Succeeded);
@@ -1547,13 +1542,199 @@ mod tests {
         let disabled = store::find(&db, &scope, &catalog().catalog, &item.installation_id).unwrap();
         assert!(!disabled.desired_enabled);
         assert_eq!(disabled.credential_ref, saved.credential_ref);
-        assert!(super::super::startup::actions(&db, &scope, vec![disabled])
+        assert!(actions(&mut db, &scope, &authority, Some(&host))
             .unwrap()
             .is_empty());
         assert_eq!(
             store::operation(&db, &scope, &action.operation_id).unwrap(),
             enabled.result
         );
+    }
+
+    #[test]
+    fn startup_recovers_an_interrupted_enable_probe_after_database_reopen() {
+        let root =
+            std::env::temp_dir().join(format!("yijie-connector-recovery-{}", Uuid::now_v7()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("ordinary.db");
+        let (mut db, scope, item, host, authority) =
+            setup_database(rusqlite::Connection::open(&path).unwrap());
+        let enabled = qualified_enable(&mut db, &scope, &item, &host, authority.clone());
+        let pending = begin(
+            &mut db,
+            &scope,
+            &enabled.result.installation,
+            &host,
+            authority.clone(),
+            ui::OperationAction::Enable,
+        );
+        let mut connecting = status(&pending, p::OperationState::Starting);
+        connecting.authorization_status = p::AuthorizationStatus::Unknown;
+        connecting.connection_status = p::ConnectionStatus::Connecting;
+        store::finish_provider(&mut db, &scope, &pending, connecting, 105).unwrap();
+        db.close().unwrap();
+
+        let mut db = rusqlite::Connection::open(&path).unwrap();
+        let stored = store::find(&db, &scope, &catalog().catalog, &item.installation_id).unwrap();
+        assert!(stored.desired_enabled && !stored.effective_enabled);
+        assert!(actions(&mut db, &scope, &authority, Some(&host))
+            .unwrap()
+            .is_empty());
+        let mut renewed = authority;
+        renewed.native_process_epoch = Uuid::now_v7().to_string();
+        let plan = actions(&mut db, &scope, &renewed, None).unwrap();
+        assert_eq!(
+            plan.len(),
+            1,
+            "the new owner must verify the saved connection"
+        );
+        let restore = &plan[0];
+        assert_eq!(restore.expected_revision, stored.revision);
+        assert_ne!(restore.operation_id, pending.payload.operation_id);
+        let retired = store::operation(&db, &scope, &pending.payload.operation_id).unwrap();
+        assert_eq!(retired.operation.status, ui::OperationStatus::Failed);
+        assert_eq!(
+            retired.operation.error_code,
+            Some(Error::ExecutionUnavailable)
+        );
+        assert!(!retired.operation.cancellable);
+        assert!(retired.installation.active_operation.is_none());
+        // A late reply from the old owner cannot resurrect the retired receipt.
+        let late = store::finish_provider(
+            &mut db,
+            &scope,
+            &pending,
+            status(&pending, p::OperationState::Succeeded),
+            107,
+        )
+        .unwrap();
+        assert_eq!(late.result, retired);
+        // An exit between retiring the receipt and starting a fresh probe still
+        // leaves a recoverable saved binding.
+        db.close().unwrap();
+        let mut db = rusqlite::Connection::open(&path).unwrap();
+        let new_host = Uuid::now_v7().to_string();
+        let plan = actions(&mut db, &scope, &renewed, Some(&new_host)).unwrap();
+        let restore = &plan[0];
+        let fresh = store::prepare_provider(
+            &mut db,
+            &scope,
+            &catalog().catalog,
+            store::ProviderIntent {
+                key: &ui::InstallationOperationPayload {
+                    installation_id: restore.installation_id.clone(),
+                    operation_id: restore.operation_id.clone(),
+                    expected_revision: restore.expected_revision,
+                },
+                expected_generation: None,
+                action: ui::OperationAction::Enable,
+                intent: &serde_json::to_value(restore).unwrap(),
+                host: &new_host,
+                authority: renewed.clone(),
+                now: 108,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            fresh.payload.binding.credential_ref,
+            enabled.payload.binding.credential_ref
+        );
+        assert_eq!(
+            fresh.payload.binding.reference.generation,
+            stored.generation
+        );
+        assert!(!fresh.result.installation.effective_enabled);
+        assert!(actions(&mut db, &scope, &renewed, Some(&new_host))
+            .unwrap()
+            .is_empty());
+        let mut ready = status(&fresh, p::OperationState::Succeeded);
+        ready.qualification = p::Qualification::Qualified;
+        ready.execution_available = true;
+        let confirmed = store::finish_provider(&mut db, &scope, &fresh, ready, 109).unwrap();
+        assert_eq!(
+            confirmed.result.operation.status,
+            ui::OperationStatus::Succeeded
+        );
+        let observed =
+            store::enabled_provider_operations(&db, &scope, &[fresh.payload.binding.reference])
+                .unwrap();
+        assert_eq!(observed[0].payload.operation_id, restore.operation_id);
+        db.close().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn startup_keeps_current_checks_and_does_not_repeat_initial_enable_or_credential_changes() {
+        for action in [
+            ui::OperationAction::Enable,
+            ui::OperationAction::Configure,
+            ui::OperationAction::Authorize,
+            ui::OperationAction::Disable,
+            ui::OperationAction::Uninstall,
+        ] {
+            let (mut db, scope, item, host, authority) = setup();
+            let auth = begin(
+                &mut db,
+                &scope,
+                &item,
+                &host,
+                authority.clone(),
+                ui::OperationAction::Authorize,
+            );
+            let authorized = store::finish_provider(
+                &mut db,
+                &scope,
+                &auth,
+                status(&auth, p::OperationState::Succeeded),
+                102,
+            )
+            .unwrap();
+            let pending = begin(
+                &mut db,
+                &scope,
+                &authorized.result.installation,
+                &host,
+                authority.clone(),
+                action,
+            );
+            let unknown = store::provider_control_failure(
+                &mut db,
+                &scope,
+                &pending.payload.operation_id,
+                Error::OutcomeUnknown,
+                false,
+                false,
+            )
+            .unwrap();
+            assert!(actions(&mut db, &scope, &authority, None)
+                .unwrap()
+                .is_empty());
+            assert_eq!(
+                store::operation(&db, &scope, &pending.payload.operation_id).unwrap(),
+                unknown.result
+            );
+
+            let new_host = Uuid::now_v7().to_string();
+            assert!(actions(&mut db, &scope, &authority, Some(&new_host))
+                .unwrap()
+                .is_empty());
+            let after = store::operation(&db, &scope, &pending.payload.operation_id).unwrap();
+            if action == ui::OperationAction::Enable {
+                assert_eq!(after.operation.status, ui::OperationStatus::Failed);
+                assert!(!after.installation.desired_enabled);
+                let retry = begin(
+                    &mut db,
+                    &scope,
+                    &after.installation,
+                    &new_host,
+                    authority.clone(),
+                    action,
+                );
+                assert_eq!(retry.kind, "probe");
+            } else {
+                assert_eq!(after, unknown.result);
+            }
+        }
     }
 
     #[test]
@@ -2241,10 +2422,7 @@ async fn poll_admission(
     let mut bindings = Vec::new();
     let mut worker_native_approvals = !operations.is_empty();
     for mut operation in operations {
-        if operation.payload.host_instance_id != host.instance_nonce()
-            || operation.payload.scope.native_process_epoch != authority.native_process_epoch
-            || operation.payload.scope.authorization_revision != authority.authorization_revision
-        {
+        if operation.owner_changed(&authority, Some(host.instance_nonce())) {
             return Err(Error::ExecutionUnavailable);
         }
         operation.payload.scope = authority.clone();

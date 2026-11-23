@@ -91,9 +91,18 @@ export function createMarketConnectorStoreDefinition(client: MarketConnectorClie
       // so an interrupted mutation can be queried with the renewed context.
       scopeEpoch++; readEpoch++; contextId.value = context;
       pending.value = new Set(); refreshing.value = false; error.value = null; phase.value = "loading";
-      if (context) await refresh();
+      if (context) await readSnapshot();
     }
-    async function refresh(): Promise<void> {
+    function refresh(): Promise<void> {
+      // Opening the picker or requesting a refresh may follow a long Keychain
+      // prompt. Resume observation of the original Enable, without resending it.
+      for (const item of snapshot.value?.installations ?? []) {
+        const operation = item.activeOperation;
+        if (operation?.action === "enable") operationBudgets.delete(operation.operationId);
+      }
+      return readSnapshot();
+    }
+    async function readSnapshot(): Promise<void> {
       const context = contextId.value;
       if (!context) return;
       const scope = scopeEpoch, read = ++readEpoch;
@@ -159,11 +168,11 @@ export function createMarketConnectorStoreDefinition(client: MarketConnectorClie
           const attempt = unconfirmed.value[serviceId];
           const previous = attempt?.receipt ?? item?.activeOperation;
           const id = attempt?.operationId ?? previous?.operationId;
-          if (!id) { await refresh(); return false; }
+          if (!id) { await readSnapshot(); return false; }
           if (action === "retry" && attempt?.resubmitAllowed) {
             const result = await dispatch(context, serviceId, attempt);
             if (!stillCurrent()) return false;
-            acceptMutation(result); retainReceipt(serviceId, result.operation); await refresh();
+            acceptMutation(result); retainReceipt(serviceId, result.operation); await readSnapshot();
             return result.operation.status === "succeeded";
           }
           let receipt: Operation;
@@ -183,7 +192,7 @@ export function createMarketConnectorStoreDefinition(client: MarketConnectorClie
           }
           if (!stillCurrent()) return false;
           retainReceipt(serviceId, receipt);
-          await refresh();
+          await readSnapshot();
           return receipt.status === "succeeded" || receipt.status === "cancelled";
         }
         if (unconfirmed.value[serviceId]) { setError(serviceId, connectorErrorMessage("outcome_unknown")); return false; }
@@ -196,14 +205,14 @@ export function createMarketConnectorStoreDefinition(client: MarketConnectorClie
         // A returned receipt is authoritative. Unknown receipts remain queryable;
         // success is never inferred from an IPC promise merely resolving.
         retainReceipt(serviceId, result.operation);
-        await refresh();
+        await readSnapshot();
         return result.operation.status === "succeeded";
       } catch (failure) {
         if (!stillCurrent()) return false;
         const code = failure instanceof ConnectorClientError ? failure.code : "temporarily_unavailable";
         if (!["temporarily_unavailable", "outcome_unknown", "operation_pending", "cleanup_pending", "context_invalid"].includes(code)) forgetAttempt(serviceId);
         setError(serviceId, connectorErrorMessage(code, serviceId));
-        if (code === "revision_conflict" || code === "permission_denied" || code === "context_invalid") await refresh();
+        if (code === "revision_conflict" || code === "permission_denied" || code === "context_invalid") await readSnapshot();
         return false;
       } finally { if (stillCurrent()) setPending(serviceId, false); scheduleOperationPoll(); }
     }
@@ -257,7 +266,7 @@ export function createMarketConnectorStoreDefinition(client: MarketConnectorClie
         budget.failures = 0;
         retainReceipt(candidate.serviceId, receipt);
         if (["succeeded", "failed", "cancelled"].includes(receipt.status)) operationBudgets.delete(candidate.operationId);
-        await refresh();
+        await readSnapshot();
       } catch (failure) {
         if (!current()) return;
         budget.failures++;

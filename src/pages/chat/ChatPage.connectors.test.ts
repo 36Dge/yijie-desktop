@@ -74,6 +74,35 @@ async function openConnectorMenu(wrapper: Awaited<ReturnType<typeof mountPage>>[
 
 const ready = { ...connectorInstallation, desiredEnabled: true, effectiveEnabled: true, connectionStatus: "ready" as const };
 
+it("adds a recovered connector to the open picker and lets the draft select and remove both", async () => {
+  const healthy = { ...ready, serviceId: "caoliao" };
+  const recovering = { ...ready, serviceId: "sorftime", installationId: "019c1a00-0000-7000-8000-000000000031", effectiveEnabled: false, connectionStatus: "connecting" as const };
+  const state = connectorSnapshot(healthy);
+  const base = state.catalog[0]!;
+  state.catalog = [{ ...base, serviceId: "caoliao", displayName: "草料二维码" }, { ...base, serviceId: "sorftime", displayName: "Sorftime" }];
+  state.installations = [healthy, recovering];
+  const { wrapper } = await mountPage("/chat", false, state);
+  const setEnabled = vi.spyOn(marketConnectorClient, "setEnabled");
+  const menu = await openConnectorMenu(wrapper);
+  expect(menu.findAll('[role="checkbox"]').map(row => row.text())).toEqual(["草料二维码"]);
+
+  vi.mocked(marketConnectorClient.snapshot).mockResolvedValue({
+    ...state, installations: [healthy, { ...recovering, revision: 2, effectiveEnabled: true, connectionStatus: "ready" }],
+  });
+  await useMarketConnectorStore().refresh(); await flushPromises();
+  expect(menu.findAll('[aria-checked="false"]').map(row => row.text())).toEqual(["草料二维码", "Sorftime"]);
+  await menu.findAll('[role="checkbox"]')[1]!.trigger("click"); await flushPromises();
+  await (await openConnectorMenu(wrapper)).get('[aria-checked="false"]').trigger("click"); await flushPromises();
+  const drafts = useChatComposerDraftStore();
+  expect(drafts.selection("new").map(item => item.serviceId).sort()).toEqual(["caoliao", "sorftime"]);
+  const selected = await openConnectorMenu(wrapper);
+  expect(selected.findAll('[aria-checked="true"]')).toHaveLength(2);
+  await selected.findAll('[aria-checked="true"]')[0]!.trigger("click"); await flushPromises();
+  await (await openConnectorMenu(wrapper)).get('[aria-checked="true"]').trigger("click"); await flushPromises();
+  expect(drafts.selection("new")).toEqual([]);
+  expect(setEnabled).not.toHaveBeenCalled();
+});
+
 it.each([false, true])("changes only this conversation selection and keeps the draft (existing session=%s)", async active => {
   const path = active ? `/chat/${SESSION_ID}` : "/chat";
   const { wrapper, router, store } = await mountPage(path, active, connectorSnapshot(ready));

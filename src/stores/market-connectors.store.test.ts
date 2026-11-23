@@ -262,6 +262,27 @@ describe("visible management operation observation", () => {
     expect(store.operationErrors.sample).toContain("自动核对已暂停"); expect(client.authorize).not.toHaveBeenCalled();
     store.setOperationObservation(false);
   });
+  it("resumes a paused Enable observation on picker refresh and uses the original receipt", async () => {
+    const pending = operation("original-enable", "pending");
+    const { client, store } = setup(snapshot([{ ...installed, desiredEnabled: true, activeOperation: pending }]));
+    client.operation.mockResolvedValue(pending);
+    await store.bind("context-a"); store.setOperationObservation(true);
+    await vi.advanceTimersByTimeAsync(310_000);
+    expect(store.operationErrors.sample).toContain("自动核对已暂停");
+    const calls = client.operation.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(client.operation).toHaveBeenCalledTimes(calls);
+
+    await store.refresh();
+    client.operation.mockResolvedValue({ ...pending, status: "succeeded", cancellable: false });
+    client.snapshot.mockResolvedValue({ ...snapshot([{ ...installed, desiredEnabled: true, effectiveEnabled: true, connectionStatus: "ready" }]), executionAvailable: true });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(client.operation).toHaveBeenCalledTimes(calls + 1);
+    expect(client.operation).toHaveBeenLastCalledWith("context-a", pending.operationId);
+    expect(store.entries[0]?.selectable).toBe(true);
+    expect(client.setEnabled).not.toHaveBeenCalled();
+    store.setOperationObservation(false);
+  });
 });
 
 

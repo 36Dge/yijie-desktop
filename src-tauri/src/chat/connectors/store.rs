@@ -333,6 +333,71 @@ pub(super) struct ProviderOperation {
     // Process-local return fact only; never inferred from a pending DB row.
     pub newly_created: bool,
 }
+
+impl ProviderOperation {
+    pub(super) fn owner_changed(
+        &self,
+        authority: &super::broker_generated::ScopeBinding,
+        host: Option<&str>,
+    ) -> bool {
+        self.payload.scope.native_process_epoch != authority.native_process_epoch
+            || self.payload.scope.authorization_revision != authority.authorization_revision
+            || host.is_some_and(|id| id != self.payload.host_instance_id)
+    }
+}
+
+/// An Enable probe can no longer establish readiness after its owner changes.
+/// Close only its local receipt. Keep the provider's last observation for audit.
+pub(super) fn retire_stale_probe(
+    tx: &rusqlite::Transaction<'_>,
+    scope: &ChatScope,
+    item: &wire::Installation,
+    active: &wire::Operation,
+    authority: &super::broker_generated::ScopeBinding,
+    host: Option<&str>,
+) -> Result<bool> {
+    if active.action != wire::OperationAction::Enable {
+        return Ok(false);
+    }
+    let Some(saved) = provider_operation(tx, scope, &active.operation_id)? else {
+        return Ok(false);
+    };
+    let binding = &saved.payload.binding;
+    if saved.kind != "probe"
+        || saved.result.operation != *active
+        || binding.service_id != item.service_id
+        || binding.reference.installation_id != item.installation_id
+        || binding.reference.generation != item.generation
+        || binding.reference.revision != item.revision
+        || Some(&binding.credential_ref) != item.credential_ref.as_ref()
+        || saved.payload.scope.owner_user_id != scope.owner_user_id
+        || saved.payload.scope.tenant_id != scope.tenant_id
+        || !saved.owner_changed(authority, host)
+    {
+        return Ok(false);
+    }
+    let mut result = saved.result;
+    result.operation.status = wire::OperationStatus::Failed;
+    result.operation.error_code = Some(Error::ExecutionUnavailable);
+    result.operation.revision = next(result.operation.revision)?;
+    result.operation.cancellable = false;
+    result.installation.active_operation = None;
+    result.installation.connection_status = wire::ConnectionStatus::Disconnected;
+    result.installation.effective_enabled = false;
+    result.installation.error_code = result.operation.error_code;
+    sql(tx.execute(
+        "UPDATE chat_connector_operations SET response_json=?1
+         WHERE owner_user_id=?2 AND tenant_id=?3 AND operation_id=?4",
+        params![
+            encode(&result)?,
+            scope.owner_user_id,
+            scope.tenant_id,
+            active.operation_id
+        ],
+    ))?;
+    Ok(true)
+}
+
 fn provider_storage(db: &Connection) -> Result<bool> {
     sql(db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='chat_connector_provider_operations')", [], |r|r.get(0)))
 }

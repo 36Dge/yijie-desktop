@@ -71,7 +71,7 @@ export function connectorPrimaryAction(view: ConnectorView): Readonly<{ action: 
   }
   if (view.actions.includes("configure")) return { action: "configure", label: "配置连接器" };
   if (view.actions.includes("authorize")) return { action: "authorize", label: "授权连接" };
-  if (view.actions.includes("enable")) return { action: "enable", label: `启用 ${view.name}` };
+  if (view.actions.includes("enable")) return { action: "enable", label: view.desiredEnabled ? "重新检查连接" : `启用 ${view.name}` };
   return null;
 }
 

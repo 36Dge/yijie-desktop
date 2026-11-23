@@ -10,6 +10,8 @@ pub(crate) struct StartupState {
     actions: Option<Vec<wire::SetEnabledPayload>>,
     next: usize,
     done: bool,
+    host_instance: Option<String>,
+    authorization_revision: Option<i64>,
 }
 
 fn repair_operation(service: &str) -> Option<&'static str> {
@@ -23,16 +25,36 @@ fn repair_operation(service: &str) -> Option<&'static str> {
 }
 
 pub(super) fn actions(
-    db: &rusqlite::Connection,
+    db: &mut rusqlite::Connection,
     scope: &ChatScope,
-    items: Vec<wire::Installation>,
+    authority: &broker_generated::ScopeBinding,
+    host: Option<&str>,
 ) -> Result<Vec<wire::SetEnabledPayload>, Error> {
+    if scope.owner_user_id != authority.owner_user_id || scope.tenant_id != authority.tenant_id {
+        return Err(Error::ContextInvalid);
+    }
+    let tx = db
+        .transaction()
+        .map_err(|_| Error::TemporarilyUnavailable)?;
     let mut actions = Vec::new();
-    for item in items {
-        if item.service_id==crate::builtin_web::wire::RETIRED_SERVICE_ID || item.status != wire::InstallationStatus::Installed || item.active_operation.is_some() {
+    for item in store::list(&tx, scope, &catalog().catalog)? {
+        if item.service_id == crate::builtin_web::wire::RETIRED_SERVICE_ID
+            || item.status != wire::InstallationStatus::Installed
+        {
             continue;
         }
+        if let Some(active) = &item.active_operation {
+            if !store::retire_stale_probe(&tx, scope, &item, active, authority, host)?
+                || !item.desired_enabled
+            {
+                continue;
+            }
+        }
+        // A partial probe may only have observed "connecting", or have no
+        // observation at all. A saved Enable and binding warrant a fresh
+        // metadata check. Only the new provider result can grant readiness.
         let ready_to_probe = item.service_id == wire::BUILTIN_MODEL_SERVICE_ID
+            || (item.desired_enabled && item.credential_ref.is_some())
             || (item.configuration_status == wire::ConfigurationStatus::Configured
                 && matches!(
                     item.authorization_status,
@@ -44,7 +66,7 @@ pub(super) fn actions(
         let operation_id = if item.desired_enabled {
             Uuid::now_v7().to_string()
         } else if let Some(id) = repair_operation(&item.service_id) {
-            match store::operation(db, scope, id) {
+            match store::operation(&tx, scope, id) {
                 Ok(_) => continue,
                 Err(Error::NotFound) => id.to_owned(),
                 Err(error) => return Err(error),
@@ -59,6 +81,7 @@ pub(super) fn actions(
             operation_id,
         });
     }
+    tx.commit().map_err(|_| Error::TemporarilyUnavailable)?;
     Ok(actions)
 }
 
@@ -69,17 +92,36 @@ pub(super) async fn initialize(
     scope: ChatScope,
 ) -> Result<(), Error> {
     // A read-only context may inspect existing facts, never issue management.
-    if authorization
-        .with_connector_context(context, &scope, "connector.manage", now()?, |_| ())
-        .is_err()
-    {
+    let Ok(revision) = authorization.with_market_authority(
+        context,
+        &scope,
+        &["connector.manage"],
+        now()?,
+        |authority| authority.authorization_revision,
+    ) else {
         return Ok(());
-    }
+    };
     let mut startup = runtime.connector_startup.lock().await;
+    let host = runtime
+        .local_host_bridge()
+        .await
+        .ok()
+        .map(|bridge| bridge.instance_nonce().to_owned());
+    // A missing bridge is not evidence that the previous Host was replaced.
+    if startup.authorization_revision != Some(revision)
+        || (host.is_some() && startup.host_instance != host)
+    {
+        *startup = StartupState {
+            host_instance: host.clone(),
+            authorization_revision: Some(revision),
+            ..StartupState::default()
+        };
+    }
     if startup.done {
         return Ok(());
     }
     if startup.actions.is_none() {
+        let _gate = authorization.market_admission_lock().await;
         let db = runtime
             .database()
             .await
@@ -89,16 +131,20 @@ pub(super) async fn initialize(
         let initial = db
             .call(move |repo| {
                 Ok(auth
-                    .with_connector_context(
+                    .with_market_authority(
                         context,
                         &query_scope,
-                        "connector.manage",
+                        &["connector.manage"],
                         now().map_err(|_| crate::chat::ChatError::DatabaseUnavailable)?,
-                        |_| {
+                        |authority| {
+                            if authority.authorization_revision != revision {
+                                return Err(Error::ContextInvalid);
+                            }
                             actions(
-                                &repo.connection,
+                                &mut repo.connection,
                                 &query_scope,
-                                store::list(&repo.connection, &query_scope, &catalog().catalog)?,
+                                &authority,
+                                host.as_deref(),
                             )
                         },
                     )
@@ -173,6 +219,14 @@ pub(super) async fn initialize(
             eprintln!("Connector startup observation: service={service} error={error:?}");
         }
         startup.next += 1;
+    }
+    if startup.host_instance.is_none() && startup.next > 0 {
+        // The first restore may itself have launched the normal sidecar.
+        startup.host_instance = runtime
+            .local_host_bridge()
+            .await
+            .ok()
+            .map(|bridge| bridge.instance_nonce().to_owned());
     }
     startup.done = true;
     let query_scope = scope.clone();

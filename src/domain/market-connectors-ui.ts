@@ -101,6 +101,8 @@ export function connectorViews(snapshot: Snapshot, pendingIds: ReadonlySet<strin
     const operationPending = operation?.status === "pending" || operation?.status === "unknown";
     const busy = pending || operationPending;
     const enabled = entry.availability !== "blocked" && installed && installation?.effectiveEnabled === true;
+    const needsConnectionCheck = installed && !enabled && !busy && Boolean(installation?.credentialRef)
+      && installation?.errorCode === "execution_unavailable" && entry.availability !== "blocked" && entry.availability !== "unverified";
     const actions: ConnectorAction[] = [];
     if (!pending && operationPending) {
       actions.push("retry");
@@ -115,7 +117,11 @@ export function connectorViews(snapshot: Snapshot, pendingIds: ReadonlySet<strin
         // Native separately reports support for beginning OAuth. An unverified
         // tool catalog must not hide account authorization, and authorization
         // must not grant enablement or execution qualification.
-        if (entry.authorizationAvailable === true && canConfigure && ["required", "expired", "failed", "unknown"].includes(installation.authorizationStatus)) {
+        if (canManage && needsConnectionCheck) {
+          // A previous owner's probe ended before it could verify this binding.
+          // The current provider can check it without opening a credential form.
+          actions.push("enable");
+        } else if (entry.authorizationAvailable === true && canConfigure && ["required", "expired", "failed", "unknown"].includes(installation.authorizationStatus)) {
           actions.push("authorize");
         } else if (!enabled && entry.availability !== "blocked" && entry.availability !== "unverified") {
           if (entry.serviceId === "kimi-web" && canManage) actions.push("enable");
@@ -137,6 +143,7 @@ export function connectorViews(snapshot: Snapshot, pendingIds: ReadonlySet<strin
       ? installation?.authorizationStatus === "authorized"
         ? "账户授权已完成；支持工具尚待验证，暂不能启用或用于对话。"
         : "可先完成账户授权；支持工具尚待验证，暂不能启用或用于对话。"
+      : needsConnectionCheck ? "已保留连接配置。重新检查通过后，可以在对话中选用。"
       : issue ? connectorErrorMessage(issue) : null;
     return {
       id: entry.serviceId, name: entry.displayName, description: entry.description || `连接${entry.displayName}，在对话中使用其服务能力。`,

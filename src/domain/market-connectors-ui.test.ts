@@ -40,6 +40,17 @@ describe("connector presentation projection", () => {
     data.catalog = [{ ...catalogEntry, availability: "blocked", blockerCodes: ["provider_onboarding_required"] }];
     expect(connectorViews(data)[0]).toMatchObject({ actions: ["uninstall"], selectable: false, explanation: "此服务的接入条件尚未完成，暂时不能连接。" });
   });
+  it("offers a fresh metadata check for a retained binding after the previous owner exited", () => {
+    const data = connectorSnapshot([{ ...installation, credentialRef: installation.installationId,
+      desiredEnabled: true, configurationStatus: "unknown", authorizationStatus: "unknown", errorCode: "execution_unavailable" }]);
+    data.catalog = [{ ...catalogEntry, authorizationAvailable: true }];
+    const view = connectorViews(data)[0]!;
+    expect(view).toMatchObject({ enabled: false, selectable: false, actions: ["uninstall", "disable", "enable"],
+      explanation: "已保留连接配置。重新检查通过后，可以在对话中选用。" });
+    expect(connectorPrimaryAction(view)).toEqual({ action: "enable", label: "重新检查连接" });
+    data.capabilities = ["connector.read", "connector.use"];
+    expect(connectorViews(data)[0]?.actions).toEqual([]);
+  });
   it("keeps deferred services visible without installation or stale selection", () => {
     const data = connectorSnapshot();
     data.catalog = [{ ...catalogEntry, availability: "blocked", authorizationAvailable: false, blockerCodes: ["provider_onboarding_required"] }];

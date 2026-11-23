@@ -17,7 +17,7 @@ const title = computed(() => {
   if (!entry) return "连接器详情";
   if (entry.busy) return `${entry.name} · ${entry.status.label}`;
   if (!entry.installed) return `安装 ${entry.name}`;
-  if (entry.id === "kimi-web" && !entry.enabled) return `${entry.name} · ${entry.status.label}`;
+  if (!entry.enabled && (entry.desiredEnabled || entry.id === "kimi-web")) return `${entry.name} · ${entry.status.label}`;
   return entry.enabled ? entry.name : `${entry.name} 已安装但未启用`;
 });
 </script>
