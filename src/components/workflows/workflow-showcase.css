@@ -38,15 +38,15 @@
 
 .workflow-page .workflow-showcase-control:active { background: var(--yj-color-control-pressed); }
 
-.workflow-page .workflow-showcase-control[aria-pressed="true"] {
-  border-color: var(--yj-color-on-brand);
+.workflow-page .workflow-showcase-control:is(.workflow-page__create-card, [aria-pressed="true"]) {
+  border-color: transparent;
   color: var(--yj-color-on-brand);
   background: var(--yj-color-brand-primary);
   font-weight: var(--yj-font-weight-semibold);
 }
 
-.workflow-page .workflow-showcase-control[aria-pressed="true"]:hover { background: var(--yj-color-brand-hover); }
-.workflow-page .workflow-showcase-control[aria-pressed="true"]:active { background: var(--yj-color-brand-active); }
+.workflow-page .workflow-showcase-control:is(.workflow-page__create-card, [aria-pressed="true"]):hover { background: var(--yj-color-brand-hover); }
+.workflow-page .workflow-showcase-control:is(.workflow-page__create-card, [aria-pressed="true"]):active { background: var(--yj-color-brand-active); }
 
 .workflow-showcase-control:focus-visible {
   outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);

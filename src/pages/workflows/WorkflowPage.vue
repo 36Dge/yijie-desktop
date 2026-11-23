@@ -203,9 +203,10 @@ const sortOptions = [
 }
 
 .workflow-page__sort {
+  --yj-color-focus-ring: var(--yj-color-border-control);
   appearance: none;
   padding-right: var(--yj-space-8);
-  border-color: var(--yj-color-border-control);
+  border-color: var(--yj-color-border-subtle);
 }
 
 .workflow-page__sort-wrapper > :deep(.yj-icon) {
@@ -217,6 +218,7 @@ const sortOptions = [
 }
 
 .workflow-page__toolbar {
+  --yj-color-border-control-hover: var(--yj-color-border-default);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -248,16 +250,6 @@ const sortOptions = [
 .workflow-page__recommended-grid > li > * {
   height: 100%;
 }
-
-.workflow-page .workflow-page__create-card {
-  text-decoration: none;
-  border-color: var(--yj-color-border-control);
-  background: var(--yj-color-brand-primary);
-  color: var(--yj-color-on-brand);
-  font-weight: var(--yj-font-weight-semibold);
-}
-.workflow-page .workflow-page__create-card:hover { background: var(--yj-color-brand-hover); }
-.workflow-page .workflow-page__create-card:active { background: var(--yj-color-brand-active); }
 
 .workflow-page__view-all {
   border-color: transparent;
