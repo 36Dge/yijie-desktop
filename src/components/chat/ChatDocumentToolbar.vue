@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { NTooltip } from "naive-ui";
 import { ref, useId } from "vue";
+import { useDocumentSaveAs, type DocumentSaveAction } from "../../composables/useDocumentSaveAs";
 import YjIcon from "../yijie/YjIcon.vue";
 import YjTooltip from "../yijie/YjTooltip.vue";
 import ChatShortScrollbar from "./ChatShortScrollbar.vue";
@@ -12,9 +13,11 @@ withDefaults(defineProps<{
   pathOpen: boolean;
   saving: boolean;
   canSave: boolean;
+  save: DocumentSaveAction;
   enabled?: boolean;
 }>(), { enabled: true });
-const emit = defineEmits<{ "update:pathOpen": [value: boolean]; save: [] }>();
+const emit = defineEmits<{ "update:pathOpen": [value: boolean] }>();
+const saveAs = useDocumentSaveAs();
 const pathTrigger = ref<HTMLButtonElement | null>(null);
 const pathViewport = ref<HTMLElement | null>(null);
 const pathContent = ref<HTMLElement | null>(null);
@@ -82,7 +85,7 @@ function dismissPath() {
       </NTooltip>
     </div>
     <YjTooltip text="另存为">
-      <button class="document-toolbar__button" type="button" aria-label="另存为" :disabled="!canSave" :aria-busy="saving" @click="$emit('save')">
+      <button class="document-toolbar__button" type="button" aria-label="另存为" :disabled="!canSave" :aria-busy="saving" @click="saveAs(save)">
         <YjIcon :name="saving ? 'pending' : 'download'" size="sm" :stroke-width="1.5" />
       </button>
     </YjTooltip>

@@ -54,7 +54,7 @@ defineExpose({ toggle, openFile, opened });
         </div>
       </div>
       <ChatDocumentToolbar v-if="!media && active?.file" v-model:path-open="pathOpen"
-        :name="active.file.name" :enabled="canLocate" :path="path" :path-state="pathState" :saving="saving" :can-save="canSave" @save="save" />
+        :name="active.file.name" :enabled="canLocate" :path="path" :path-state="pathState" :saving="saving" :can-save="canSave" :save="save" />
       <div v-if="!media && phase === 'ready' && metadata?.availableModes?.length"
         class="document-sidebar__reading" aria-label="阅读选项">
         <select v-if="metadata.availableModes?.length" :value="metadata.viewMode" aria-label="阅读方式" @change="selectViewMode(($event.target as HTMLSelectElement).value as 'layout' | 'content')"><option v-for="mode in metadata.availableModes" :key="mode" :value="mode">{{ mode === 'layout' ? '版式' : metadata.kind === 'xlsx' ? '表格' : '正文' }}</option></select>

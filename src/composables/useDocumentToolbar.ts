@@ -72,7 +72,7 @@ export function useDocumentToolbar(input: {
     }
   }
   watch(pathOpen, open => { if (open) void locate(); });
-  async function save() {
+  async function save(): Promise<"saved" | void> {
     const file = input.file();
     const context = input.context();
     if (!canSave.value || !file || !context) return;
@@ -81,14 +81,18 @@ export function useDocumentToolbar(input: {
     saving.value = true;
     try {
       const source = file.source;
+      let result;
       if (source.kind === "artifact") {
         const identity = { sessionId: source.sessionId, turnId: source.turnId, artifactId: source.artifactId };
-        if (file.artifact?.kind === "report" || file.mediaType === "application/vnd.yijie.report+json;version=1") await chatArtifactReportNativeClient.saveReport(context, identity);
-        else await chatArtifactFileNativeClient.saveFile(context, identity);
+        const isReport = file.artifact?.kind === "report" || file.mediaType === "application/vnd.yijie.report+json;version=1";
+        result = isReport
+          ? await chatArtifactReportNativeClient.saveReport(context, identity)
+          : await chatArtifactFileNativeClient.saveFile(context, identity);
       } else if (revision) {
-        await documentPreviewClient.run(context, { action: "save", viewId: crypto.randomUUID(), source, revision });
+        result = await documentPreviewClient.run(context, { action: "save", viewId: crypto.randomUUID(), source, revision });
       }
-    } catch { /* Saving has no status text in the document UI, per the user's preference. */ }
+      if (!disposed && generation === epoch && result?.status === "saved") return result.status;
+    } catch { /* A rejected save has no completion to announce. */ }
     finally { if (!disposed && generation === epoch) saving.value = false; }
   }
   onBeforeUnmount(() => { disposed = true; reset(); });

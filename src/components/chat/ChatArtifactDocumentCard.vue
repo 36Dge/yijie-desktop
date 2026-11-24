@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, useId } from "vue";
+import { useDocumentSaveAs, type DocumentSaveAction } from "../../composables/useDocumentSaveAs";
 import { chatDocumentIcon, fileNameParts } from "../../domain/chat-file-presentation";
 import YjIcon from "../yijie/YjIcon.vue";
 import YjTooltip from "../yijie/YjTooltip.vue";
@@ -10,8 +11,10 @@ const props = defineProps<{
   sizeBytes: number | null;
   canSave: boolean;
   saving: boolean;
+  save: DocumentSaveAction;
 }>();
-defineEmits<{ open: [event: MouseEvent]; save: [] }>();
+defineEmits<{ open: [event: MouseEvent] }>();
+const saveAs = useDocumentSaveAs();
 const icon = computed(() => chatDocumentIcon(props.mediaType ?? "", props.name));
 const nameParts = computed(() => fileNameParts(props.name));
 const sizeId = useId();
@@ -38,7 +41,7 @@ const sizeLabel = computed(() => {
       </span>
     </button>
     <YjTooltip text="另存为">
-      <button class="chat-artifact-document-card__save" type="button" aria-label="另存为" :disabled="!canSave || saving" @click.stop="$emit('save')">
+      <button class="chat-artifact-document-card__save" type="button" aria-label="另存为" :disabled="!canSave || saving" @click.stop="saveAs(save)">
         <YjIcon :name="saving ? 'pending' : 'download'" size="sm" :stroke-width="1.5" />
       </button>
     </YjTooltip>

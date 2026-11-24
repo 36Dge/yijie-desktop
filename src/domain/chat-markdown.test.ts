@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import fileExamples from "../../src-tauri/schemas/fixtures/chat-message-file-references.json";
 import { createChatMarkdownParser, type ChatContentNode } from "./chat-markdown";
+import type { MessageFileReference } from "./message-file-reference";
 const blocks = (text: string) => [{ identity: "body", blockIndex: 0, type: "text" as const, text }];
+function located(paths: readonly string[], root = "/work") {
+  const known = new Set(paths);
+  return ({path}: MessageFileReference) => known.has(path) ? (path.startsWith("/") ? path : root + "/" + path) : undefined;
+}
 describe("incremental safe Markdown", () => {
   it("matches a fresh parse for every prefix across headings, lists, quotes, tables and code", () => {
     const text = "前言 **重点**。\n\n## 标题\n\n- 第一项\n  - 子项\n- 第二项\n\n> 引用 **内容**\n\n| 一 | 二 |\n| --- | --- |\n| a | b |\n\n```js\nconst a = 1;\n```\n\n末尾 `code`。";
@@ -59,13 +64,14 @@ describe("incremental safe Markdown", () => {
 });
 
 it("streams file references without exposing a repeated local path or altering a fenced example", () => {
-  const parse = createChatMarkdownParser(true);
   const path = "/Users/example/Desktop/杭州旅游介绍.md";
+  const lookup = located([path, "/work/report.pdf"]);
+  const parse = createChatMarkdownParser(lookup);
   const answer = `**[指南](file://${path})**\n\n路径：\`${path}\``;
   for (let i = 1; i <= answer.length; i++) {
     const input = blocks(answer.slice(0, i));
     const frame = parse(input, "rich", true);
-    expect(frame).toEqual(createChatMarkdownParser(true)(input, "rich", true));
+    expect(frame).toEqual(createChatMarkdownParser(lookup)(input, "rich", true));
     expect(frame.text).not.toContain("/Users/");
   }
   expect(parse(blocks(answer), "rich", false).text).toBe("《杭州旅游介绍.md》");
@@ -73,8 +79,27 @@ it("streams file references without exposing a repeated local path or altering a
 });
 
 describe("shared conversation file reference examples", () => {
+  it("checks completed paths in live Markdown but waits for the end of an unfinished bare filename", () => {
+    const parse = createChatMarkdownParser(located([]));
+    const table = "| 资料 | 图像 |\n| --- | --- |\n| /work/guide.pdf | /web/chart.svg";
+    expect(parse(blocks(table), "rich", true).fileCandidates?.map(file => file.path)).toEqual(["/work/guide.pdf"]);
+    expect(parse(blocks(table + " |"), "rich", true).fileCandidates?.map(file => file.path)).toEqual(["/work/guide.pdf", "/web/chart.svg"]);
+  });
+  it("preserves normal paragraph flow and live path labels for unconfirmed references", () => {
+    const parse = createChatMarkdownParser(located([]));
+    const source = "接口说明\n`/api/export.json`\n以及网站图片 /assets/cover.png。";
+    const doc = parse(blocks(source), "rich", false);
+    expect(doc.nodes.map(node => node.kind)).toEqual(["paragraph"]);
+    expect(doc.text).toBe("接口说明 /api/export.json 以及网站图片 /assets/cover.png。");
+    expect(doc.fileCandidates?.map(file => file.path)).toEqual(["/api/export.json", "/assets/cover.png"]);
+    for (const text of ["路径：/api/export.j", "路径：`/api/export.json"]) {
+      expect(parse(blocks(text), "rich", true).text).toBe(text.replace("`", ""));
+    }
+    expect(parse(blocks(source), "plain", false)).toMatchObject({text: source, nodes: [{kind: "paragraph"}]});
+    expect(parse(blocks(source), "plain", false).fileCandidates).toBeUndefined();
+  });
   it.each(fileExamples)("$label", ({source, targets, visible}) => {
-    const doc = createChatMarkdownParser(true)(blocks(source), "rich", false);
+    const doc = createChatMarkdownParser(located(targets))(blocks(source), "rich", false);
     const found = new Set<string>();
     function visit(node: ChatContentNode) {
       if (node.kind === "paragraph" || node.kind === "heading") {
@@ -92,20 +117,22 @@ describe("shared conversation file reference examples", () => {
   it("folds an unlabelled, space-containing path in a bullet only after its workspace identity is known", () => {
     const root = "/Users/example/Library/Application Support/易界/workspace";
     const text = "《[报告](./outputs/验收%20报告.html)\n![封面](./outputs/封面.svg)\n[视频](./outputs/演示.mp4)\n\n- `" + root + "/outputs/验收 报告.html`";
-    const pending = createChatMarkdownParser(true)(blocks(text), "rich", false);
-    expect(pending.relativeHint?.path).toBe("outputs/验收 报告.html");
-    const rendered = createChatMarkdownParser(true, root)(blocks(text), "rich", false);
+    const paths = ["outputs/验收 报告.html", "outputs/封面.svg", "outputs/演示.mp4"];
+    const pending = createChatMarkdownParser(located([]))(blocks(text), "rich", false);
+    expect(pending.fileCandidates?.map(file => file.path)).toEqual(paths);
+    expect(pending.text).toContain(root + "/outputs/验收 报告.html");
+    const rendered = createChatMarkdownParser(located(paths, root))(blocks(text), "rich", false);
     expect(rendered.text).toBe("《验收 报告.html》 《封面.svg》 《演示.mp4》");
     expect(rendered.nodes.map(n => n.kind)).toEqual(["paragraph"]);
-    const other = createChatMarkdownParser(true, "/other")(blocks(text),"rich",false);
+    const other = createChatMarkdownParser(located(paths, "/other"))(blocks(text),"rich",false);
     expect(other.text).toContain(root + "/outputs/验收 报告.html");
   });
   it("uses the session workspace to distinguish mixed relative and absolute references", () => {
     const text = "[行程](./out/行程.md)\n\n> - 路径：/work/out/行程.md\n\n- 路径：/else/out/行程.md";
-    const unresolved = createChatMarkdownParser(true)(blocks(text),"rich",false);
-    expect(unresolved.relativeHint?.path).toBe("out/行程.md");
-    const resolved = createChatMarkdownParser(true, "/work")(blocks(text),"rich",false);
-    expect(resolved.text).toBe("《行程.md》《行程.md》");
+    const unresolved = createChatMarkdownParser(located([]))(blocks(text),"rich",false);
+    expect(unresolved.fileCandidates?.map(file => file.path)).toEqual(["out/行程.md", "/work/out/行程.md", "/else/out/行程.md"]);
+    const resolved = createChatMarkdownParser(located(["out/行程.md", "/work/out/行程.md"]))(blocks(text),"rich",false);
+    expect(resolved.text).toBe("《行程.md》路径：/else/out/行程.md");
     expect(resolved.nodes.map(node=>node.kind)).toEqual(["paragraph","list"]);
   });
 });

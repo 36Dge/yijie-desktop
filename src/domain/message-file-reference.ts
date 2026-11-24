@@ -18,6 +18,7 @@ export function messageFileReference(raw: string, markdown = false) {
   return { raw, path, name };
 }
 export type MessageFileReference = NonNullable<ReturnType<typeof messageFileReference>>;
+export type LocatedMessageFile = MessageFileReference & {location: string};
 
 const pathLabel = /^(?:(?:文件|保存|输出|完整)?路径|path)\s*[：:]\s*/iu;
 const extension = /\.[\p{L}\p{N}]{1,16}$/u;
@@ -42,9 +43,14 @@ export function possibleRepeatedPath(line: string) {
   return !raw.includes("`") && extension.test(raw) ? messageFileReference(raw) : null;
 }
 
-export function isPendingFileLine(line: string): boolean {
-  const value = line.trim().replace(pathLabel, "");
-  return /^`?(?:\/|file:)/iu.test(value) && !value.endsWith("`");
+export function pendingFilePath(line: string): string | undefined {
+  const text = line.trim();
+  const value = text.replace(pathLabel, "").replace(/^`/u, "");
+  if (value.endsWith("`")) return;
+  if (/^file:\/\/(?:localhost)?\//iu.test(value)) {
+    try { return decodeURI(value.replace(/^file:\/\/(?:localhost)?/iu, "")); } catch { return; }
+  }
+  return pathLabel.test(text) && value.startsWith("/") ? value : undefined;
 }
 
 const bareStart = /[\s（(【《“‘"'：，、|]/u;

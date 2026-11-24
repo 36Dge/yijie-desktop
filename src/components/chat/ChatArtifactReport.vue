@@ -235,7 +235,7 @@ async function closePreview(): Promise<void> {
   previewTrigger.value?.focus();
 }
 
-async function saveReport(): Promise<void> {
+async function saveReport(): Promise<"saved" | void> {
   const issuingClient = props.client;
   if (!available.value || !issuingClient || saving.value) return;
   const request = ++saveRequest;
@@ -251,6 +251,7 @@ async function saveReport(): Promise<void> {
     if (result.status === "saved") {
       saveFeedback.value = "报告 JSON 已保存。";
       saveTone.value = "success";
+      return result.status;
     } else if (result.status === "cancelled") {
       saveFeedback.value = "已取消保存。";
       saveTone.value = "muted";
@@ -308,7 +309,7 @@ onBeforeUnmount(() => {
       :can-save="available"
       :saving="saving"
       @open="openFile(artifact)"
-      @save="saveReport"
+      :save="saveReport"
     />
     <div v-else-if="available && !previewOnly" class="artifact-report__actions">
       <button class="yj-control"

@@ -1,12 +1,16 @@
 // @vitest-environment happy-dom
 
 import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
 import type { ChatArtifactReportNativeClient } from "../../api/chat-artifact-report-native-client";
 import type { ChatArtifact } from "../../domain/chat-ipc";
 import { createArtifactProjection } from "../../domain/chat-artifact";
 import ChatArtifactList from "./ChatArtifactList.vue";
+
+const toast = vi.hoisted(() => ({ success: vi.fn() }));
+vi.mock("naive-ui", async original => ({ ...await original<typeof import("naive-ui")>(), useMessage: () => toast }));
+beforeEach(() => { toast.success.mockClear(); });
 
 const SESSION_ID = "019c1a00-0000-7000-8000-000000000911";
 const TURN_ID = "019c1a00-0000-7000-8000-000000000912";
@@ -125,13 +129,17 @@ describe("ChatArtifactList document cards", () => {
     expect(fileNativeClient.saveFile).toHaveBeenCalledTimes(1);
     expect(save.attributes("disabled")).toBeDefined();
     expect(wrapper.find(".artifact-file__feedback").exists()).toBe(false);
+    expect(toast.success).not.toHaveBeenCalled();
     finish({ status: "cancelled", code: null }); await flushPromises();
     expect(wrapper.find(".artifact-file__feedback").exists()).toBe(false);
+    expect(toast.success).not.toHaveBeenCalled();
     await save.trigger("click"); await flushPromises();
     expect(wrapper.find(".artifact-file__feedback").exists()).toBe(false);
     expect(save.attributes("disabled")).toBeUndefined();
+    expect(toast.success).not.toHaveBeenCalled();
     await save.trigger("click"); await flushPromises();
     expect(wrapper.find(".artifact-file__feedback").exists()).toBe(false);
+    expect(toast.success).toHaveBeenCalledExactlyOnceWith("文件已保存");
     await wrapper.setProps({ artifacts: [{ ...file, status: "expired" }] });
     expect(wrapper.find(".chat-artifact-document-card").exists()).toBe(false);
     expect(wrapper.text()).toContain("已过期");
@@ -156,5 +164,9 @@ describe("ChatArtifactList document cards", () => {
     expect(reportNativeClient.readReportPreview).not.toHaveBeenCalled();
     expect(openFile).toHaveBeenCalledTimes(1);
     expect(wrapper.find(".artifact-report__save-feedback").exists()).toBe(false);
+    expect(toast.success).not.toHaveBeenCalled();
+    vi.mocked(reportNativeClient.saveReport).mockResolvedValueOnce({ status: "saved", code: null });
+    await wrapper.get('button[aria-label="另存为"]').trigger("click"); await flushPromises();
+    expect(toast.success).toHaveBeenCalledExactlyOnceWith("文件已保存");
   });
 });

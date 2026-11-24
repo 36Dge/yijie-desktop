@@ -440,7 +440,7 @@ describe("FEAT-126 ChatPage", () => {
     const native = vi.spyOn(documentPreviewClient, "run").mockImplementation(async (_context, action) => ({
       status: action.action === "locate" ? "located" : action.action === "open" ? "ready" : "closed",
       viewId: action.viewId, position: null,
-      ...(action.action === "locate" && {path: path.startsWith("/") ? path : "/work/" + path}),
+      ...(action.action === "locate" && {path: path.startsWith("/") ? path : "/work/" + path, fileInfo: {sizeBytes: 24, saveSupported: true}}),
       document: action.action === "open" ? {kind:"text", revision:"a".repeat(64), expiresAt:Math.floor(Date.now()/1000)+600,
         sections:[],section:0,offset:0,nextOffset:null,previousOffset:null,partial:false,notice:null} : null,
     }));
@@ -449,7 +449,7 @@ describe("FEAT-126 ChatPage", () => {
     const link = wrapper.get(".chat-file-link");
     expect(link.text()).toBe(`《${name}》`);
     const source = {kind:"messageFile", sessionId:SESSION_ID,turnId:TURN_ID,itemId:`${TURN_ID}:assistant:0`,reference:path};
-    expect(native).not.toHaveBeenCalled();
+    expect(native).toHaveBeenCalledExactlyOnceWith(store.context!.contextId, expect.objectContaining({action: "locate", source}));
     expect(wrapper.find('[role="tab"][aria-selected="true"]').exists()).toBe(false);
     await link.trigger("click"); await flushPromises();
     expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toBe(name);
@@ -460,7 +460,16 @@ describe("FEAT-126 ChatPage", () => {
 
   it.skipIf(!kimiK31Candidate)("shows one card per registered document ID alongside ordinary links, including cached history", async () => {
     const title = "苏州与杭州简单对比";
-    const answer = `已生成文档。\n\n[打开文档](</work/易界 temp/${title}.html>)\n\n参考 [城市资料](./资料.pdf)。`;
+    const missing = "/work/缺失.json";
+    const route = "/2/friendships/friends.json";
+    const answer = `已生成文档。\n\n[打开文档](</work/易界 temp/${title}.html>)\n\n参考 [城市资料](./资料.pdf)。\n\n上游 \`${route}\`，路径 \`${missing}\`。`;
+    vi.spyOn(documentPreviewClient, "run").mockImplementation(async (_context, action) => {
+      if (action.action !== "locate" || action.source.kind !== "messageFile") throw new Error("unexpected action");
+      const path = action.source.reference;
+      if (path === route) throw new Error("forbidden");
+      return {status: "located", viewId: action.viewId, position: null, document: null,
+        path: path.startsWith("/") ? path : "/work/" + path, ...(path !== missing && {fileInfo: {sizeBytes: 0, saveSupported: false}})};
+    });
     const turn = HISTORY_WITHOUT_REASONING.turns[0]!;
     const messages = turn.messages.map(message => message.role === "assistant" ? {...message, content: answer} : message);
     const history = {turns: [{...turn, messages}], nextCursor: null};
@@ -468,6 +477,7 @@ describe("FEAT-126 ChatPage", () => {
     const titles = () => wrapper.findAll(".chat-artifact-document-card__name").map(card => card.text());
     expect(titles()).toEqual([]);
     expect(wrapper.findAll(".chat-file-link").map(link => link.text())).toEqual([`《${title}.html》`, "《资料.pdf》"]);
+    expect(wrapper.findAll("code").map(code => code.text())).toEqual(expect.arrayContaining([route, missing]));
 
     const file: ChatArtifact = {artifactId: "019c1a00-0000-7000-8000-000000000021", kind: "file", provenance: "provider",
       status: "ready", ordinal: 0, displayName: title, mediaType: "text/html", sizeBytes: 6010,
@@ -503,7 +513,8 @@ describe("FEAT-126 ChatPage", () => {
       expect(titles()).toEqual([title, title]);
       expect(wrapper.findAllComponents(ChatArtifactList).flatMap(list => list.props("artifacts").map(record => record.artifactId)))
         .toEqual([file.artifactId, other.artifactId]);
-      expect(wrapper.findAll(".chat-file-link")).toHaveLength(2);
+      expect(wrapper.findAll(".chat-file-link").map(link => link.text())).toEqual([`《${title}.html》`, "《资料.pdf》"]);
+      expect(wrapper.findAll("code").map(code => code.text())).toEqual(expect.arrayContaining([route, missing]));
     } finally {
       await store.clearSelectedSession();
       resume();

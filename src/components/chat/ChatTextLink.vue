@@ -3,11 +3,11 @@ import { computed, inject, ref, useId, watch } from "vue";
 import { NTooltip } from "naive-ui";
 import { chatTextRevealKey } from "../../composables/useChatTextReveal";
 import ChatFileLink from "./ChatFileLink.vue";
-import type { MessageFileReference } from "../../domain/message-file-reference";
+import type { LocatedMessageFile } from "../../domain/message-file-reference";
 import { useChatMessageLink } from "../../composables/useChatMessageLink";
 import ChatStreamText from "./ChatStreamText.vue";
 
-const props = defineProps<{ text: string; file?: MessageFileReference; destination: string | null; offset: number; streaming: boolean; userUrl?: boolean }>();
+const props = defineProps<{ text: string; file?: LocatedMessageFile; destination: string | null; offset: number; streaming: boolean; userUrl?: boolean }>();
 const {href, pending, error, open} = useChatMessageLink(() => props.destination, () => !!props.userUrl);
 const reveal = inject(chatTextRevealKey, null);
 const shown = computed(() => !reveal || reveal.frame.value.cursor > props.offset);

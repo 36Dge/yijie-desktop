@@ -257,7 +257,7 @@ function updateSearch(event: Event): void {
   searchQuery.value = bounded;
 }
 
-async function saveFile(): Promise<void> {
+async function saveFile(): Promise<"saved" | void> {
   if (!canSave.value || saving.value) return;
   const request = ++saveRequest;
   const epoch = identityEpoch;
@@ -273,6 +273,7 @@ async function saveFile(): Promise<void> {
     if (result.status === "saved") {
       saveFeedback.value = "文件已保存。";
       saveTone.value = "success";
+      return result.status;
     } else if (result.status === "cancelled") {
       saveFeedback.value = "已取消保存。";
       saveTone.value = "muted";
@@ -331,7 +332,7 @@ onBeforeUnmount(() => {
       :can-save="canSave"
       :saving="saving"
       @open="openFile(artifact)"
-      @save="saveFile"
+      :save="saveFile"
     />
     <div v-else class="artifact-file__actions">
       <button v-if="openFile" class="yj-control" type="button" @click="openFile(artifact)"><YjIcon name="file" size="sm" />预览文件</button>

@@ -9,7 +9,7 @@ import ChatStreamText from "./ChatStreamText.vue";
 import ChatTextLink from "./ChatTextLink.vue";
 import ChatUserText from "./ChatUserText.vue";
 import type { PositionedChatSkill } from "../../domain/chat-skills";
-import { messageFileWorkspaceKey, messageFileLocationKey, messageLinkTargetKey, type MessageLinkTarget } from "../../composables/useChatMessageLink";
+import { useMessageFileLocations, messageLinkTargetKey, type MessageLinkTarget } from "../../composables/useChatMessageLink";
 
 const props = withDefaults(defineProps<{
   blocks?: readonly ConversationTimelineContentBlock[];
@@ -31,17 +31,13 @@ defineSlots<{
   "code-actions"(props: { codeIdentity: string; text: string; language: string | null }): unknown;
 }>();
 const root = ref<HTMLElement | null>(null);
-const workspace = inject(messageFileWorkspaceKey, null);
-const locateFile = inject(messageFileLocationKey, null);
-const parse = computed(() => createChatMarkdownParser(Boolean(props.fileLinks && props.linkTarget), workspace?.value));
+const files = props.parsedNodes ? null : useMessageFileLocations(() => props.fileLinks ? props.linkTarget : undefined);
+const parse = computed(() => createChatMarkdownParser(files?.lookup.value));
 const documentView = computed<ChatMarkdownDocument>(() => props.parsedNodes ? { nodes: props.parsedNodes, text: "" }
   : measureChatRender("markdown", () => parse.value(props.blocks, props.mode, props.streaming)));
-// A relative link and an absolute path line may denote different files. Fold
-// them only after Native supplies this session's authoritative workspace.
-watch([() => documentView.value.relativeHint?.path, () => props.linkTarget?.itemId, () => locateFile?.value], () => {
-  const file = documentView.value.relativeHint;
-  if (file && props.linkTarget) void locateFile?.value?.(props.linkTarget, file).catch(() => {});
-}, { immediate: true });
+if (files) watch([() => documentView.value.fileCandidates, () => props.streaming], ([candidates, streaming]) => {
+  files.verify(candidates, !streaming);
+}, {immediate: true});
 const inherited = inject(chatTextRevealKey, null);
 const takeArrival = inject(liveAnswerArrivalKey, null);
 const reveal = props.parsedNodes && inherited ? inherited

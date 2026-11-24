@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { h, nextTick } from "vue";
+import { computed, h, nextTick } from "vue";
+import { messageFileLocationKey, type LocateMessageFile } from "../../composables/useChatMessageLink";
 import type { NativeConversationView } from "../../api/generated/native-conversation-private.gen";
 import { composeConversationView, type ConversationItemSnapshot } from "../../domain/conversation-view";
 import { selectConversationTimeline, type ConversationTimelineItemViewModel, type ConversationTimelineArtifactReferenceContentBlock } from "../../domain/conversation-timeline";
@@ -14,6 +15,7 @@ import ChatTurnGroup from "./ChatTurnGroup.vue";
 import ChatTimeline from "./ChatTimeline.vue";
 
 enableAutoUnmount(afterEach);
+vi.mock("naive-ui", async original => ({ ...await original<typeof import("naive-ui")>(), useMessage: () => ({ success: vi.fn() }) }));
 const SESSION = "019c1a00-0000-7000-8000-000000000901";
 const TURN = "019c1a00-0000-7000-8000-000000000902";
 const CONTEXT = "019c1a00-0000-7000-8000-000000000903";
@@ -102,7 +104,9 @@ describe("turn output stays inside the response", () => {
     const before = timeline({count: 1, text: "", live: true, artifactStatus: "announced"});
     let artifacts = before.artifacts;
     const callbacks = slotsFor(() => artifacts);
-    const wrapper = mount(ChatTurnGroup, {props: {turn: before.timeline.turns[0]!, position: 1}, slots: callbacks.slots});
+    const locate = vi.fn<LocateMessageFile>(async (_scope, file) => file.path === "杭州样本.pdf" ? "/work/杭州样本.pdf" : null);
+    const wrapper = mount(ChatTurnGroup, {props: {turn: before.timeline.turns[0]!, position: 1}, slots: callbacks.slots,
+      global: {provide: {[messageFileLocationKey as symbol]: computed(() => locate)}}});
     const instance = wrapper.getComponent(ChatArtifactList).vm.$;
     const container = wrapper.get(".chat-turn-output__artifacts").element;
     expect(wrapper.find(".answer-action").exists()).toBe(false);
@@ -119,6 +123,7 @@ describe("turn output stays inside the response", () => {
     await vi.waitFor(() => expect(wrapper.find(".chat-turn-output__actions").exists()).toBe(true), {timeout: 3_000});
     expect(wrapper.get(".chat-turn-output__actions").text()).toBe("复制回答");
     expect(wrapper.get(".chat-file-link").text()).toBe("《杭州样本.pdf》");
+    expect(locate).toHaveBeenCalledWith({sessionId: SESSION, turnId: TURN, itemId: "answer"}, expect.objectContaining({path: "杭州样本.pdf"}));
     expect(wrapper.findAll(".chat-artifact-document-card")).toHaveLength(1);
   });
 

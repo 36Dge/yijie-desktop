@@ -7,6 +7,8 @@ import { createMemoryHistory, createRouter } from "vue-router";
 import YjAppShell from "../yijie/YjAppShell.vue";
 import ChatDocumentWorkspace from "./ChatDocumentWorkspace.vue";
 import { MIN_PREVIEW_WIDTH, MIN_PREVIEW_WORKSPACE, type PreviewFile } from "../../domain/conversation-file-preview";
+const toast = vi.hoisted(() => ({ success: vi.fn() }));
+vi.mock("naive-ui", async original => ({ ...await original<typeof import("naive-ui")>(), useMessage: () => toast }));
 const native = vi.hoisted(() => ({ run: vi.fn(), saveFile: vi.fn(), saveReport: vi.fn(), events: new Map<string, (event: { payload: unknown }) => void>() }));
 vi.mock("../../api/chat-document-preview-client", async original => ({ ...await original<object>(), documentPreviewClient: { run: native.run } }));
 vi.mock("../../api/chat-artifact-file-native-client", async original => ({ ...await original<object>(), chatArtifactFileNativeClient: { saveFile: native.saveFile } }));
@@ -15,6 +17,7 @@ vi.mock("@tauri-apps/api/event", () => ({ TauriEvent:{WINDOW_FOCUS:"tauri://focu
 const file = (id: string): PreviewFile => ({ source: { kind: "artifact", sessionId: "s", turnId: "t", artifactId: id }, name: `${id}.txt`, mediaType: "text/plain", status: "ready", expiresAt: null });
 const document = { kind: "text", revision: "a".repeat(64), expiresAt: Math.floor(Date.now()/1000)+600, sections: [], section: 0, offset: 0, nextOffset: null, previousOffset: null, partial: false, notice: null, locationSupported: true };
 beforeEach(() => {
+  toast.success.mockClear();
   native.events.clear(); native.run.mockReset();
   native.saveFile.mockReset().mockResolvedValue({status:"cancelled",code:null});
   native.saveReport.mockReset().mockResolvedValue({status:"cancelled",code:null});
@@ -414,6 +417,7 @@ it("opens a message file with its exact scoped reference and reuses its tab for 
 });
 
 it("opens a published report using its specialized reader in the active tab", async () => {
+  native.saveReport.mockResolvedValueOnce({ status: "saved", code: null });
   const kind = "report" as const;
   const w = mount(ChatDocumentWorkspace, {
     props: {contextId: "scope", scopeKey: "session", enabled: true},
@@ -429,6 +433,7 @@ it("opens a published report using its specialized reader in the active tab", as
     expect(w.findAll('[role="tab"]')).toHaveLength(1);
     await w.get('[aria-label="另存为"]').trigger('click'); await flushPromises();
     expect(native.saveReport).toHaveBeenCalledExactlyOnceWith('scope',{sessionId:'s',turnId:'t',artifactId:'report'});
+    expect(toast.success).toHaveBeenCalledExactlyOnceWith("文件已保存");
     expect(native.run).not.toHaveBeenCalled();
     await w.get('[aria-label="收起右侧面板"]').trigger("click"); await flushPromises();
     expect(w.find(".document-sidebar__artifact").exists()).toBe(false);
@@ -475,6 +480,8 @@ it("returns to the selected document and reading position when a media dialog cl
 });
 
 it("shows the active document toolbar and routes artifact Save As through the existing client", async () => {
+  let finish!: (value: unknown) => void;
+  native.saveFile.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
   native.run.mockImplementation(async (_context, action) => ({ status: action.action === 'open' ? 'ready' : action.action === 'locate' ? 'located' : 'closed', viewId: action.viewId, document: action.action === 'open' ? document : null, position: null, ...(action.action === 'locate' ? {path:'/ordinary/workspace/report.pdf'} : {}) }));
   const w=create();
   try {
@@ -490,6 +497,9 @@ it("shows the active document toolbar and routes artifact Save As through the ex
     expect(save.attributes('data-yj-tooltip')).toBe('另存为');
     await save.trigger('click'); await flushPromises();
     expect(native.saveFile).toHaveBeenCalledExactlyOnceWith('scope',{sessionId:'s',turnId:'t',artifactId:'report'});
+    expect(toast.success).not.toHaveBeenCalled();
+    finish({ status: "saved", code: null }); await flushPromises();
+    expect(toast.success).toHaveBeenCalledExactlyOnceWith("文件已保存");
     expect(w.find('.artifact-file__feedback').exists()).toBe(false);
   } finally {w.unmount();}
 });
@@ -534,6 +544,10 @@ it.each(['messageFile','attachment'] as const)("saves %s only with Native capabi
     expect(save.attributes('disabled')).toBeUndefined();
     expect(native.saveFile).not.toHaveBeenCalled();
     expect(w.text()).not.toContain('已取消保存');
+    expect(toast.success).not.toHaveBeenCalled();
+    await save.trigger('click');
+    finish({status:'saved',document:null,position:null}); await flushPromises();
+    expect(toast.success).toHaveBeenCalledExactlyOnceWith("文件已保存");
   } finally {w.unmount();}
 });
 

@@ -1,4 +1,4 @@
-import { bareFileAt, markdownFileDestination, standaloneFileLine, possibleRepeatedPath, isPendingFileLine, type MessageFileReference } from "./message-file-reference";
+import { bareFileAt, markdownFileDestination, standaloneFileLine, possibleRepeatedPath, pendingFilePath, type LocatedMessageFile, type MessageFileReference } from "./message-file-reference";
 import type { ConversationTimelineArtifactReferenceContentBlock, ConversationTimelineAttachmentReferenceContentBlock, ConversationTimelineContentBlock } from "./conversation-timeline";
 
 type SafeInlineNode = Readonly<{
@@ -6,7 +6,7 @@ type SafeInlineNode = Readonly<{
   kind: "text" | "strong" | "emphasis" | "strikethrough" | "inline_code" | "inert_link" | "file_link";
   text: string;
   destination: string | null;
-  file?: MessageFileReference;
+  file?: LocatedMessageFile;
 }>;
 
 type SafeInlineGroup = Readonly<{
@@ -20,6 +20,7 @@ type SafeContentNode =
       kind: "paragraph";
       pathLine?: string;
       possibleRepeat?: MessageFileReference;
+      pendingPath?: string;
       inlines: readonly SafeInlineNode[];
     }>
   | Readonly<{
@@ -69,7 +70,10 @@ function stableKey(...parts: readonly string[]): string {
   return parts.map((part) => `${part.length}:${part}`).join("|");
 }
 
-function inlineNodes(source: string, keyBase: string, plain: boolean, streaming: boolean, fileLinks: boolean): readonly SafeInlineNode[] {
+type FileLocation = (file: MessageFileReference) => string | undefined;
+type FindFile = ((candidate: MessageFileReference | null) => LocatedMessageFile | undefined) | undefined;
+
+function inlineNodes(source: string, keyBase: string, plain: boolean, streaming: boolean, fileLinks: FindFile, openFileTail = streaming): readonly SafeInlineNode[] {
   if (source.length === 0) return Object.freeze([]);
   if (plain) {
     return Object.freeze([Object.freeze({
@@ -88,7 +92,7 @@ function inlineNodes(source: string, keyBase: string, plain: boolean, streaming:
     kind: SafeInlineNode["kind"],
     text: string,
     destination: string | null = null,
-    file?: MessageFileReference,
+    file?: LocatedMessageFile,
   ): void {
     if (text.length === 0) return;
     nodes.push(Object.freeze({
@@ -100,19 +104,17 @@ function inlineNodes(source: string, keyBase: string, plain: boolean, streaming:
     }));
   }
 
-  function appendFile(file: MessageFileReference): void {
+  function appendFile(file: LocatedMessageFile): void {
     append("file_link", `《${file.name}》`, file.raw, file);
   }
 
-  function appendFormatted(kind: "strong" | "emphasis" | "strikethrough", value: string): void {
+  function appendFormatted(kind: "strong" | "emphasis" | "strikethrough", value: string, openTail = false): void {
     // A styled run can contain a file link. Keep the surrounding emphasis
     // while giving the link its own interactive node and reveal offsets.
     if (fileLinks && (value.includes("[") || value.includes("/") || value.includes("`"))) {
-      const parts = inlineNodes(value, keyBase, false, streaming, fileLinks);
-      if (parts.some(part => part.file || part.kind === "inert_link")) {
-        for (const part of parts) append(part.kind === "text" ? kind : part.kind, part.text, part.destination, part.file);
-        return;
-      }
+      const parts = inlineNodes(value, keyBase, false, streaming, fileLinks, openTail);
+      for (const part of parts) append(part.kind === "text" ? kind : part.kind, part.text, part.destination, part.file);
+      return;
     }
     append(kind, value);
   }
@@ -142,7 +144,7 @@ function inlineNodes(source: string, keyBase: string, plain: boolean, streaming:
       if (closing >= cursor + count) {
         flushPlain(cursor);
         const value = source.slice(cursor + count, closing);
-        const file = fileLinks && count === 1 && standaloneFileLine(value);
+        const file = count === 1 && fileLinks?.(standaloneFileLine(value));
         if (file && file.raw === value) appendFile(file);
         else append("inline_code", value);
         plainStart = cursor = closing + count;
@@ -151,7 +153,7 @@ function inlineNodes(source: string, keyBase: string, plain: boolean, streaming:
       if (streaming) {
         flushPlain(cursor);
         const suffix = source.slice(cursor + count);
-        if (!fileLinks || count !== 1 || !/^(?:\/|file:)/iu.test(suffix)) append("inline_code", suffix);
+        append("inline_code", suffix);
         plainStart = cursor = source.length;
         continue;
       }
@@ -177,7 +179,7 @@ function inlineNodes(source: string, keyBase: string, plain: boolean, streaming:
         flushPlain(cursor);
         const suffix = source.slice(cursor + 2);
         appendFormatted(delimiter === "~~" ? "strikethrough" : "strong",
-          suffix.endsWith(delimiter[0]!) ? suffix.slice(0, -1) : suffix);
+          suffix.endsWith(delimiter[0]!) ? suffix.slice(0, -1) : suffix, openFileTail);
         plainStart = cursor = source.length;
         continue;
       }
@@ -229,10 +231,12 @@ function inlineNodes(source: string, keyBase: string, plain: boolean, streaming:
           break;
         }
         const destination = source.slice(start, closing);
-        const file = fileLinks && markdownFileDestination(destination);
+        const candidate = fileLinks && markdownFileDestination(destination);
+        const file = candidate && fileLinks?.(candidate);
         flushPlain(cursor);
         if (file) appendFile(file);
         else if (imageLink || !label || !destination) append("text", source.slice(cursor, closing + 1));
+        else if (candidate) append("text", label);
         else append("inert_link", label, destination);
         plainStart = cursor = closing + 1;
         continue;
@@ -240,11 +244,13 @@ function inlineNodes(source: string, keyBase: string, plain: boolean, streaming:
     }
 
     if (fileLinks && (source[cursor] === "/" || (source[cursor] === "f" || source[cursor] === "F") && source.slice(cursor, cursor + 5).toLowerCase() === "file:")) {
-      const file = bareFileAt(source, cursor);
-      if (file) {
+      const candidate = bareFileAt(source, cursor);
+      const file = candidate && (!openFileTail || cursor + candidate.raw.length < source.length) && fileLinks(candidate);
+      if (candidate) {
         flushPlain(cursor);
-        appendFile(file);
-        cursor += file.raw.length;
+        if (file) appendFile(file);
+        else append("text", candidate.raw);
+        cursor += candidate.raw.length;
         plainStart = cursor;
         continue;
       }
@@ -349,19 +355,24 @@ function startsBlock(
   closingFenceIndexes: readonly number[],
   index: number,
   streaming: boolean,
-  fileLinks: boolean,
+  fileLinks: FindFile,
 ): boolean {
   const line = lines[index] ?? "";
-  if (line.trim().length === 0 || (fileLinks && (standaloneFileLine(line) || possibleRepeatedPath(line) ||
-      streaming && index === lines.length - 1 && isPendingFileLine(line)))) return true;
+  if (line.trim().length === 0) return true;
+  if (fileLinks) {
+    const lastLiveLine = streaming && index === lines.length - 1;
+    const candidate = (!lastLiveLine || line.trimEnd().endsWith("`")) && standaloneFileLine(line);
+    if ((candidate && (/\s/u.test(candidate.raw) || fileLinks(candidate))) || possibleRepeatedPath(line) ||
+        (lastLiveLine && pendingFilePath(line))) return true;
+  }
   if (fence(line) !== null && (closingFenceIndexes[index] !== -1 || streaming)) return true;
   if (heading(line) || isRule(line) || /^ {0,3}>/.test(line) || listMarker(line)) return true;
   const header = tableCells(line);
   return header !== null && isTableDelimiter(tableCells(lines[index + 1] ?? ""));
 }
 
-function inlineGroup(text: string, key: string, plain: boolean, streaming: boolean, fileLinks: boolean): SafeInlineGroup {
-  return Object.freeze({ key, inlines: inlineNodes(text, key, plain, streaming, fileLinks) });
+function inlineGroup(text: string, key: string, streaming: boolean, fileLinks: FindFile, openFileTail = false): SafeInlineGroup {
+  return Object.freeze({ key, inlines: inlineNodes(text, key, false, streaming, fileLinks, openFileTail) });
 }
 
 function markdownNodes(
@@ -369,7 +380,8 @@ function markdownNodes(
   keyBase: string,
   plain: boolean,
   streaming: boolean,
-  fileLinks: boolean,
+  location: FileLocation | undefined,
+  unresolved: WeakMap<SafeContentNode, readonly MessageFileReference[]>,
   baseIndex = 0,
   starts: number[] = [],
 ): readonly SafeContentNode[] {
@@ -379,13 +391,20 @@ function markdownNodes(
       : Object.freeze([Object.freeze({
           key: stableKey(keyBase, "paragraph", "0"),
           kind: "paragraph" as const,
-          inlines: inlineNodes(text, stableKey(keyBase, "paragraph", "0"), true, streaming, false),
+          inlines: inlineNodes(text, stableKey(keyBase, "paragraph", "0"), true, streaming, undefined),
         })]);
   }
 
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
   const closingFenceIndexes = nextClosingFenceIndexes(lines);
   const nodes: SafeContentNode[] = [];
+  const candidates: MessageFileReference[][] = [];
+  const fileLinks: FindFile = location && (candidate => {
+    if (!candidate) return;
+    const path = location(candidate);
+    if (path) return {...candidate, location: path};
+    (candidates[nodes.length] ??= []).push(candidate);
+  });
   let index = 0;
   const offsets: number[] = [];
   let offset = 0;
@@ -422,7 +441,7 @@ function markdownNodes(
         key,
         kind: "heading" as const,
         level: title?.level ?? (underline![1]![0] === "=" ? 1 : 2),
-        inlines: inlineNodes(title?.text ?? line.trim(), key, false, streaming, fileLinks),
+        inlines: inlineNodes(title?.text ?? line.trim(), key, false, streaming, fileLinks, streaming && index === lines.length - 1),
       }));
       index += title ? 1 : 2;
       continue;
@@ -457,17 +476,18 @@ function markdownNodes(
     ) {
       const key = stableKey(keyBase, "table", String(baseIndex + nodes.length));
       const headers = Object.freeze(headerCells.map((cell, cellIndex) =>
-        inlineGroup(cell, stableKey(key, "header", String(cellIndex)), false, streaming, fileLinks)));
+        inlineGroup(cell, stableKey(key, "header", String(cellIndex)), streaming, fileLinks)));
       const rows: (readonly SafeInlineGroup[])[] = [];
       let rowIndex = index + 2;
       while (rowIndex < lines.length) {
         const cells = tableCells(lines[rowIndex] ?? "");
         if (cells === null || cells.length !== headers.length) break;
+        const openRow = streaming && rowIndex === lines.length - 1 && !lines[rowIndex]!.trimEnd().endsWith("|");
         rows.push(Object.freeze(cells.map((cell, cellIndex) =>
           inlineGroup(
             cell,
             stableKey(key, "row", String(rows.length), String(cellIndex)),
-            false, streaming, fileLinks,
+            streaming, fileLinks, openRow && cellIndex === cells.length - 1,
           ))));
         rowIndex += 1;
       }
@@ -524,17 +544,23 @@ function markdownNodes(
       continue;
     }
 
-    if (fileLinks && streaming && index === lines.length - 1 && isPendingFileLine(line)) {
-      starts.pop();
-      break;
-    }
-    const pathLine = fileLinks && standaloneFileLine(line);
+    const candidate = fileLinks && standaloneFileLine(line);
+    const lastLiveLine = streaming && index === lines.length - 1;
+    const pendingPath = fileLinks && lastLiveLine ? pendingFilePath(line) : undefined;
+    const pathLine = candidate && (!lastLiveLine || line.trimEnd().endsWith("`")) && fileLinks(candidate);
     if (pathLine) {
       const key = stableKey(keyBase, "paragraph", String(baseIndex + nodes.length));
       nodes.push({ key, kind: "paragraph", pathLine: pathLine.path, inlines: [{
         key: stableKey(key, "file_link", "0"), kind: "file_link", text: `《${pathLine.name}》`,
         destination: pathLine.raw, file: pathLine,
       }] });
+      index++;
+      continue;
+    }
+    // A labelled path with spaces is one spelling. Never promote a shorter token inside it.
+    if ((candidate && /\s/u.test(candidate.raw)) || pendingPath) {
+      const key = stableKey(keyBase, "paragraph", String(baseIndex + nodes.length));
+      nodes.push({key, kind: "paragraph", pendingPath, inlines: inlineNodes(line.trim(), key, !line.includes("`"), streaming, undefined)});
       index++;
       continue;
     }
@@ -563,10 +589,11 @@ function markdownNodes(
     nodes.push(Object.freeze({
       key,
       kind: "paragraph" as const,
-      inlines: inlineNodes(paragraphText, key, literalFallback, streaming, fileLinks),
+      inlines: inlineNodes(paragraphText, key, literalFallback, streaming, fileLinks, streaming && index === lines.length),
     }));
   }
 
+  candidates.forEach((files, index) => { if (nodes[index]) unresolved.set(nodes[index]!, files); });
   return Object.freeze(nodes);
 }
 
@@ -584,13 +611,14 @@ export type ChatContentNode = ContentRange & (
 );
 interface ParsedMarkdown { text: string; plain: boolean; streaming: boolean; nodes: readonly SafeContentNode[]; starts: number[] }
 interface IndexedMarkdown { startOffset: number; streaming: boolean; node: ChatContentNode; text: string }
-export interface ChatMarkdownDocument { readonly nodes: readonly ChatContentNode[]; readonly text: string; readonly relativeHint?: MessageFileReference }
+export interface ChatMarkdownDocument { readonly nodes: readonly ChatContentNode[]; readonly text: string; readonly fileCandidates?: readonly MessageFileReference[] }
 
 /** Component-local cache: completed blocks retain identity; only the last open
  * block is reparsed on append. Replacements and mode changes use the full parser. */
-export function createChatMarkdownParser(fileLinks = false, workspace: string | null = null) {
+export function createChatMarkdownParser(fileLocation?: FileLocation) {
   let cache = new Map<string, ParsedMarkdown>();
   const indexed = new WeakMap<SafeContentNode, IndexedMarkdown>();
+  const unresolved = new WeakMap<SafeContentNode, readonly MessageFileReference[]>();
   return (blocks: readonly ConversationTimelineContentBlock[], mode: "rich" | "plain", streaming: boolean): ChatMarkdownDocument => {
     const nextCache = new Map<string, ParsedMarkdown>();
     function parse(text: string, key: string, plain: boolean): readonly SafeContentNode[] {
@@ -607,7 +635,7 @@ export function createChatMarkdownParser(fileLinks = false, workspace: string | 
       const kept = append ? Math.max(0, prior.nodes.length - rewind) : 0;
       const startOffset = kept ? prior!.starts[kept]! : 0;
       const starts: number[] = [];
-      const nodes = [...(kept ? prior!.nodes.slice(0, kept) : []), ...markdownNodes(text.slice(startOffset), key, plain, streaming, fileLinks, kept, starts)];
+      const nodes = [...(kept ? prior!.nodes.slice(0, kept) : []), ...markdownNodes(text.slice(startOffset), key, plain, streaming, fileLocation, unresolved, kept, starts)];
       nextCache.set(key, { text, plain, streaming, nodes, starts: [...(kept ? prior!.starts.slice(0, kept) : []), ...starts.map(offset => offset + startOffset)] });
       return nodes;
     }
@@ -679,26 +707,23 @@ export function createChatMarkdownParser(fileLinks = false, workspace: string | 
     // Resolve duplicates across all blocks and nested containers in this one
     // answer before assigning reveal offsets. Keep named links in real prose.
     const hiddenPaths = new Set<string>();
-    let relativeHint: MessageFileReference | undefined;
-    if (fileLinks && mode === "rich") {
+    const candidates = new Map<string, MessageFileReference>();
+    if (fileLocation && mode === "rich") {
       const contextual = new Set<string>();
       const standalone: { key: string; path: string; pathLine: boolean }[] = [];
       const possibleRepeats: {key: string; path: string}[] = [];
-      let relative: MessageFileReference | undefined;
-      let hasAbsolute = false;
-      function identity(file: MessageFileReference) {
-        if (file.path.startsWith("/")) hasAbsolute = true;
-        else relative ??= file;
-        return !workspace || file.path.startsWith("/") ? file.path : workspace + "/" + file.path;
-      }
+      const pendingPaths: {key: string; prefix: string}[] = [];
       function remember(inlines: readonly SafeInlineNode[]) {
-        for (const link of inlines) if (link.file) contextual.add(identity(link.file));
+        for (const link of inlines) if (link.file) contextual.add(link.file.location);
       }
       function visit(node: SafeContentNode) {
-        if (node.kind === "paragraph" && node.possibleRepeat) {
-          possibleRepeats.push({ key: node.key, path: identity(node.possibleRepeat) });
+        for (const file of unresolved.get(node) ?? []) candidates.set(file.path, file);
+        if (node.kind === "paragraph" && node.pendingPath) {
+          pendingPaths.push({key: node.key, prefix: node.pendingPath});
+        } else if (node.kind === "paragraph" && node.possibleRepeat) {
+          possibleRepeats.push({ key: node.key, path: node.possibleRepeat.path });
         } else if (node.kind === "paragraph" && node.inlines.length === 1 && node.inlines[0]!.file) {
-          standalone.push({key: node.key, path: identity(node.inlines[0]!.file), pathLine: Boolean(node.pathLine)});
+          standalone.push({key: node.key, path: node.inlines[0]!.file.location, pathLine: Boolean(node.pathLine)});
         } else if (node.kind === "paragraph" || node.kind === "heading") remember(node.inlines);
         else if (node.kind === "table") for (const cell of [...node.headers, ...node.rows.flat()]) remember(cell.inlines);
         else if (node.kind === "list") for (const item of node.items) parse(item.text, item.key, false).forEach(visit);
@@ -711,10 +736,12 @@ export function createChatMarkdownParser(fileLinks = false, workspace: string | 
         else contextual.add(item.path);
       }
       for (const item of possibleRepeats) if (contextual.has(item.path)) hiddenPaths.add(item.key);
-      if (!workspace && hasAbsolute && (standalone.length || possibleRepeats.length)) relativeHint = relative;
+      for (const item of pendingPaths) {
+        if ([...contextual].some(path => path.startsWith(item.prefix))) hiddenPaths.add(item.key);
+      }
     }
     const result = indexNodes(nodes, 0);
     cache = nextCache;
-    return relativeHint ? { ...result, relativeHint } : result;
+    return candidates.size ? {...result, fileCandidates: [...candidates.values()]} : result;
   };
 }

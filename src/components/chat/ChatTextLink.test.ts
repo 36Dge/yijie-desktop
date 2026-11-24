@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
-import { computed } from "vue";
+import { computed, shallowRef } from "vue";
 import { messageFileActionKey, messageFileLocationKey, type LocateMessageFile } from "../../composables/useChatMessageLink";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ChatSafeContent from "./ChatSafeContent.vue";
@@ -150,16 +150,18 @@ describe("conversation output file links", () => {
   const path = "/Users/example/Desktop/杭州旅游介绍 (初稿).md";
   const uri = "file://" + encodeURI(path);
   const source = `已生成并保存到你的电脑桌面：\n\n**[杭州旅游介绍.md](${uri})**\n\n路径：\`${path}\``;
-  function renderFile(text: string, streaming = false, typography: "compact" | "answer" = "compact", locate?: LocateMessageFile) {
+  const locateFixture: LocateMessageFile = async (_target, file) => file.path.startsWith("/") ? file.path : "/work/" + file.path;
+  async function renderFile(text: string, streaming = false, typography: "compact" | "answer" = "compact", locate: LocateMessageFile = locateFixture) {
     const open = vi.fn();
     const wrapper = mount(ChatSafeContent, { attachTo: document.body,
       props: {blocks: blocks(text), linkTarget: target, fileLinks: true, streaming, animate: false, typography},
       global: {provide: {[messageFileActionKey as symbol]: computed(() => open), [messageFileLocationKey as symbol]: computed(() => locate)}},
     });
+    await flushPromises();
     return { wrapper, open };
   }
   it("folds the duplicate path, shows the decoded location on hover/focus and opens only on activation", async () => {
-    const { wrapper, open } = renderFile(source);
+    const { wrapper, open } = await renderFile(source);
     const links = wrapper.findAll('[role="link"]');
     expect(links).toHaveLength(1);
     const link = links[0]!;
@@ -175,26 +177,25 @@ describe("conversation output file links", () => {
     expect(link.attributes("aria-describedby")).toBeUndefined();
     expect(open).not.toHaveBeenCalled();
     await link.trigger("click");
-    expect(open).toHaveBeenCalledExactlyOnceWith(target, { raw: uri, path, name: "杭州旅游介绍 (初稿).md" });
+    expect(open).toHaveBeenCalledExactlyOnceWith(target, expect.objectContaining({raw: uri, path, name: "杭州旅游介绍 (初稿).md"}));
     expect(wrapper.props("blocks")).toEqual(blocks(source));
   });
-  it("recognizes different formats, preserves same-name files in other directories and skips fenced examples", () => {
+  it("recognizes different formats, preserves same-name files in other directories and skips fenced examples", async () => {
     const text = "- **[预览](/work/a/报告.pdf)**\n\n路径：/work/b/报告.pdf\n\n> [表格](</work/计划 (1).xlsx>)\n\n| 海报 | 视频 |\n| --- | --- |\n| `/work/封面.png` | [观看](/work/演示.mp4) |\n\n```txt\n/work/例子.html\n```";
-    const { wrapper } = renderFile(text);
+    const { wrapper } = await renderFile(text);
     expect(wrapper.findAll('[role="link"]').map(link => link.attributes("data-yj-tooltip"))).toEqual([
       "/work/a/报告.pdf", "/work/b/报告.pdf", "/work/计划 (1).xlsx", "/work/封面.png", "/work/演示.mp4",
     ]);
     expect(wrapper.get("pre").text()).toBe("/work/例子.html");
   });
-  it("resolves the path of a standalone answer link when its tooltip opens", async () => {
+  it("confirms the scoped file before enabling the link and reuses its location on hover and focus", async () => {
     const path = "/work/杭州3天行程.html";
     const locate = vi.fn(async () => path);
-    const {wrapper} = renderFile("[行程](./杭州3天行程.html)", false, "answer", locate);
+    const {wrapper} = await renderFile("[行程](./杭州3天行程.html)", false, "answer", locate);
     const link = wrapper.get('[role="link"]');
     expect(wrapper.findComponent(ChatArtifactDocumentCard).exists()).toBe(false);
-    expect(locate).not.toHaveBeenCalled();
-    await link.trigger("mouseenter"); await flushPromises();
     expect(locate).toHaveBeenCalledExactlyOnceWith(target, expect.objectContaining({path: "杭州3天行程.html"}));
+    await link.trigger("mouseenter"); await flushPromises();
     expect(document.getElementById(link.attributes("aria-describedby")!)?.textContent).toBe(path);
     await link.trigger("mouseleave"); (link.element as HTMLButtonElement).focus(); await link.trigger("focusin");
     expect(document.getElementById(link.attributes("aria-describedby")!)?.textContent).toBe(path);
@@ -208,7 +209,7 @@ describe("conversation output file links", () => {
       "参考 [备注](./notes.md)。",
       "```txt\n/work/example.docx\n```",
     ].join("\n\n");
-    const { wrapper, open } = renderFile(answer, false, "answer");
+    const { wrapper, open } = await renderFile(answer, false, "answer");
     const links = wrapper.findAll(".chat-file-link");
     expect(wrapper.findComponent(ChatArtifactDocumentCard).exists()).toBe(false);
     expect(links.map(link => link.text())).toEqual([
@@ -225,22 +226,73 @@ describe("conversation output file links", () => {
     ]);
     expect(wrapper.props("blocks")).toEqual(blocks(answer));
   });
-  it("discards a late location after the answer switches to another file with the same name", async () => {
+  it("discards a late location when another turn mentions the same relative filename", async () => {
     let finish!: (path: string) => void;
     const locate = vi.fn<LocateMessageFile>()
-      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
-    const {wrapper, open} = renderFile("[报告](./a/报告.html)", false, "answer", locate);
-    await wrapper.get('[role="link"]').trigger("mouseenter");
-    await wrapper.setProps({blocks: blocks("[报告](./b/报告.html)")});
+      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
+      .mockResolvedValueOnce("/work/b/报告.html");
+    const {wrapper, open} = await renderFile("[报告](./报告.html)", false, "answer", locate);
+    expect(wrapper.find('[role="link"]').exists()).toBe(false);
+    const nextTarget = {...target, turnId: "second-turn"};
+    await wrapper.setProps({linkTarget: nextTarget});
+    await flushPromises();
     finish("/work/a/报告.html");
     await flushPromises();
     const link = wrapper.get('[role="link"]');
-    expect(link.attributes("data-yj-tooltip")).toBe("b/报告.html");
+    expect(link.attributes("data-yj-tooltip")).toBe("/work/b/报告.html");
     await link.trigger("click");
-    expect(open).toHaveBeenCalledExactlyOnceWith(target, expect.objectContaining({path: "b/报告.html"}));
+    expect(open).toHaveBeenCalledExactlyOnceWith(nextTarget, expect.objectContaining({path: "报告.html"}));
+  });
+  it("preserves endpoint spelling and code in tables, lists, quotes and headings alongside a real file with the same name", async () => {
+    const route = "/2/friendships/friends.json";
+    const other = "/2/friendships/followers/other_all.json";
+    const source = [
+      `| 上游返回 | 对照接口 |\n| --- | --- |\n| \`${route}\` | \`${other}\` |`,
+      `> - 接口 \`${route}\`\n> - 路径：\`${route}\``,
+      "## 网站资源 /assets/cover.png",
+      "参考 [接口文档](docs/help.pdf) 和 **[本地导出](./out/friends.json)**。",
+      "```txt\n/examples/sample.csv\n```",
+    ].join("\n\n");
+    const locate = vi.fn<LocateMessageFile>(async (_target, file) =>
+      file.path === "out/friends.json" ? "/work/out/friends.json" : null);
+    const {wrapper, open} = await renderFile(source, false, "answer", locate);
+    expect(wrapper.findAll("td code").map(code => code.text())).toEqual([route, other]);
+    expect(wrapper.findAll("blockquote code").map(code => code.text())).toEqual([route, route]);
+    expect(wrapper.get("h2").text()).toContain("/assets/cover.png");
+    expect(wrapper.text()).toContain("参考 接口文档 和 《friends.json》。");
+    expect(wrapper.findAll(".chat-file-link").map(link => link.attributes("data-yj-tooltip"))).toEqual(["/work/out/friends.json"]);
+    expect(locate.mock.calls.map(([, file]) => file.path).sort()).toEqual([route, other, "/assets/cover.png", "docs/help.pdf", "out/friends.json"].sort());
+    expect(open).not.toHaveBeenCalled();
+  });
+  it("rechecks an unresolved live reference once when the final message is available", async () => {
+    let complete!: (path: null) => void;
+    const locate = vi.fn<LocateMessageFile>()
+      .mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }))
+      .mockResolvedValueOnce("/work/周报.pdf");
+    const {wrapper} = await renderFile("[周报](./周报.pdf)", true, "answer", locate);
+    expect(wrapper.find("button").exists()).toBe(false);
+    await wrapper.setProps({blocks: blocks("[周报](./周报.pdf) 已完成。"), streaming: false});
+    complete(null);
+    await flushPromises();
+    expect(wrapper.get(".chat-file-link").text()).toBe("《周报.pdf》");
+    expect(locate).toHaveBeenCalledTimes(2);
+  });
+  it("revokes rendered links when their location provider changes and waits for new confirmation", async () => {
+    const locate = shallowRef<LocateMessageFile>();
+    const wrapper = mount(ChatSafeContent, {props: {blocks: blocks(source), linkTarget: target, fileLinks: true},
+      global: {provide: {[messageFileLocationKey as symbol]: locate, [messageFileActionKey as symbol]: computed(() => vi.fn())}}});
+    expect(wrapper.find(".chat-file-link").exists()).toBe(false);
+    expect(wrapper.text()).toContain(path);
+    locate.value = locateFixture;
+    await flushPromises();
+    expect(wrapper.findAll(".chat-file-link")).toHaveLength(1);
+    locate.value = async () => null;
+    await flushPromises();
+    expect(wrapper.find(".chat-file-link").exists()).toBe(false);
+    expect(wrapper.get("code").text()).toBe(path);
   });
   it.each(["compact", "answer"] as const)("keeps selected file text without opening and preserves click and keyboard activation (%s)", async typography => {
-    const { wrapper, open } = renderFile(source, false, typography);
+    const { wrapper, open } = await renderFile(source, false, typography);
     const link = wrapper.get('[role="link"]');
     const selection = document.getSelection()!;
     const range = document.createRange();
@@ -265,10 +317,11 @@ describe("conversation output file links", () => {
     }
   });
   it.each(["compact", "answer"] as const)("activates a streamed bold output only after the destination closes (%s)", async typography => {
-    const { wrapper } = renderFile("**[指南](file:///Users/example/Desk", true, typography);
+    const { wrapper } = await renderFile("**[指南](file:///Users/example/Desk", true, typography);
     expect(wrapper.text()).toBe("指南");
     expect(wrapper.find("button").exists()).toBe(false);
     await wrapper.setProps({blocks: blocks(source)});
+    await flushPromises();
     expect(wrapper.findAll('[role="link"]')).toHaveLength(1);
     expect(wrapper.findComponent(ChatArtifactDocumentCard).exists()).toBe(false);
     expect(wrapper.text()).not.toContain("/Users/");

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import YjTooltip from "../../components/yijie/YjTooltip.vue";
 import { documentPreviewClient } from "../../api/chat-document-preview-client";
-import { messageFileWorkspaceKey, messageFileLocationKey, messageFileActionKey } from "../../composables/useChatMessageLink";
+import { messageFileLocationKey, messageFileActionKey, type LocateMessageFile } from "../../composables/useChatMessageLink";
 import { provideWebSourceActions } from "../../composables/useWebSources";
 import { useChatTurnTimingDetails } from "../../composables/useChatTurnTiming";
 import { useChatTurnModels } from "../../composables/useChatTurnModels";
@@ -173,34 +173,32 @@ provide(messageFileActionKey, computed(() => previewEnabled.value ? (target, fil
   previewWorkspace.value?.openFile({ source: { kind: "messageFile", ...target, reference: file.path },
     name: file.name, mediaType: "", status: "ready", expiresAt: null });
 } : undefined));
-const locatedWorkspace = shallowRef<{context: string; session: string; path: string} | null>(null);
-const fileWorkspace = computed(() => {
-  const value = locatedWorkspace.value;
-  return value && value.context === chatStore.context?.contextId && value.session === chatStore.selectedSessionId && previewEnabled.value ? value.path : null;
-});
-provide(messageFileWorkspaceKey, fileWorkspace);
-provide(messageFileLocationKey, computed(() => {
-  const context = chatStore.context?.contextId;
-  const session = chatStore.selectedSessionId;
-  if (!context || !session || !previewEnabled.value) return undefined;
-  const pending = new Map<string, Promise<string>>();
-  const active = () => previewEnabled.value && chatStore.context?.contextId === context && chatStore.selectedSessionId === session;
+function scopedFileLocator(context: string, session: string, scope: string): LocateMessageFile {
+  const pending = new Map<string, Promise<string | null>>();
+  let queue = Promise.resolve();
+  const active = () => previewEnabled.value && chatStore.context?.contextId === context && chatStore.selectedSessionId === session && previewScope.value === scope;
   return async (target, file) => {
-    if (target.sessionId !== session || !active()) throw new Error("file_location_unavailable");
+    if (target.sessionId !== session || !active()) return null;
     const source = {kind: "messageFile" as const, ...target, reference: file.path};
     const key = JSON.stringify(source);
     const existing = pending.get(key);
     if (existing) return existing;
-    const request = documentPreviewClient.run(context, {action: "locate", viewId: crypto.randomUUID(), source}).then(result => {
-      if (!result.path || !active()) throw new Error("file_location_unavailable");
-      if (!file.path.startsWith("/") && result.path.endsWith("/" + file.path)) {
-        locatedWorkspace.value = {context, session, path: result.path.slice(0, -file.path.length - 1)};
-      }
-      return result.path;
+    // History may contain many references. Only inspect metadata for the
+    // exact message, and give up queued reads if its authority changes.
+    const request = queue.then(async () => {
+      if (!active()) return null;
+      const result = await documentPreviewClient.run(context, {action: "locate", viewId: crypto.randomUUID(), source});
+      return active() && result.fileInfo ? result.path ?? null : null;
     }).finally(() => pending.delete(key));
+    queue = request.then(() => {}, () => {});
     pending.set(key, request);
     return request;
   };
+}
+provide(messageFileLocationKey, computed(() => {
+  const context = chatStore.context?.contextId;
+  const session = chatStore.selectedSessionId;
+  return context && session && previewEnabled.value ? scopedFileLocator(context, session, previewScope.value) : undefined;
 }));
 function openArtifactFile(artifact: ArtifactProjection) {
   if (!previewEnabled.value || artifact.sessionId !== chatStore.selectedSessionId || ["image", "video"].includes(artifact.kind)) return;
