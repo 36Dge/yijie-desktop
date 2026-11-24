@@ -149,7 +149,7 @@
   border-top: var(--yj-border-width) solid color-mix(in srgb, var(--yj-color-border-subtle) 60%, var(--yj-color-bg-card));
   border-end-start-radius: calc(var(--yj-radius-xl) - var(--yj-border-width));
   border-end-end-radius: calc(var(--yj-radius-xl) - var(--yj-border-width));
-  background-color: color-mix(in srgb, var(--yj-color-control-hover) 75%, var(--yj-color-bg-card));
+  background-color: color-mix(in srgb, var(--yj-color-control-hover) 35%, var(--yj-color-bg-card));
 }
 
 .workflow-showcase-card .workflow-card-action {
