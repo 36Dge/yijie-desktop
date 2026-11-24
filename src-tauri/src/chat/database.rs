@@ -12797,6 +12797,16 @@ mod tests {
     #[test]
     #[ignore = "Run pnpm check:native-integration with actual Host projection output"]
     fn feat132_cross_repo_host_bytes_reach_native_storage_without_identity_rewriting() {
+        check_host_exchange(false);
+    }
+
+    #[test]
+    #[ignore = "Requires recorded weather notifications from the matching Runtime and Host"]
+    fn recorded_hangzhou_fetch_turn_reopens_with_final_answer() {
+        check_host_exchange(true);
+    }
+
+    fn check_host_exchange(weather: bool) {
         use crate::chat::host_domain::{HostStreamEvent, SseDecoder};
         use crate::chat::native_conversation::NativeDisplayBuffer;
         use crate::chat::native_conversation_generated::{NativeEvent, NativeThreadSnapshot};
@@ -12862,7 +12872,11 @@ mod tests {
                 let HostStreamEvent::Native(event) = value else {
                     panic!("unexpected event family")
                 };
-                assert!(buffer.observe(&event).unwrap());
+                let changed = buffer.observe(&event).unwrap();
+                if weather && !changed {
+                    continue;
+                }
+                assert!(changed);
                 buffer.view = repo
                     .commit_native_view(&context, buffer.view.clone(), Some(&event), now)
                     .unwrap();
@@ -12870,6 +12884,51 @@ mod tests {
             }
         }
         decoder.finish().unwrap();
+        if weather {
+            assert_eq!(buffer.view.status.as_deref(), Some("completed"));
+            assert!(buffer
+                .view
+                .items
+                .iter()
+                .any(|i| i.item.phase.as_deref() == Some("final_answer")
+                    && i.item.text.as_ref().is_some_and(|text| !text.is_empty())));
+            let observed = buffer
+                .view
+                .items
+                .iter()
+                .map(|i| (i.item.id.clone(), i.item.text.clone()))
+                .collect::<Vec<_>>();
+            let output =
+                std::path::PathBuf::from(std::env::var("YIJIE_FEAT132_TEST_VIEW_OUTPUT").unwrap());
+            fs::write(
+                output.with_extension("live.json"),
+                serde_json::to_vec(&buffer.view).unwrap(),
+            )
+            .unwrap();
+            drop(repo);
+            let mut reopened = open_repository_for_scope(&root, 49, owner);
+            let saved = reopened
+                .native_recovery_views(
+                    pending.session_id,
+                    &[pending.turn_id],
+                    Some(&exchange.history),
+                    true,
+                )
+                .unwrap();
+            assert_eq!(saved[0].status.as_deref(), Some("completed"));
+            assert_eq!(
+                observed,
+                saved[0]
+                    .items
+                    .iter()
+                    .map(|i| (i.item.id.clone(), i.item.text.clone()))
+                    .collect::<Vec<_>>()
+            );
+            fs::write(output, serde_json::to_vec(&saved[0]).unwrap()).unwrap();
+            drop(reopened);
+            fs::remove_dir_all(root).unwrap();
+            return;
+        }
         let final_item = buffer
             .view
             .items

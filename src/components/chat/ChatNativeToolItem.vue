@@ -147,12 +147,6 @@ const toolOutcome = computed(() => {
         <WebRetrievalResult v-if="searchResult" :key="item.identity" :preview="searchResult" @open-source="open" />
         <p v-else-if="item.activityLabel" role="note">{{ item.activityLabel }}</p>
         <p v-else-if="!item.busy" role="note">{{ execution.status === "completed" && !fact ? "本次搜索的结果详情不可用。" : summaryStatus }}</p>
-        <details v-if="searchCalls && searchCalls.length > 1" class="native-tool__calls">
-          <summary>调用明细（{{ searchCalls.length }} 次）</summary>
-          <ol><li v-for="call in searchCalls" :key="call.identity">
-            本轮第 {{ call.ordinal + 1 }} 项 · {{ callLabel(call) }}
-          </li></ol>
-        </details>
         <p v-if="openError" role="alert">{{ openError }}</p>
         <p class="native-tool__source chat-execution-details__footer">易界网页检索<span v-if="elapsed"> · 耗时 {{ elapsed }}</span></p>
       </template>
@@ -176,6 +170,12 @@ const toolOutcome = computed(() => {
         <p v-else>{{ toolOutcome }}</p>
         <p v-if="sourceAndDuration" class="native-tool__source chat-execution-details__footer">{{ sourceAndDuration }}</p>
       </template>
+      <details v-if="searchCalls && searchCalls.length > 1" class="native-tool__calls">
+        <summary>调用明细（{{ searchCalls.length }} 次）</summary>
+        <ol><li v-for="call in searchCalls" :key="call.identity">
+          本轮第 {{ call.ordinal + 1 }} 项 · {{ callLabel(call) }}
+        </li></ol>
+      </details>
     </div>
   </ChatTimelineItemShell>
 </template>

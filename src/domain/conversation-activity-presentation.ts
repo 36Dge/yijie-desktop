@@ -12,7 +12,7 @@ export type ConversationActivityHeaderState =
 export type ConversationActivityGroup = Readonly<{ identity: string; items: readonly Item[]; entries: readonly ConversationActivityEntry[]; state: ConversationActivityHeaderState }>;
 export type ConversationReadingNode =
   | Readonly<{ kind: "activity"; identity: string; group: ConversationActivityGroup }>
-  | Readonly<{ kind: "message" | "attention"; identity: string; item: Item; searchCalls?: readonly Item[]; process: boolean; answerCandidate: boolean }>;
+  | Readonly<{ kind: "message" | "attention"; identity: string; item: Item; searchCalls?: readonly Item[]; commentaryOccurrences?: readonly Item[]; process: boolean; answerCandidate: boolean }>;
 
 function unsupportedDisplayOnly(item: Item): boolean {
   return item.presentation === "unknown" && item.domainStatus === "completed" &&
@@ -59,6 +59,7 @@ export function conversationActivityPresentation(turn: Turn, attentionIds: Reado
     const id = deepSearchReceipt(item)?.operation_id;
     return id ? ordered.get(id) : undefined;
   };
+  const commentaryByText = new Map<string, Item[]>();
   let pending: Item[] = [];
   const flush = () => {
     if (!pending.length) return;
@@ -89,10 +90,26 @@ export function conversationActivityPresentation(turn: Turn, attentionIds: Reado
       Boolean(item.activityLabel) || (item.availability === "partial" && ["commentary", "assistant_unclassified", "final_answer"].includes(item.presentation)) || (item.reasoning != null && (item.reasoning.reasonCode != null || item.reasoning.status === "incomplete")) ||
       (item.presentation === "unknown" && !unsupportedDisplayOnly(item)) ||
       (item.availability === "unavailable" && !unsupportedDisplayOnly(item));
+    if (item.presentation === "user_message") commentaryByText.clear();
+    let commentaryOccurrences: Item[] | undefined;
+    if (!attention && (item.presentation === "commentary" || item.presentation === "assistant_unclassified") &&
+        item.contentBlocks.every(block => block.type === "text")) {
+      const body = item.contentBlocks.map(block => block.type === "text" ? block.text : "").join("").replace(/\r\n?/g, "\n").trim();
+      if (body && item.phase === "active" && [...commentaryByText.keys()].some(previous => previous.startsWith(body))) continue;
+      if (body && item.presentation === "commentary" && item.domainStatus === "completed") {
+        const earlier = commentaryByText.get(body);
+        if (earlier) {
+          earlier.push(item);
+          continue;
+        }
+        commentaryOccurrences = [item];
+        commentaryByText.set(body, commentaryOccurrences);
+      }
+    }
     if (attention || !["reasoning", "command", "tool", "web_search", "unknown"].includes(item.presentation)) {
       flush();
       const answerCandidate = item.identity === candidate;
-      nodes.push({kind: attention ? "attention" : "message", identity: item.identity, item, answerCandidate, ...(related ? {searchCalls:related} : {}),
+      nodes.push({kind: attention ? "attention" : "message", identity: item.identity, item, answerCandidate, ...(commentaryOccurrences ? {commentaryOccurrences} : {}), ...(related ? {searchCalls:related} : {}),
         process: !answerCandidate && (item.presentation === "commentary" || observed.has(item.identity))});
     } else pending.push(item);
   }

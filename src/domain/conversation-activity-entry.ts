@@ -44,7 +44,7 @@ export function activityItemIcon(item: Item, mcp = activityNativeItem(item)?.mcp
 
 export function deepSearchReceipt(item: Item) {
   const mcp = activityNativeItem(item)?.mcp;
-  return mcp?.server === "yijie_web" && mcp.tool === "kimi_web_search_pro" && mcp.searchReceipt?.version === 2 ? mcp.searchReceipt : undefined;
+  return mcp?.server === "yijie_web" && (mcp.tool === "kimi_web_search_pro" || mcp.tool === "kimi_web_fetch") && mcp.searchReceipt?.version === 2 ? mcp.searchReceipt : undefined;
 }
 
 /** Pick the best settled evidence for the primary card without moving its position. */

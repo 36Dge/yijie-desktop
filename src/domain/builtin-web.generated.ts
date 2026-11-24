@@ -67,7 +67,9 @@ export type BuiltinWebRetrievalV1 =
   | DeepSearchResponse
   | WebWorkerFacts
   | ClaimFinishV2
-  | WebWorkerEnvelopeV2;
+  | WebWorkerEnvelopeV2
+  | ScopedFetchRequest
+  | ScopedFetchResponse;
 /**
  * Public HTTP(S) URL. Connector additionally parses authority, rejects userinfo/control characters and local/private literal destinations; no local request to this target is made.
  */
@@ -410,6 +412,16 @@ export interface ClaimFinishV2 {
 export interface WebWorkerEnvelopeV2 {
   result: ToolOutput;
   facts: WebWorkerFacts;
+}
+export interface ScopedFetchRequest {
+  scope_id: string;
+  deadline_unix_ms: number;
+  request: FetchOperation;
+}
+export interface ScopedFetchResponse {
+  call_id: OperationId;
+  receipt: DeepSearchReceipt;
+  result?: FetchSuccess | AppErrorOutput;
 }
 
 export const RETIRED_SERVICE_ID = "kimi-web" as const;

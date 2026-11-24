@@ -295,6 +295,10 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
 <template v-if="slots['item-actions']" #item-actions="slotProps"><slot name="item-actions" v-bind="slotProps" /></template>
 <template v-if="slots['code-actions']" #code-actions="slotProps"><slot name="code-actions" v-bind="slotProps" /></template>
           </ChatActivityRow>
+          <details v-if="node.kind === 'message' && node.commentaryOccurrences && node.commentaryOccurrences.length > 1" class="chat-turn-group__occurrences">
+            <summary>相同进度记录（{{ node.commentaryOccurrences.length }} 条）</summary>
+            <ol><li v-for="occurrence in node.commentaryOccurrences" :key="occurrence.identity">本轮第 {{ occurrence.ordinal + 1 }} 项</li></ol>
+          </details>
         </li>
       </template>
     </ol>
@@ -460,6 +464,8 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
 }
+
+.chat-turn-group__occurrences { color: var(--yj-color-text-tertiary); font-size: var(--yj-font-size-caption); }
 
 .chat-turn-group__notice--error .chat-turn-group__notice-body {
   border-color: var(--yj-color-error);

@@ -25,6 +25,7 @@ export function summarizeActivity(group: ConversationActivityGroup, live: boolea
   const typed = group.entries.filter(e => deepSearchReceipt(e.item));
   const facts = typed.map(entry => deepSearchReceipt(deepSearchEvidence(entry.item, entry.searchCalls))!);
   const dispatched = facts.filter(fact => fact.dispatch === "responded").length;
+  const fetches = typed.filter(entry => activityNativeItem(entry.item)?.mcp?.tool === "kimi_web_fetch" && deepSearchReceipt(deepSearchEvidence(entry.item, entry.searchCalls))?.dispatch === "responded").length;
   const attempted = facts.filter(fact => fact.dispatch === "attempted").length;
   const receipts = typed.flatMap(entry => entry.searchCalls ?? [entry.item]).map(deepSearchReceipt);
   const reused = receipts.filter(fact => fact?.relation === "reused").length;
@@ -53,6 +54,6 @@ export function summarizeActivity(group: ConversationActivityGroup, live: boolea
     key: state.kind === "active" ? `active:${state.entry.identity}` : state.kind,
     icon: iconItem ? activityItemIcon(iconItem) : "warning" as const,
     callCount: calls.length, actionCount: actions, sourceCount: sources.size,
-    counts: [dispatched ? `${dispatched} 次实际搜索` : "", reused ? `复用 ${reused} 次` : "", joined ? `并发合并 ${joined} 次` : "", attempted ? `${attempted} 项已尝试发送` : "", ordinary ? `${ordinary} 次调用` : "", actions ? `${actions} 个命令动作` : "", sources.size ? `${sources.size} 个来源` : "", unsupported ? `${unsupported} 项暂不支持展示` : ""].filter(Boolean).join(" · "),
+    counts: [dispatched > fetches ? `${dispatched - fetches} 次实际搜索` : "", fetches ? `${fetches} 次实际取页` : "", reused ? `复用 ${reused} 次` : "", joined ? `并发合并 ${joined} 次` : "", attempted ? `${attempted} 项已尝试发送` : "", ordinary ? `${ordinary} 次调用` : "", actions ? `${actions} 个命令动作` : "", sources.size ? `${sources.size} 个来源` : "", unsupported ? `${unsupported} 项暂不支持展示` : ""].filter(Boolean).join(" · "),
   };
 }
