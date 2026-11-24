@@ -226,6 +226,11 @@ const sortOptions = [
   gap: var(--yj-space-3) var(--yj-space-5);
 }
 
+/* Align the gap below the filter pills with the visible gap below the recommendation title. */
+.workflow-page__toolbar + .workflow-card-rail {
+  margin-block-start: calc((var(--yj-control-height-sm) - var(--yj-font-size-section-title)) / 2);
+}
+
 .workflow-page__filter-list {
   flex: 1 1 auto;
 }
