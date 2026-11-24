@@ -4,7 +4,7 @@ import { NCard } from "naive-ui";
 import YjIcon from "../yijie/YjIcon.vue";
 
 const props = defineProps<{ show: boolean; target: HTMLButtonElement | null }>();
-const emit = defineEmits<{ dismiss: [] }>();
+const emit = defineEmits<{ dismiss: [restoreFocus: boolean] }>();
 const card = ref<{ $el: HTMLElement } | null>(null);
 const panel = computed(() => card.value?.$el ?? null);
 const overlay = ref<HTMLElement | null>(null);
@@ -49,7 +49,7 @@ function scheduleMeasure() {
   frame = requestAnimationFrame(measure);
 }
 function dismiss(restoreFocus = false) {
-  emit("dismiss");
+  emit("dismiss", restoreFocus);
   if (restoreFocus) props.target?.focus({ preventScroll: true });
 }
 function keydown(event: KeyboardEvent) {

@@ -54,7 +54,12 @@ const showCreate = ref(false);
 let createReturnTarget: HTMLButtonElement | null = null;
 const { show: showCreateGuide, enter: enterCreateGuide, dismiss: dismissCreateGuide } = useWorkflowCreateGuide();
 const createTrigger = ref<HTMLButtonElement | null>(null);
+const createFocusReturned = ref(false);
 watch(() => route.query.create, value => { if (value === "1") openCreate(); });
+function closeCreateGuide(restoreFocus: boolean) {
+  createFocusReturned.value = restoreFocus;
+  dismissCreateGuide();
+}
 function openCreate() {
   dismissCreateGuide();
   // macOS mouse activation does not focus buttons; give the modal a real return target.
@@ -64,9 +69,15 @@ function openCreate() {
   state.createdWorkflowId.value = null;
   showCreate.value = true;
 }
-function restoreCreateFocus() { (createReturnTarget?.isConnected ? createReturnTarget : createTrigger.value)?.focus(); }
+function restoreCreateFocus() {
+  // The modal may finish its exit transition after the user has already tabbed on.
+  if (!createFocusReturned.value) return;
+  const target = createReturnTarget?.isConnected ? createReturnTarget : createTrigger.value;
+  target?.focus({ preventScroll: true });
+}
 function cancelCreate() {
   if (creating.value || createUncertain.value) return;
+  createFocusReturned.value = true;
   showCreate.value = false;
   if (route.query.create) void router.replace({ path: "/workflows" });
 }
@@ -91,7 +102,11 @@ onActivated(() => {
   if (activated && workflowLocalUiEnabled) void state.refresh();
   activated = true;
 });
-onDeactivated(() => { dismissCreateGuide(); showCreate.value = false; });
+onDeactivated(() => {
+  dismissCreateGuide();
+  showCreate.value = false;
+  createFocusReturned.value = false;
+});
 onMounted(async () => {
   if (workflowLocalUiEnabled) void state.refresh();
   if (route.query.create === "1") { openCreate(); return; }
@@ -114,7 +129,9 @@ const sortOptions = [
 
       <YjSection title="我的工作流" icon="workflow">
         <template #actions>
-          <button ref="createTrigger" type="button" class="workflow-page__create-card workflow-showcase-control yj-control" :aria-describedby="showCreateGuide ? 'workflow-guide-description' : undefined" @click="openCreate">
+          <button ref="createTrigger" type="button" class="workflow-page__create-card workflow-showcase-control yj-control"
+            :data-restored-focus="createFocusReturned || undefined" :aria-describedby="showCreateGuide ? 'workflow-guide-description' : undefined"
+            @blur="createFocusReturned = false" @click="openCreate">
             <YjIcon name="plus" size="sm" />
             创建工作流
           </button>
@@ -172,7 +189,7 @@ const sortOptions = [
     <WorkflowCreateDialog :show="showCreate" :busy="creating" :uncertain="createUncertain" :queryable="!!pendingCreate" :created="!!createdWorkflowId"
       :available="workflowLocalUiEnabled" :error="error?.message"
       @closed="restoreCreateFocus" @cancel="cancelCreate" @confirm="confirmCreate" @query="queryCreate" @enter="enterCreated" />
-    <WorkflowCreateGuide :show="showCreateGuide" :target="createTrigger" @dismiss="dismissCreateGuide" />
+    <WorkflowCreateGuide :show="showCreateGuide" :target="createTrigger" @dismiss="closeCreateGuide" />
   </YjPage>
 </template>
 
@@ -260,6 +277,10 @@ const sortOptions = [
   border-color: transparent;
   color: var(--yj-color-text-primary);
   background: transparent;
+}
+
+@media not (forced-colors: active) {
+  .workflow-page__create-card[data-restored-focus]:focus-visible { outline: none; }
 }
 
 .workflow-page__notice { display: flex; align-items: center; flex-wrap: wrap; gap: var(--yj-space-3); color: var(--yj-color-text-secondary); }

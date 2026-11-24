@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { h } from "vue";
 import { NMessageProvider } from "naive-ui";
+import WorkflowCreateDialog from "../../components/workflows/WorkflowCreateDialog.vue";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createMemoryHistory, createRouter, RouterView } from "vue-router";
 import { afterEach, expect, it, vi } from "vitest";
@@ -34,6 +35,21 @@ it("opens a labelled required form; ordinary corrections and cancellation never 
  await fill();expect(button("确认").disabled).toBe(false);
  const a11y=await axe.run(document.querySelector('[role="dialog"]')!,{rules:{region:{enabled:false}}});expect(a11y.violations.filter(v=>v.impact==="critical"||v.impact==="serious")).toEqual([]);
  button("取消").click();await flushPromises();expect(create).not.toHaveBeenCalled();expect(router.currentRoute.value.path).toBe("/workflows");
+});
+it("keeps the user's next focus target when the creation dialog finishes closing", async () => {
+  await setup();
+  button("取消").click();
+  await flushPromises();
+  const trigger = wrapper.get<HTMLButtonElement>(".workflow-page__create-card");
+  expect(trigger.attributes("data-restored-focus")).toBe("true");
+  trigger.element.focus();
+  const next = wrapper.get<HTMLButtonElement>(".workflow-page__filter");
+  next.element.focus();
+  await flushPromises();
+  wrapper.getComponent(WorkflowCreateDialog).vm.$emit("closed");
+  await flushPromises();
+  expect(document.activeElement).toBe(next.element);
+  expect(trigger.attributes("data-restored-focus")).toBeUndefined();
 });
 it("waits for confirmed ID and prevents repeat writes before navigating without opening a departing session",async()=>{
  const {create,router,open}=await setup();let resolve!:(w:WorkflowSchemas["Workflow"])=>void;create.mockImplementationOnce(()=>new Promise(done=>{resolve=done;}));

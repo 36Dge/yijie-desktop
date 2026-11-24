@@ -31,11 +31,15 @@ function openPreview() {
     <p class="workflow-showcase-card__description">{{ workflow.description }}</p>
     <footer class="workflow-showcase-card__footer" role="group" :aria-label="`${workflow.title}操作`">
       <button ref="previewButton" type="button" class="recommended-workflow-card__action workflow-card-action workflow-card-action--secondary workflow-showcase-control yj-control"
-        :aria-label="`预览：${workflow.title}`" aria-haspopup="dialog" :aria-expanded="preview" @click="openPreview">{{ workflow.actions[0] }}</button>
+        :aria-label="`预览：${workflow.title}`" aria-haspopup="dialog" :aria-expanded="preview" @click="openPreview">
+        <YjIcon name="readPage" size="xs" />{{ workflow.actions[0] }}
+      </button>
       <NPopover trigger="click" placement="bottom-end" :show="exampleNoticeVisible" @update:show="exampleNoticeVisible = $event">
         <template #trigger>
           <button type="button" class="recommended-workflow-card__action workflow-card-action workflow-showcase-control yj-control"
-            :aria-label="`使用工作流：${workflow.title}`" :aria-expanded="exampleNoticeVisible" @keyup.esc="exampleNoticeVisible = false">{{ workflow.actions[1] }}<YjIcon name="arrowRight" size="sm" /></button>
+            :aria-label="`使用工作流：${workflow.title}`" :aria-expanded="exampleNoticeVisible" @keyup.esc="exampleNoticeVisible = false">
+            {{ workflow.actions[1] }}<YjIcon name="arrowRight" size="sm" class="workflow-card-action__icon" />
+          </button>
         </template>
         <p class="recommended-workflow-card__notice" role="status">此工作流为示例方案，暂未开放。可通过「创建工作流」编排自己的流程。</p>
       </NPopover>

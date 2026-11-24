@@ -32,7 +32,9 @@ function submit() {
 </script>
 
 <template>
-  <NModal :show="show" :mask-closable="false" :close-on-esc="!busy && !uncertain" @esc="cancel" @after-enter="nameInput?.focus()" @after-leave="emit('closed')">
+  <!-- A stable focus trap returns focus once when closing, even if Tab lands during the exit transition. -->
+  <NModal :show="show" display-directive="show" :mask-closable="false" :close-on-esc="!busy && !uncertain"
+    @esc="cancel" @after-enter="nameInput?.focus()" @after-leave="emit('closed')">
     <NCard :bordered="false" role="dialog" aria-modal="true" aria-labelledby="workflow-create-title" class="workflow-create-dialog">
     <div class="workflow-create-dialog__header">
       <h2 id="workflow-create-title">创建工作流</h2>

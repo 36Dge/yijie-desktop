@@ -37,10 +37,16 @@ it("shows onboarding in showcase mode with real route focus, dismisses for this 
   expect(wrapper.find(".workflow-page__create-card").exists()).toBe(true);
   expect(document.querySelector(".workflow-create-guide--ready")).not.toBeNull();
   expect(document.querySelector("#workflow-guide-title")?.textContent).toBe("从创建第一个工作流开始");
-  expect(document.activeElement).toBe(wrapper.get(".workflow-page__create-card").element);
-  document.querySelector<HTMLButtonElement>('[aria-label="关闭新手引导"]')!.click();
+  const trigger = wrapper.get<HTMLButtonElement>(".workflow-page__create-card");
+  expect(document.activeElement).toBe(trigger.element);
+  await trigger.trigger("keydown", { key: "Escape" });
   await flushPromises();
   expect(document.querySelector(".workflow-create-guide")).toBeNull();
+  expect(document.activeElement).toBe(trigger.element);
+  expect(trigger.attributes("data-restored-focus")).toBe("true");
+  wrapper.get<HTMLButtonElement>(".workflow-page__filter").element.focus();
+  await flushPromises();
+  expect(trigger.attributes("data-restored-focus")).toBeUndefined();
 
   await router.push("/chat");
   await router.push("/workflows");

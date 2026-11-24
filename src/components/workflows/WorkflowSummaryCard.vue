@@ -48,17 +48,19 @@ function select(key: string) {
     <footer class="workflow-showcase-card__footer">
       <span class="workflow-summary-card__details">
         <span class="workflow-summary-card__status" :class="{ 'workflow-summary-card__status--published': published }">
-          <YjIcon :name="published ? 'check' : 'pending'" size="xs" />{{ published ? '已发布' : '未发布' }}
+          {{ published ? '已发布' : '未发布' }}
         </span>
-        <span v-if="example" class="workflow-showcase-card__badge">示例</span>
+        <span v-if="example" class="workflow-summary-card__example">示例</span>
       </span>
       <RouterLink v-if="to" :to="to" class="workflow-summary-card__action workflow-card-action workflow-showcase-control yj-control"
-        :aria-label="`${actionLabel}：${workflow.title}`"><YjIcon v-if="!published" name="edit" size="sm" />{{ actionLabel }}<YjIcon v-if="published" name="arrowRight" size="sm" /></RouterLink>
+        :aria-label="`${actionLabel}：${workflow.title}`">
+        {{ actionLabel }}<YjIcon :name="published ? 'arrowRight' : 'edit'" size="sm" class="workflow-card-action__icon" />
+      </RouterLink>
       <NPopover v-else trigger="click" placement="bottom-end" :show="exampleNoticeVisible" @update:show="exampleNoticeVisible = $event">
         <template #trigger>
           <button type="button" class="workflow-summary-card__action workflow-card-action workflow-showcase-control yj-control"
             :aria-label="`${actionLabel}：${workflow.title}`" :aria-expanded="exampleNoticeVisible" @keyup.esc="exampleNoticeVisible = false">
-            <YjIcon v-if="!published" name="edit" size="sm" />{{ actionLabel }}<YjIcon v-if="published" name="arrowRight" size="sm" />
+            {{ actionLabel }}<YjIcon :name="published ? 'arrowRight' : 'edit'" size="sm" class="workflow-card-action__icon" />
           </button>
         </template>
         <p class="workflow-summary-card__notice" role="status">此工作流为示例方案，暂未开放。可通过「创建工作流」编排自己的流程。</p>
@@ -89,9 +91,9 @@ function select(key: string) {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0 var(--yj-space-2);
+  gap: var(--yj-space-1) var(--yj-space-2);
   min-width: 0;
-  color: var(--yj-color-text-tertiary);
+  color: var(--yj-color-text-secondary);
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
 }
@@ -104,18 +106,33 @@ function select(key: string) {
   white-space: nowrap;
 }
 
-.workflow-summary-card__status :deep(.yj-icon) { color: inherit; }
-
 .workflow-summary-card__status {
   display: inline-flex;
   flex: none;
   align-items: center;
   gap: var(--yj-space-1);
-  color: var(--yj-color-text-secondary);
   white-space: nowrap;
 }
 
-.workflow-summary-card__status--published { color: var(--yj-color-semantic-success-ink); }
+.workflow-summary-card__status::before {
+  content: "";
+  width: 0.5em;
+  height: 0.5em;
+  box-sizing: border-box;
+  border: var(--yj-border-width) solid var(--yj-color-text-tertiary);
+  border-radius: 50%;
+}
+
+.workflow-summary-card__status--published::before {
+  border-color: var(--yj-color-success);
+  background-color: var(--yj-color-success);
+}
+
+.workflow-summary-card__example {
+  padding-inline-start: var(--yj-space-2);
+  border-inline-start: var(--yj-border-width) solid var(--yj-color-border-default);
+  white-space: nowrap;
+}
 
 .workflow-summary-card__action {
   position: relative;
