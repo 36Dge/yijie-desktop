@@ -14,17 +14,17 @@ const native: NativeConversationView = { sessionId: "local-session", turnId: "lo
 ] };
 const snapshot: ContextWindowSnapshot = { schema_version: 1, thread_id: "native-thread", model_profile: "ordinary", model_revision: 1, sample: null, compactions: [{ turn_id: "native-turn", item_id: "native-context-item", state: "in_progress" }] };
 describe("native public context update row", () => {
-  it("keeps original position and native identity and remains outside collapsed tools", () => {
+  it.each(["in_progress", "completed", "interrupted", "unknown"] as const)("keeps the %s update in its original position within the turn process", state => {
     const original = JSON.stringify(native);
-    const timeline = selectConversationTimeline(composeConversationView(local, [native]), "local-session");
-    const enriched = withContextWindowTimeline(timeline, snapshot)!;
-    const item = enriched.turns[0]!.items[1]!;
-    expect(item).toMatchObject({ kind: "unknown", presentation: "context_update", role: "assistant", assistantPhase: null, itemId: "native-context-item", ordinal: 1, copyPolicy: "none" });
-    const node = conversationActivityPresentation(enriched.turns[0]!).find(node => node.identity === item.identity);
-    expect(node).toMatchObject({ kind: "message", process: false });
-    const done = withContextWindowTimeline(timeline, { ...snapshot, compactions: [{ ...snapshot.compactions[0]!, state: "completed" }] })!;
-    expect(done.turns[0]!.items[1]!.identity).toBe(item.identity);
-    expect(done.turns[0]!.items[1]!.contextUpdateState).toBe("completed");
+    const timeline = selectConversationTimeline(composeConversationView(local, [native]), "local-session")!;
+    const turn = withContextWindowTimeline(timeline, { ...snapshot, compactions: [{ ...snapshot.compactions[0]!, state }] })!.turns[0]!;
+    const originalItems = timeline.turns[0]!.items;
+    expect(turn.items[1]).toMatchObject({ kind: "unknown", presentation: "context_update", contextUpdateState: state, role: "assistant", assistantPhase: null, itemId: "native-context-item", ordinal: 1, copyPolicy: "none" });
+    expect(conversationActivityPresentation(turn)).toMatchObject([
+      { identity: originalItems[0]!.identity },
+      { identity: originalItems[1]!.identity, kind: "message", process: true },
+      { identity: originalItems[2]!.identity },
+    ]);
     expect(JSON.stringify(native)).toBe(original);
   });
   it("does not match another native thread/turn or reinterpret arbitrary unknown items", () => {

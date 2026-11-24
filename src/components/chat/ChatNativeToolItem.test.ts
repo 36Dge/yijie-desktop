@@ -77,9 +77,13 @@ describe("native Tool display",()=>{
     expect(toggle.text()).toContain("读取指定网页" + (site ? " · " + site : ""));
     expect(toggle.text()).not.toMatch(/读取失败|已完成/);
     expect(toggle.attributes("aria-description")).toBe(status === "failed" ? "读取失败" : "已完成");
+    expect(wrapper.find(".chat-tool-call-status").exists()).toBe(false);
     await toggle.trigger("click");
     expect(wrapper.text()).toContain(expected);
-    expect(wrapper.text()).toContain("用时 6.8 秒");
+    const callStatus = wrapper.get(".chat-execution-details__footer .chat-tool-call-status");
+    expect(callStatus.text()).toBe(status === "completed" ? "调用成功" : "调用失败");
+    expect(callStatus.classes().includes("chat-tool-call-status--success")).toBe(status === "completed");
+    expect(wrapper.get(".chat-execution-details__footer").text()).toContain("用时 6.8 秒");
     if (title) expect(wrapper.get(".native-tool__page-title").text()).toBe(title);
     expect(wrapper.text()).not.toMatch(/查询参数|已观察到的原生记录|此项信息不完整|参数不可展示|结果已接收|Recorded page body|unrecognized/);
     wrapper.unmount();
@@ -95,6 +99,7 @@ describe("native Tool display",()=>{
     await toggle.trigger("click");
     expect(wrapper.text()).toContain("本次搜索的结果详情不可用");
     expect(wrapper.text()).toContain("耗时 8.3 秒");
+    expect(wrapper.get(".chat-tool-call-status--success").text()).toBe("调用成功");
     wrapper.unmount();
   });
 
@@ -135,16 +140,18 @@ describe("native Tool display",()=>{
   });
 
   it.each([
-    ['{"results":[],"truncated":false}', "未找到相关网页。", true],
-    ['{"results":[],"truncated":true}', "部分搜索结果未完整展示。", false],
-    ['{"error":{"code":"quota_exceeded","message":"网页检索额度已用尽。"}}', "网页检索额度已用尽。", false],
-    ["历史结果详情不可用", "本次搜索的结果详情不可用。", false],
-  ] as const)("distinguishes real empty results, partial results, errors and missing content (%s)", async (text, expected, empty) => {
+    ["completed", '{"results":[],"truncated":false}', "未找到相关网页。", true, "调用成功"],
+    ["completed", '{"results":[],"truncated":true}', "部分搜索结果未完整展示。", false, "调用成功"],
+    ["failed", '{"error":{"code":"quota_exceeded","message":"网页检索额度已用尽。"}}', "网页检索额度已用尽。", false, "调用失败"],
+    ["completed", '{"error":{"code":"quota_exceeded","message":"网页检索额度已用尽。"}}', "网页检索额度已用尽。", false, "调用失败"],
+    ["completed", "历史结果详情不可用", "本次搜索的结果详情不可用。", false, "调用成功"],
+  ] as const)("distinguishes real empty results, partial results, errors and missing content (%s / %s)", async (status, text, expected, empty, callStatus) => {
     const wrapper = renderDeepSearch({resultKind: "text", texts: [{index: 0, text}], diagnostics: []},
-      {status: text.includes("quota_exceeded") ? "failed" : "completed"});
+      {status});
     await wrapper.get(".chat-timeline-item-shell__disclosure").trigger("click");
     expect(wrapper.text()).toContain(expected);
     expect(wrapper.get(".chat-timeline-item-shell__disclosure").attributes("aria-description")?.includes("0 条结果")).toBe(empty);
+    expect(wrapper.get(".chat-tool-call-status").text()).toBe(callStatus);
     expect(wrapper.find("pre").exists()).toBe(false);
     wrapper.unmount();
   });
@@ -163,6 +170,7 @@ describe("native Tool display",()=>{
     if(toggle.attributes("aria-expanded")!=="true")await toggle.trigger("click");
     expect(wrapper.text()).toContain("采集网页资料");expect(wrapper.text()).toContain("公开资料");
     expect(wrapper.get("[aria-label='网页检索材料']").text()).toContain("普通检索材料");
+    expect(wrapper.get(".chat-tool-call-status--success").text()).toBe("调用成功");
     expect(wrapper.text()).not.toMatch(/internal_fields|服务返回文本|查询参数/);
     expect(activityToolSourceLabel(item)).toBe("易界网页检索");wrapper.unmount();
   });
@@ -265,7 +273,7 @@ describe("native Tool display",()=>{
     expect(row.text()).toContain("旺季11月、12月");
     expect(row.get('[aria-label="前 100 款商品指标"]').text()).toBe("月销量合计12,345 件平均售价（当地货币）18.90平均评分4.37 / 5");
     const footer = wrapper.get(".chat-execution-details .chat-execution-details__footer");
-    expect(footer.text()).toBe("Sorftime · 用时 2.4 秒");
+    expect(footer.text()).toBe("调用成功 · Sorftime · 用时 2.4 秒");
     expect(wrapper.text()).not.toMatch(/m_1d673|yijie_market|原生记录|原生历史读取|参数|服务返回文本|node_id|Sub-category|已收到工具结果|安全摘要|安全输出|工作目录|退出码/);
     expect(wrapper.find("pre, .chat-copy-action").exists()).toBe(false);
     expect(JSON.stringify(view)).toBe(before);
@@ -286,7 +294,10 @@ describe("native Tool display",()=>{
     const toggle = wrapper.get("button.chat-timeline-item-shell__disclosure");
     expect(toggle.text()).toBe("list entries");
     await toggle.trigger("click");
-    expect(wrapper.get(".chat-timeline-item-shell__body").text()).toBe(expected);
+    expect(wrapper.get(".native-tool > p:first-child").text()).toBe(expected);
+    expect(wrapper.get(".chat-execution-details__footer").text()).toBe("调用成功");
+    await toggle.trigger("click");
+    expect(wrapper.find(".chat-tool-call-status").exists()).toBe(false);
     wrapper.unmount();
   });
   it("expands all category matches in order and keeps stale rows out of a running call", async () => {
@@ -313,6 +324,10 @@ describe("native Tool display",()=>{
     await wrapper.setProps({item: running, execution: running.execution});
     expect(wrapper.find(".category-result").exists()).toBe(false);
     expect(wrapper.text()).toContain("正在等待工具返回结果");
+    expect(wrapper.get(".chat-tool-call-status").text()).toBe("执行中");
+    expect(wrapper.find(".chat-tool-call-status--success").exists()).toBe(false);
+    await wrapper.setProps({item, execution: item.execution});
+    expect(wrapper.get(".chat-tool-call-status--success").text()).toBe("调用成功");
     wrapper.unmount();
   });
   it("stops busy feedback after Turn completion without changing the unfinished Item",async()=>{
@@ -321,6 +336,7 @@ describe("native Tool display",()=>{
     await wrapper.get(".chat-timeline-item-shell__disclosure").trigger("click");
     expect(wrapper.text()).toContain("本轮已结束，未观察到该项结束记录");
     expect(wrapper.get(".native-tool").attributes("aria-busy")).toBe("false");
+    expect(wrapper.get(".chat-tool-call-status").text()).toBe("结果待确认");
     wrapper.unmount();
   });
 });

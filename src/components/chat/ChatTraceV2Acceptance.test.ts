@@ -124,7 +124,7 @@ describe("v2 normal reading acceptance", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(wrapper.get(".chat-activity-group__title").text()).toBe("正在运行 tail -n 5 README.md");
     await wrapper.setProps({turn: turn(view([command("a"), command("b")] ))});
-    expect(wrapper.get(".chat-activity-group__title").text()).toBe("运行了命令");
+    expect(wrapper.get(".chat-activity-group__title").text()).toBe("运行 python3 --version 2 次");
   });
 
   it("A11 keeps the same group DOM and opened choice when empty reasoning ends", async () => {

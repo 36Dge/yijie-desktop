@@ -12,6 +12,7 @@ import { activityItemIcon } from "../../domain/conversation-activity-entry";
 import { legacyMcpTitle } from "../../domain/native-mcp-display";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatCopyAction from "./ChatCopyAction.vue";
+import ChatToolCallStatus from "./ChatToolCallStatus.vue";
 import ChatTimelineItemShell, {
   type ChatTimelineDisclosureChange,
 } from "./ChatTimelineItemShell.vue";
@@ -176,8 +177,12 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
         </p>
       </section>
 
-      <dl v-if="durationLabel" class="chat-tool-item__facts">
+      <dl class="chat-tool-item__facts">
         <div>
+          <dt>状态</dt>
+          <dd><ChatToolCallStatus :item="item" /></dd>
+        </div>
+        <div v-if="durationLabel">
           <dt>耗时</dt>
           <dd>{{ durationLabel }}</dd>
         </div>

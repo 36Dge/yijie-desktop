@@ -97,15 +97,15 @@ afterEach(() => {
 
 describe("ChatToolItem", () => {
   it.each([
-    ["in_progress" as const, "最后观察：执行中", false],
-    ["completed" as const, "已完成", false],
-    ["failed" as const, "调用失败", false],
-    ["declined" as const, "已拒绝", false],
-    ["incomplete" as const, "未完整结束", false],
-  ])("renders %s with an accessible status and the correct initial disclosure", (
+    ["in_progress" as const, "最后观察：执行中", "结果待确认"],
+    ["completed" as const, "已完成", "调用成功"],
+    ["failed" as const, "调用失败", "调用失败"],
+    ["declined" as const, "已拒绝", "已拒绝"],
+    ["incomplete" as const, "未完整结束", "未完整结束"],
+  ])("renders %s with an accessible status and the correct initial disclosure", async (
     status,
     label,
-    expanded,
+    detailStatus,
   ) => {
     const tool = execution({
       status,
@@ -115,12 +115,16 @@ describe("ChatToolItem", () => {
     const wrapper = mount(ChatToolItem, { props: { item: item(tool), execution: tool } });
 
     const disclosure = wrapper.get(".chat-timeline-item-shell__disclosure");
-    expect(disclosure.attributes("aria-expanded")).toBe(String(expanded));
+    expect(disclosure.attributes("aria-expanded")).toBe("false");
     expect(disclosure.attributes("type")).toBe("button");
     expect(disclosure.attributes("aria-description")).toBe(label);
     expect(disclosure.find(".chat-timeline-item-shell__status").exists()).toBe(false);
     expect(disclosure.find(".chat-activity-chevron").exists()).toBe(true);
-    expect(wrapper.find(".chat-tool-item__details").exists()).toBe(expanded);
+    expect(wrapper.find(".chat-tool-item__details").exists()).toBe(false);
+    await disclosure.trigger("click");
+    const callStatus = wrapper.get(".chat-tool-item__facts .chat-tool-call-status");
+    expect(callStatus.text()).toBe(detailStatus);
+    expect(callStatus.classes().includes("chat-tool-call-status--success")).toBe(status === "completed");
   });
 
   it("keeps unknown identity inside the Tool renderer and exposes the capability gap", async () => {

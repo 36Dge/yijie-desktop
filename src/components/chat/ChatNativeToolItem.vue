@@ -7,6 +7,7 @@ import { completedMcpOutcome } from "../../domain/native-mcp-display";
 import { readSorftimeCategoryResult } from "../../domain/sorftime-category-result";
 import { readDeepSearchPreview, readWebRetrievalResult } from "../../domain/web-retrieval-display";
 import { useWebSources } from "../../composables/useWebSources";
+import ChatToolCallStatus from "./ChatToolCallStatus.vue";
 import SorftimeCategoryResult from "./SorftimeCategoryResult.vue";
 import WebRetrievalResult from "./WebRetrievalResult.vue";
 import type { ConversationNativeToolExecution } from "../../domain/conversation-view";
@@ -19,6 +20,7 @@ const emit = defineEmits<{ "disclosure-change": [change: ChatTimelineDisclosureC
 const evidence = computed(() => deepSearchEvidence(props.item, props.searchCalls));
 const { open, openError } = useWebSources(() => evidence.value);
 const native = computed(() => activityNativeItem(evidence.value) ?? props.execution.native.item);
+const executionStatus = computed(() => evidence.value.execution?.status ?? props.execution.status);
 const fileChange = computed(() => native.value.type === "fileChange");
 const imageView = computed(() => native.value.type === "imageView");
 const mcpCall = computed(() => native.value.type === "mcpToolCall");
@@ -35,18 +37,18 @@ const fetchDetails = computed(() => {
   if (text.startsWith("{") || text.startsWith("[") || text.startsWith("Wall time:")) {
     const saved = readWebRetrievalResult("kimi_web_fetch", text);
     if (saved && "error" in saved) return {description: saved.error.message};
-    if (saved && "markdown" in saved && props.execution.status === "completed") return {
+    if (saved && "markdown" in saved && executionStatus.value === "completed") return {
       title: saved.title, description: saved.truncated ? "已读取部分正文，网页内容较长。" : "已读取网页正文。",
     };
     return;
   }
-  return {description: text, title: props.execution.status === "completed" ? native.value.resultSummary : undefined};
+  return {description: text, title: executionStatus.value === "completed" ? native.value.resultSummary : undefined};
 });
 const fetchDescription = computed(() => {
   if (fetchDetails.value) return fetchDetails.value.description;
-  if (props.item.busy) return "正在读取网页内容…";
-  if (props.item.activityLabel) return props.item.activityLabel;
-  switch (props.execution.status) {
+  if (evidence.value.busy) return "正在读取网页内容…";
+  if (evidence.value.activityLabel) return evidence.value.activityLabel;
+  switch (executionStatus.value) {
     case "completed": return "读取已完成。这条记录没有保存页面详情。";
     case "failed": return "网页读取失败。这条记录没有保存具体原因。";
     case "declined": return "本次读取未获批准。";
@@ -62,7 +64,11 @@ const searchResult = computed(() => {
 });
 const title = computed(() => activityItemTitle(evidence.value));
 const elapsed = computed(() => native.value.durationMs == null ? null : formatToolDuration(native.value.durationMs));
-const sourceAndDuration = computed(() => [activityToolSourceLabel(props.item), elapsed.value && `用时 ${elapsed.value}`].filter(Boolean).join(" · "));
+const sourceAndDuration = computed(() => {
+  const source = webFetch.value ? undefined : activityToolSourceLabel(evidence.value);
+  const duration = elapsed.value && `${deepSearch.value ? "耗时" : "用时"} ${elapsed.value}`;
+  return [source, duration].filter(Boolean).join(" · ");
+});
 const status = computed(() => {
   if (imageView.value) {
     switch (props.execution.status) {
@@ -74,11 +80,11 @@ const status = computed(() => {
     }
   }
   if (native.value.type === "subAgentActivity") return props.item.busy ? "处理中" : "已记录";
-  switch (props.execution.status) {
+  switch (executionStatus.value) {
     case "completed": return "已完成";
     case "failed": return webFetch.value ? "读取失败" : "调用失败";
     case "declined": return "已拒绝";
-    case "in_progress": return props.item.busy ? "执行中" : "最后观察：执行中";
+    case "in_progress": return evidence.value.busy ? "执行中" : "最后观察：执行中";
     default: return "状态信息不完整";
   }
 });
@@ -102,7 +108,7 @@ const summaryStatus = computed(() => {
   if (fact.value?.outcome === "unknown") return "结果待确认";
   if (fact.value?.outcome === "empty") return "0 条结果";
   const result = searchResult.value;
-  if ((evidence.value.execution?.status === "completed") && result && "results" in result && (result.results.length || !result.truncated)) {
+  if (executionStatus.value === "completed" && result && "results" in result && (result.results.length || !result.truncated)) {
     return fact.value?.outcome === "partial"
       ? `${result.results.length} 条结果 · 部分资料`
       : `${result.results.length} 条结果`;
@@ -141,19 +147,17 @@ const toolOutcome = computed(() => {
     collapsible :show-availability="!mcpCall && !fileChange && !imageView" :default-expanded="!mcpCall && !processPresentation && item.busy"
     @disclosure-change="emit('disclosure-change', $event)"
   >
-    <div class="native-tool" :class="{ 'chat-execution-details': mcpCall }" :aria-busy="item.busy">
+    <div class="native-tool" :class="{ 'chat-execution-details': mcpCall }" :aria-busy="evidence.busy">
       <template v-if="deepSearch">
         <p v-if="query" class="native-tool__query">搜索词 {{ query }}</p>
         <WebRetrievalResult v-if="searchResult" :key="item.identity" :preview="searchResult" @open-source="open" />
-        <p v-else-if="item.activityLabel" role="note">{{ item.activityLabel }}</p>
-        <p v-else-if="!item.busy" role="note">{{ execution.status === "completed" && !fact ? "本次搜索的结果详情不可用。" : summaryStatus }}</p>
+        <p v-else-if="evidence.activityLabel" role="note">{{ evidence.activityLabel }}</p>
+        <p v-else-if="!evidence.busy" role="note">{{ executionStatus === "completed" && !fact ? "本次搜索的结果详情不可用。" : summaryStatus }}</p>
         <p v-if="openError" role="alert">{{ openError }}</p>
-        <p class="native-tool__source chat-execution-details__footer">易界网页检索<span v-if="elapsed"> · 耗时 {{ elapsed }}</span></p>
       </template>
       <template v-else-if="webFetch">
         <strong v-if="fetchDetails?.title" class="native-tool__page-title">{{ fetchDetails.title }}</strong>
         <p v-if="fetchDescription">{{ fetchDescription }}</p>
-        <p v-if="elapsed" class="native-tool__source chat-execution-details__footer">用时 {{ elapsed }}</p>
       </template>
       <p v-else-if="fileChange" class="native-tool__file-change">{{ native.text || "文件变更明细不可用。" }}</p>
       <p v-else-if="imageView" class="native-tool__image-view">{{ status }}<span v-if="imageViewNumber"> · 本轮第 {{ imageViewNumber }} 次查看</span><span v-if="elapsed"> · 用时 {{ elapsed }}</span></p>
@@ -168,12 +172,14 @@ const toolOutcome = computed(() => {
         </template>
         <SorftimeCategoryResult v-else-if="categoryResult" :key="item.identity" :result="categoryResult" />
         <p v-else>{{ toolOutcome }}</p>
-        <p v-if="sourceAndDuration" class="native-tool__source chat-execution-details__footer">{{ sourceAndDuration }}</p>
       </template>
+      <p v-if="mcpCall" class="native-tool__source chat-execution-details__footer">
+        <ChatToolCallStatus :item="evidence" /><span v-if="sourceAndDuration"> · {{ sourceAndDuration }}</span>
+      </p>
       <details v-if="searchCalls && searchCalls.length > 1" class="native-tool__calls">
         <summary>调用明细（{{ searchCalls.length }} 次）</summary>
         <ol><li v-for="call in searchCalls" :key="call.identity">
-          本轮第 {{ call.ordinal + 1 }} 项 · {{ callLabel(call) }}
+          本轮第 {{ call.ordinal + 1 }} 项 · {{ callLabel(call) }} · <ChatToolCallStatus :item="call" />
         </li></ol>
       </details>
     </div>

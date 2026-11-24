@@ -34,8 +34,13 @@ it("shows one row per visible MCP call, with a separate original clock for repea
   expect(rows.map(row => row.element.querySelector("button time")?.getAttribute("datetime"))).toEqual([
     new Date(start).toISOString(), undefined, new Date(start + 1000).toISOString(),
   ]);
+  expect(wrapper.find(".chat-tool-call-status").exists()).toBe(false);
   await rows[0]!.get("button").trigger("click");
-  expect(rows[0]!.get(".chat-execution-details").text()).toBe("已返回天气观测。用时 2.4 秒");
+  expect(rows[0]!.get(".chat-execution-details__footer").text()).toBe("调用成功 · 用时 2.4 秒");
+  expect(rows[0]!.get(".chat-execution-details").text()).toContain("已返回天气观测。");
+  expect(wrapper.findAll(".chat-tool-call-status")).toHaveLength(1);
+  await rows[0]!.get("button").trigger("click");
+  expect(wrapper.find(".chat-tool-call-status").exists()).toBe(false);
   expect(rows[0]!.find(".chat-execution-details time").exists()).toBe(false);
 });
 it("numbers visible image views across groups and shows their own result after an interrupted turn", async () => {
@@ -51,7 +56,7 @@ it("numbers visible image views across groups and shows their own result after a
   const wrapper = mount(ChatTurnGroup, {props: {turn, position: 1}});
   await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
   const mixed = wrapper.get(".chat-activity-group__toggle");
-  expect(mixed.text()).toBe("查看图片 2 次、运行了命令");
+  expect(mixed.text()).toBe("查看图片 2 次，运行了命令");
   expect(mixed.get("svg").classes()).toContain("lucide-scan-eye");
   await mixed.trigger("click");
   const rows = wrapper.findAll("button.chat-timeline-item-shell__disclosure").filter(row => row.text() === "查看图片");
@@ -74,7 +79,7 @@ it("uses the same book icon on a completed fetch group and its rows", async () =
   await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
   const group = wrapper.get(".chat-activity-group__toggle");
   expect(group.get("svg").classes()).toContain("lucide-book-open-text");
-  expect(group.text()).toBe("已使用 易界网页检索");
+  expect(group.text()).toBe("读取指定网页 2 次");
   expect(group.find(".chat-activity-chevron.lucide-chevron-right").exists()).toBe(true);
   await group.trigger("click");
   expect(group.find(".chat-activity-chevron.lucide-chevron-down").exists()).toBe(true);
@@ -132,7 +137,7 @@ it("switches the header icon immediately between parallel tools and restores the
     expect(group().get("svg").classes()).toContain("lucide-globe");
     await wrapper.setProps({turn: traceTurn(history)});
     expect(group().get("svg").classes()).toContain("lucide-globe");
-    expect(group().text()).toBe("已使用 易界网页检索、搜索了网页");
+    expect(group().text()).toBe("网页深度搜索 3 次，搜索网页 杭州统计公报");
     const reopened = mount(ChatTurnGroup, {props: {turn: traceTurn(history), position: 1}});
     expect(reopened.get(".chat-activity-group__toggle svg").classes()).toContain("lucide-globe");
 

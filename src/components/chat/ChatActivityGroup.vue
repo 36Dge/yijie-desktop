@@ -2,6 +2,7 @@
 import { computed, inject, ref, useId } from "vue";
 import type { ConversationActivityGroup } from "../../domain/conversation-activity-presentation";
 import { summarizeActivity } from "../../domain/conversation-activity-summary";
+import { createActivityTitleSelector } from "../../domain/conversation-activity-title";
 import { chatTracePresentationKey, createChatTracePresentationStore } from "../../stores/chat-trace-presentation.store";
 import type { ChatTimelineDisclosureChange } from "./ChatTimelineItemShell.vue";
 import ChatActivityChevron from "./ChatActivityChevron.vue";
@@ -16,7 +17,8 @@ const choices = inject(chatTracePresentationKey, null) ?? createChatTracePresent
 const expanded = computed(() => choices.get(props.group.identity, false));
 const singleton = computed(() => !props.live && props.group.state.kind === "summary" && props.group.entries.length === 1 &&
   props.group.entries[0]!.item.domainStatus === "completed" && !props.group.entries[0]!.item.busy && !choices.has(props.group.identity));
-const summary = computed(() => summarizeActivity(props.group, props.live));
+const titleForEntries = createActivityTitleSelector();
+const summary = computed(() => summarizeActivity(props.group, props.live, titleForEntries));
 const header = useActivitySummary(summary, () => props.group.identity);
 const contentId = `${useId()}-activity`;
 const viewport = ref<HTMLElement | null>(null);

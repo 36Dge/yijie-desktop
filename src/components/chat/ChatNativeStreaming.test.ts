@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { NativeConversationView } from "../../api/generated/native-conversation-private.gen";
 import { composeConversationView, type ConversationSnapshot } from "../../domain/conversation-view";
 import { selectConversationTimeline } from "../../domain/conversation-timeline";
+import { withContextWindowTimeline } from "../../domain/context-window-timeline";
 import { completedTurnAnswer } from "../../domain/conversation-process";
 import { copyableTimelineItemText } from "../../domain/conversation-timeline-copy";
 import ChatTimeline from "./ChatTimeline.vue";
@@ -318,6 +319,44 @@ it.each([undefined, "final_answer"] as const)("moves from thinking to timed stre
   expect(wrapper.text()).toContain("本轮已结束，未观察到该项结束记录");
   await vi.waitFor(() => expect(wrapper.find('.chat-stream-text__fresh').exists()).toBe(false));
   wrapper.unmount();
+});
+
+it("folds a lone context update when the final answer starts and on history reopen", async () => {
+  const started = native({items: [
+    {ordinal: 0, lastMethod: "item/started", item: {id: "context", type: "unknown", availability: "unavailable"}},
+  ]});
+  const answer = native({items: [
+    {...started.items[0]!, lastMethod: "item/completed"},
+    {ordinal: 1, lastMethod: "item/started", item: {id: "answer", type: "agentMessage", phase: "final_answer", text: "已完成比较。", availability: "available"}},
+  ]});
+  const project = (view: NativeConversationView, state: "in_progress" | "completed", liveTurnId: string | null) =>
+    withContextWindowTimeline(timeline(view, liveTurnId), {
+      schema_version: 1, thread_id: "native-thread", model_profile: null, model_revision: 1, sample: null,
+      compactions: [{turn_id: "native-turn", item_id: "context", state}],
+    })!;
+  const wrapper = mount(ChatTimeline, {attachTo: document.body, props: {timeline: project(started, "in_progress", "turn")}});
+  const row = wrapper.get(".chat-context-update");
+  expect(row.isVisible()).toBe(true);
+  expect(row.text()).toContain("正在整理上下文");
+
+  await wrapper.setProps({timeline: project(answer, "completed", "turn")});
+  const toggle = wrapper.get(".chat-turn-group__process-toggle");
+  expect(toggle.attributes("aria-expanded")).toBe("false");
+  expect(wrapper.get(".chat-turn-group__item--final_answer").isVisible()).toBe(true);
+  expect(row.isVisible()).toBe(false);
+  await toggle.trigger("click");
+  expect(wrapper.get(".chat-context-update").element).toBe(row.element);
+  expect(row.isVisible()).toBe(true);
+  expect(row.text()).toBe("上下文已更新");
+  wrapper.unmount();
+
+  const history = native({source: "native_rebuilt", statusSource: "runtime_read", status: "completed",
+    items: answer.items.map(entry => ({...entry, lastMethod: "item/completed"}))});
+  const reopened = mount(ChatTimeline, {attachTo: document.body, props: {timeline: project(history, "completed", null)}});
+  expect(reopened.get(".chat-context-update").isVisible()).toBe(false);
+  await reopened.get(".chat-turn-group__process-toggle").trigger("click");
+  expect(reopened.get(".chat-context-update").isVisible()).toBe(true);
+  reopened.unmount();
 });
 
 it("does not claim to wait for a model during historical, disconnected, terminal or tool execution states", () => {

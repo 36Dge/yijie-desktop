@@ -1,7 +1,7 @@
 import type { NativeMcpDisplay } from "../api/generated/native-conversation-private.gen";
-
-// Published marketplace alias of Sorftime's category_search_from_product_name.
-export const sorftimeCategoryTool = "m_1d673ceb21a3c8e9b62a3a9ff2d142c1f4e1442ebce7e1b92ae02ef420b2";
+import { sorftimeTool } from "./sorftime-tools";
+import { incompleteSorftimeResult, isRecord, sorftimeResultData } from "./sorftime-result";
+export { sorftimeCategoryTool } from "./sorftime-tools";
 
 interface Category {
   name: string;
@@ -17,11 +17,6 @@ export interface SorftimeCategoryResult {
 
 const numberFormat = new Intl.NumberFormat("zh-CN", {maximumFractionDigits: 2});
 const priceFormat = new Intl.NumberFormat("zh-CN", {minimumFractionDigits: 2, maximumFractionDigits: 2});
-const incompleteResult = new Set(["content_truncated", "content_limit", "content_redacted", "display_limit", "result_unavailable", "unsupported_content"]);
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function numericValue(value: unknown): number | undefined {
   if (typeof value === "string") {
@@ -42,7 +37,7 @@ function peakSeason(value: unknown): string | undefined {
 }
 
 function readCategory(row: unknown): Category | undefined {
-  if (!isObject(row)) return;
+  if (!isRecord(row)) return;
   const name = typeof row.category_name === "string" ? row.category_name.trim() : "";
   if (!name || name.length > 512 || /[\r\n]|^\[(?:redacted|omitted)\]$/i.test(name) || name.startsWith('{"') || name.startsWith("[{")) return;
   const id = row.node_id;
@@ -58,23 +53,15 @@ function readCategory(row: unknown): Category | undefined {
   return {name, nodeId, season: peakSeason(row.peak_season), metrics};
 }
 
-function resultRows(text: string): unknown[] | undefined {
-  try {
-    const envelope: unknown = JSON.parse(text);
-    if (isObject(envelope) && envelope.error == null && envelope.isError !== true && Array.isArray(envelope.data)) return envelope.data;
-  } catch { /* A clipped or older receipt may not contain a complete JSON object. */ }
-}
-
 /** Read business rows only from this tool's retained display text. doc describes the fields. */
 export function readSorftimeCategoryResult(mcp?: NativeMcpDisplay): SorftimeCategoryResult | undefined {
-  if (!mcp || !((mcp.server === "yijie_market" && mcp.tool === sorftimeCategoryTool) ||
-      (mcp.server === "sorftime" && mcp.tool === "category_search_from_product_name"))) return;
+  if (!mcp || sorftimeTool(mcp.server, mcp.tool)?.method !== "category_search_from_product_name") return;
   const categories: Category[] = [];
   let foundList = false;
-  let partial = mcp.diagnostics.some(code => incompleteResult.has(code));
+  let partial = incompleteSorftimeResult(mcp);
   for (const block of mcp.resultKind === "text" ? mcp.texts : []) {
-    const rows = resultRows(block.text);
-    if (!rows) { partial = true; continue; }
+    const rows = sorftimeResultData(block.text);
+    if (!Array.isArray(rows)) { partial = true; continue; }
     foundList = true;
     for (const row of rows) {
       const category = readCategory(row);

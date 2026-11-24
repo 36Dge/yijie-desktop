@@ -109,8 +109,11 @@ export function conversationActivityPresentation(turn: Turn, attentionIds: Reado
     if (attention || !["reasoning", "command", "tool", "web_search", "unknown"].includes(item.presentation)) {
       flush();
       const answerCandidate = item.identity === candidate;
-      nodes.push({kind: attention ? "attention" : "message", identity: item.identity, item, answerCandidate, ...(commentaryOccurrences ? {commentaryOccurrences} : {}), ...(related ? {searchCalls:related} : {}),
-        process: !answerCandidate && (item.presentation === "commentary" || observed.has(item.identity))});
+      const process = !answerCandidate && (
+        item.presentation === "commentary" || item.presentation === "context_update" || observed.has(item.identity)
+      );
+      nodes.push({kind: attention ? "attention" : "message", identity: item.identity, item, answerCandidate, process,
+        ...(commentaryOccurrences ? {commentaryOccurrences} : {}), ...(related ? {searchCalls:related} : {})});
     } else pending.push(item);
   }
   flush();

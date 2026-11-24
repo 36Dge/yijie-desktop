@@ -33,9 +33,27 @@ it("shows each grouped call in order with its outcome across both batches", asyn
     await cards[0]!.get(disclosure).trigger("click");
     const details = cards[0]!.findAll(".native-tool__calls li").map(row => row.text());
     expect(details).toEqual(calls.map((call, index) =>
-      `本轮第 ${items.indexOf(call) + 1} 项 · ${index === 0 ? "已收到服务响应" : "复用原结果"}`));
+      `本轮第 ${items.indexOf(call) + 1} 项 · ${index === 0 ? "已收到服务响应" : "复用原结果"} · 调用成功`));
     wrapper.unmount();
   }
+});
+
+it.each(["kimi_web_search_pro", "kimi_web_fetch"])("shows each %s call's own status when an active call shares a settled result", async tool => {
+  const pending = {...search("first", {relation: "first", dispatch: "attempted", outcome: "pending", availability: "pending"}), status: "inProgress" as const};
+  const settled = search("waiter", {relation: "joined"});
+  const calls = [pending, settled].map(call => tool === "kimi_web_fetch"
+    ? {...call, mcp: {...call.mcp!, tool, resultKind: "omitted" as const, texts: []}}
+    : call);
+  const wrapper = mount(ChatTurnGroup, {props: {turn: traceTurn(calls, true), position: 1}});
+  await wrapper.get(".chat-activity-group__toggle").trigger("click");
+  const card = wrapper.get(".mcp-tool-row");
+  await card.get(disclosure).trigger("click");
+  expect(card.get(".native-tool").attributes("aria-busy")).toBe("false");
+  if (tool === "kimi_web_fetch") expect(card.text()).toContain("读取已完成。这条记录没有保存页面详情。");
+  expect(card.get(".chat-execution-details__footer .chat-tool-call-status--success").text()).toBe("调用成功");
+  expect(card.findAll(".native-tool__calls .chat-tool-call-status").map(status => status.text())).toEqual(["执行中", "调用成功"]);
+  expect(card.findAll(".native-tool__calls .chat-tool-call-status--success")).toHaveLength(1);
+  wrapper.unmount();
 });
 
 it("uses a settled logical receipt when the earliest observed item has incomplete facts", async () => {
