@@ -36,6 +36,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use unicode_segmentation::UnicodeSegmentation;
 use uuid::Uuid;
 
+mod skill_title;
+
 const DATABASE_FILE_NAME: &str = "conversations.db";
 const MAX_REASONING_PART_BYTES: usize = 64 * 1024;
 const MAX_REASONING_ITEM_BYTES: usize = 128 * 1024;
@@ -2307,7 +2309,7 @@ impl ChatRepository {
         let turn_id = Uuid::now_v7();
         let turn_operation_id = Uuid::now_v7();
         let message_id = Uuid::now_v7();
-        let title = fallback_title(input);
+        let title = skill_title::legacy_title(input);
         transaction
             .execute(
                 "INSERT INTO chat_sessions(
@@ -2532,18 +2534,25 @@ impl ChatRepository {
         if !project_exists {
             return Err(ChatError::NotFound);
         }
-        let title_source = if text_projection.trim().is_empty() {
-            first_attachment_name(
+        let skill_prose = skill_title::draft_prose(transaction, blocks)?;
+        let title_source = skill_prose.as_deref().unwrap_or(&text_projection);
+        let title = if title_source.trim().is_empty() {
+            let attachment = first_attachment_name(
                 transaction,
                 &scope.owner_user_id,
                 &scope.tenant_id,
                 &DraftTarget::New,
                 blocks,
                 now,
-            )?
-            .unwrap_or_else(|| "新任务".to_owned())
+            )?;
+            let default_title = if skill_prose.is_some() {
+                skill_title::SKILL_ONLY_TITLE
+            } else {
+                "新任务"
+            };
+            fallback_title(attachment.as_deref().unwrap_or(default_title))
         } else {
-            text_projection.clone()
+            fallback_title(title_source)
         };
         let session_id = Uuid::now_v7();
         let task_id = session_id;
@@ -2565,7 +2574,7 @@ impl ChatRepository {
                     scope.owner_user_id,
                     scope.tenant_id,
                     project_id.to_string(),
-                    fallback_title(&title_source),
+                    title,
                     now,
                 ],
             )
@@ -4958,6 +4967,7 @@ impl ChatRepository {
                 },
             )
             .collect::<Result<Vec<_>, ChatError>>()?;
+        skill_title::restore_fallback_titles(&self.connection, &self.scope, &mut sessions)?;
         let next_cursor = if has_more {
             sessions.last().map(|session| SessionPageCursor {
                 pinned_at: session.pinned_at,
@@ -7653,7 +7663,17 @@ fn fallback_title(input: &str) -> String {
         })
         .collect::<String>();
     let collapsed = safe.split_whitespace().collect::<Vec<_>>().join(" ");
-    let title = collapsed.graphemes(true).take(40).collect::<String>();
+    // The display limit counts graphemes. The existing SQLite title column
+    // also bounds Unicode code points, including those within a single emoji.
+    let mut code_points = 0;
+    let title = collapsed
+        .graphemes(true)
+        .take(40)
+        .take_while(|grapheme| {
+            code_points += grapheme.chars().count();
+            code_points <= 255
+        })
+        .collect::<String>();
     if title.is_empty() {
         "新任务".to_owned()
     } else {
@@ -8749,7 +8769,7 @@ fn load_session_summary_from_connection(
         .optional()
         .map_err(|_| ChatError::DatabaseUnavailable)?
         .ok_or(ChatError::NotFound)?;
-    Ok(SessionSummary {
+    let mut summary = SessionSummary {
         session_id,
         project_id: row.0.as_deref().map(parse_uuid_value).transpose()?,
         title: row.1,
@@ -8758,7 +8778,9 @@ fn load_session_summary_from_connection(
         last_activity_at: row.4,
         latest_turn_status: row.5,
         project_available: row.6,
-    })
+    };
+    skill_title::restore_fallback_titles(connection, scope, std::slice::from_mut(&mut summary))?;
+    Ok(summary)
 }
 
 fn load_history_page_from_connection(
@@ -9359,6 +9381,7 @@ fn persist_new_task_permission(
 #[cfg(test)]
 mod tests {
     mod publication_acceptance;
+    mod skill_titles;
     #[test]
     #[cfg(feature = "kimi-k31-pro-candidate")]
     fn retired_tool_preference_is_removed_without_changing_chat_history() {
