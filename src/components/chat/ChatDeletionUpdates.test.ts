@@ -1,19 +1,41 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "../../stores/chat.store";
 import ChatDeletionUpdates from "./ChatDeletionUpdates.vue";
 
-const warning = vi.hoisted(() => vi.fn());
+const { success, warning } = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn() }));
 const historyChanged = vi.hoisted(() => ({ handler: (() => {}) as () => void, unlisten: vi.fn() }));
-vi.mock("naive-ui", () => ({ useNotification: () => ({ warning }) }));
+vi.mock("naive-ui", () => ({ useMessage: () => ({ success }), useNotification: () => ({ warning }) }));
 vi.mock("../../api/chat-history-events", () => ({ onChatHistoryChanged: async (handler: () => void) => {
   historyChanged.handler = handler;
   return historyChanged.unlisten;
 } }));
 
 describe("local history deletion notification", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it.each([false, true])("shows one success toast when deletion finishes (initially pending: %s)", initiallyPending => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const store = useChatStore();
+    const wrapper = mount(ChatDeletionUpdates, { global: { plugins: [pinia] } });
+    const complete = { operationId: "019c1a00-0000-7000-8000-000000000008",
+      desktopState: "complete" as const, hostState: "complete" as const, runtimeState: "complete" as const,
+      outcomeCode: "cleanup_complete", lastErrorCode: null, requestedAt: 1, completedAt: 2, expiresAt: 3 };
+    if (initiallyPending) {
+      store.cleanupStatus = { ...complete, runtimeState: "pending", outcomeCode: "pending", completedAt: null, expiresAt: null };
+    }
+    expect(success).not.toHaveBeenCalled();
+    store.cleanupStatus = complete;
+    store.cleanupStatus = null;
+    store.cleanupStatus = { ...complete };
+    expect(success).toHaveBeenCalledExactlyOnceWith("任务已永久删除");
+    expect(warning).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
   it("announces the incomplete remote result once even when route cleanup clears the selection", () => {
     const pinia = createPinia();
     setActivePinia(pinia);
@@ -31,6 +53,7 @@ describe("local history deletion notification", () => {
     expect(warning).toHaveBeenCalledWith(expect.objectContaining({
       title: "本地任务记录已删除", content: expect.stringContaining("无法确认"), duration: 0, closable: true,
     }));
+    expect(success).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 
