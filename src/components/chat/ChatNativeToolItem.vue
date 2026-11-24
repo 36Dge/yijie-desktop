@@ -14,7 +14,7 @@ import { activityItemIcon, activityNativeItem, activityToolSourceLabel, deepSear
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
 import ChatTimelineItemShell, { type ChatTimelineDisclosureChange } from "./ChatTimelineItemShell.vue";
 
-const props = defineProps<{ item: ConversationTimelineItemViewModel; execution: ConversationNativeToolExecution; processPresentation?: boolean; searchCalls?: readonly ConversationTimelineItemViewModel[]; imageViewNumber?: number }>();
+const props = defineProps<{ item: ConversationTimelineItemViewModel; execution: ConversationNativeToolExecution; processPresentation?: boolean; searchCalls?: readonly ConversationTimelineItemViewModel[]; imageViewNumber?: number; repeatCallTimeMs?: number }>();
 const emit = defineEmits<{ "disclosure-change": [change: ChatTimelineDisclosureChange] }>();
 const evidence = computed(() => deepSearchEvidence(props.item, props.searchCalls));
 const { open, openError } = useWebSources(() => evidence.value);
@@ -26,11 +26,6 @@ const mcp = computed(() => native.value.mcp);
 const builtinWeb = computed(() => mcp.value?.server === "yijie_web" && ["kimi_web_search", "kimi_web_search_pro", "kimi_web_fetch"].includes(mcp.value.tool ?? ""));
 const deepSearch = computed(() => builtinWeb.value && mcp.value?.tool === "kimi_web_search_pro");
 const webFetch = computed(() => builtinWeb.value && mcp.value?.tool === "kimi_web_fetch");
-const fetchSite = computed(() => {
-  const site = native.value.argumentsSummary;
-  return webFetch.value && site && /^[a-z\d.-]{1,253}$/i.test(site) &&
-    !mcp.value?.diagnostics.some(code => code === "arguments_unavailable") ? site : undefined;
-});
 const fetchDetails = computed(() => {
   const receipt = mcp.value;
   if (!webFetch.value || receipt?.resultKind !== "text" || receipt.texts.length !== 1 || receipt.texts[0]?.index !== 0) return;
@@ -65,7 +60,7 @@ const searchResult = computed(() => {
   if (!deepSearch.value || receipt?.resultKind !== "text" || receipt.texts.length !== 1 || receipt.texts[0]?.index !== 0) return null;
   return readDeepSearchPreview(receipt.texts[0].text);
 });
-const title = computed(() => [activityItemTitle(props.item), query.value || fetchSite.value].filter(Boolean).join(" · "));
+const title = computed(() => activityItemTitle(evidence.value));
 const elapsed = computed(() => native.value.durationMs == null ? null : formatToolDuration(native.value.durationMs));
 const sourceAndDuration = computed(() => [activityToolSourceLabel(props.item), elapsed.value && `用时 ${elapsed.value}`].filter(Boolean).join(" · "));
 const status = computed(() => {
@@ -142,7 +137,7 @@ const toolOutcome = computed(() => {
   <ChatTimelineItemShell
     :class="{ 'mcp-tool-row': mcpCall, 'deep-search-row': deepSearch, 'web-fetch-row': webFetch }"
     :process-presentation="processPresentation"
-    :item="item" :label="title" :status-label="headerStatus" :icon="activityItemIcon(item, mcp)"
+    :item="item" :label="title" :call-time-ms="repeatCallTimeMs" :status-label="headerStatus" :icon="activityItemIcon(item, mcp)"
     collapsible :show-availability="!mcpCall && !fileChange && !imageView" :default-expanded="!mcpCall && !processPresentation && item.busy"
     @disclosure-change="emit('disclosure-change', $event)"
   >

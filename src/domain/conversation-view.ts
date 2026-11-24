@@ -116,6 +116,7 @@ export interface ConversationNativeCommandExecution {
   readonly native: Readonly<{
     source: NativeConversationView["source"];
     lastMethod: NativeConversationView["items"][number]["lastMethod"];
+    callStartedAtMs?: number;
     item: NativeConversationView["items"][number]["item"];
   }>;
 }
@@ -396,7 +397,7 @@ function nativeExecution(entry: NativeConversationView["items"][number], view: N
       item.status === "completed" || item.status === "failed" || item.status === "declined" ? item.status :
       ["subAgentActivity", "imageView"].includes(item.type) && entry.lastMethod === "item/started" ? "in_progress" :
       ["subAgentActivity", "imageView"].includes(item.type) && entry.lastMethod === "item/completed" ? "completed" : "unknown",
-    native: {source: view.source, lastMethod: entry.lastMethod, item},
+    native: {source: view.source, lastMethod: entry.lastMethod, item, callStartedAtMs: entry.callStartedAtMs},
   };
   return null;
 }

@@ -85,9 +85,11 @@ const legacySix = structuredClone(publicSpec);
 delete legacySix.components.schemas.NativeItem.properties.publication;
 delete legacySix.components.schemas.NativeMessagePublication;
 legacySix.components.schemas.NativeItem.properties.type.enum = legacySix.components.schemas.NativeItem.properties.type.enum.filter(kind => kind !== "unpublishedText");
-for(const [version,pub,priv] of [[1,legacyPublic,legacyPrivate],[2,previousPublic,previousPrivate],[3,thirdPublic,thirdPrivate],[4,fourthPublic,fourthPrivate],[6,legacySix,privateSpec],[7,publicSpec,privateSpec]]){const defs=jsonSchema({...pub.components.schemas,...priv.definitions});savedAjv.addSchema({...defs.NativeConversationView,definitions:defs},"saved"+version);}
+const legacyPrivateDisplay = structuredClone(privateSpec);
+delete legacyPrivateDisplay.definitions.NativeDisplayItem.properties.callStartedAtMs;
+for(const [version,pub,priv] of [[1,legacyPublic,legacyPrivate],[2,previousPublic,previousPrivate],[3,thirdPublic,thirdPrivate],[4,fourthPublic,fourthPrivate],[6,legacySix,legacyPrivateDisplay],[7,publicSpec,legacyPrivateDisplay],[8,publicSpec,privateSpec]]){const defs=jsonSchema({...pub.components.schemas,...priv.definitions});savedAjv.addSchema({...defs.NativeConversationView,definitions:defs},"saved"+version);}
 savedAjv.addSchema(archiveResolved,"saved5");
-const savedValidation='/* Generated saved-format validators; do not edit. */\nimport ucs2lengthModule from "ajv/dist/runtime/ucs2length.js";\nconst ucs2length=typeof ucs2lengthModule === "function"?ucs2lengthModule:ucs2lengthModule.default;\n'+standalone(savedAjv,Object.fromEntries([1,2,3,4,5,6,7].map(n=>["validateSavedV"+n,"saved"+n]))).replaceAll('require("ajv/dist/runtime/ucs2length").default',"ucs2length");
+const savedValidation='/* Generated saved-format validators; do not edit. */\nimport ucs2lengthModule from "ajv/dist/runtime/ucs2length.js";\nconst ucs2length=typeof ucs2lengthModule === "function"?ucs2lengthModule:ucs2lengthModule.default;\n'+standalone(savedAjv,Object.fromEntries([1,2,3,4,5,6,7,8].map(n=>["validateSavedV"+n,"saved"+n]))).replaceAll('require("ajv/dist/runtime/ucs2length").default',"ucs2length");
 const outputs=[
  ["src-tauri/schemas/chat-native-archive-v5-resolved.schema.json",JSON.stringify(archiveResolved,null,2)+"\n"],
  ["scripts/generated/native-saved-views-validator.gen.mjs",savedValidation],

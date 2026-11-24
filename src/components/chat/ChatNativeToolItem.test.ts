@@ -218,7 +218,7 @@ describe("native Tool display",()=>{
     const named=traceTurn([{...raw,toolDisplay:{provenance:"registeredTool",title:"已登记的具体名称",sourceLabel:"已登记的服务"}}]).items[0]!;
     expect(activityToolTitle(named)).toBe("已登记的具体名称"); expect(activityToolSourceLabel(named)).toBe("已登记的服务");
     const other=traceTurn([{...raw,toolLabel:"ordinary-service / kimi_web_fetch",mcp:{...raw.mcp!,server:"ordinary-service"}}]).items[0]!;
-    expect(activityToolTitle(other)).toBe("使用工具"); expect(activityToolSourceLabel(other)).toBeUndefined();
+    expect(activityToolTitle(other)).toBe("kimi web fetch"); expect(activityToolSourceLabel(other)).toBeUndefined();
   });
   it.each(["available", "partial"] as const)("shows a compact progress update for legacy Sorftime calls (%s)", async availability=>{
     const props=fixture(false, availability);
@@ -226,7 +226,7 @@ describe("native Tool display",()=>{
     expect(props.execution).not.toHaveProperty("resultSummary");
     const wrapper=mount(ChatNativeToolItem,{props});
     const toggle = wrapper.get("button.chat-timeline-item-shell__disclosure");
-    expect(toggle.text()).toBe("查看 Amazon 商品详情");
+    expect(toggle.text()).toBe("查看 Amazon 商品详情 · B07H9PZDQW");
     expect(toggle.attributes("aria-expanded")).toBe("false");
     await toggle.trigger("click");
     expect(wrapper.text()).toContain("正在等待工具返回结果");
@@ -284,7 +284,7 @@ describe("native Tool display",()=>{
     if (item.execution?.kind !== "tool" || !("native" in item.execution)) throw new Error("missing execution");
     const wrapper = mount(ChatNativeToolItem, {props: {item, execution: item.execution}});
     const toggle = wrapper.get("button.chat-timeline-item-shell__disclosure");
-    expect(toggle.text()).toBe("使用连接器");
+    expect(toggle.text()).toBe("list entries");
     await toggle.trigger("click");
     expect(wrapper.get(".chat-timeline-item-shell__body").text()).toBe(expected);
     wrapper.unmount();

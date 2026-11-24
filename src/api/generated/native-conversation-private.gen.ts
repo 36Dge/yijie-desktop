@@ -41,6 +41,10 @@ export interface NativeDisplayItem {
   item: NativeItem;
   lastMethod: "item/started" | "item/completed" | "thread/read";
   ordinal: number;
+  /**
+   * Host observation time of this connector Item's first item/started notification, in Unix milliseconds. Display only. Absent when the original start was not observed.
+   */
+  callStartedAtMs?: number;
 }
 export interface NativeItem {
   id: string;

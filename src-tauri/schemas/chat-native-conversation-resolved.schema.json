@@ -951,6 +951,12 @@
         "ordinal": {
           "type": "integer",
           "minimum": 0
+        },
+        "callStartedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799999,
+          "description": "Host observation time of this connector Item's first item/started notification, in Unix milliseconds. Display only. Absent when the original start was not observed."
         }
       },
       "required": [

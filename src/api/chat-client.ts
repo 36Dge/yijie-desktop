@@ -356,7 +356,8 @@ export function createChatClient(transport: ChatClientTransport = productionTran
   async function run<T>(command: string, request: Record<string, unknown>, parse: (value: unknown) => T): Promise<T> {
     try {
       const history = command === "chat_load_history_v2" || command === "chat_load_history_v3" || command === "chat_resync_session_v2";
-      return parse(await transport.invoke(command, history ? { request, includeUserMessageSkills: true } : { request }));
+      const callTimes = command === "chat_load_native_history_v7" || (command === "chat_subscribe_session_v1" && request.schemaVersion === 6);
+      return parse(await transport.invoke(command, {request, ...(history && {includeUserMessageSkills: true}), ...(callTimes && {includeMcpCallTimes: true})}));
     } catch (error: unknown) {
       mapFailure(error);
     }

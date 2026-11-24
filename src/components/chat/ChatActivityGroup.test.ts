@@ -2,10 +2,42 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { enableAutoUnmount, mount } from "@vue/test-utils";
 import { traceItem, traceTurn } from "../../domain/conversation-activity-fixtures";
+import type { NativeConversationView } from "../../api/generated/native-conversation-private.gen";
+import { composeConversationView } from "../../domain/conversation-view";
+import { selectConversationTimeline } from "../../domain/conversation-timeline";
 import ChatTurnGroup from "./ChatTurnGroup.vue";
 import ChatTraceNotices from "./ChatTraceNotices.vue";
 
 enableAutoUnmount(afterEach);
+it("shows one row per visible MCP call, with a separate original clock for repeated titles", async () => {
+  const start = Date.UTC(2026, 0, 4, 10, 0);
+  const view: NativeConversationView = {
+    sessionId: "s", turnId: "t", runtimeThreadId: "r", runtimeTurnId: "rt", ordinal: 0,
+    revision: "1", source: "native_observed", availability: "available", status: "completed",
+    statusSource: "runtime_notification", terminalObserved: true,
+    items: ["青岛", "上海", "青岛", "上海"].map((city, ordinal) => ({
+      ordinal, lastMethod: "item/completed", callStartedAtMs: start + ordinal * 500,
+      item: traceItem("call-" + ordinal, "mcpToolCall", {
+        status: ordinal === 3 ? "failed" : "completed", durationMs: 2400, resultSummary: "已返回天气观测。",
+        toolDisplay: {provenance: "registeredTool", title: "查询天气 · " + city},
+        mcp: {server: "weather", tool: "get_weather", resultKind: "text", texts: [{index: 0, text: "记录"}], diagnostics: []},
+      }),
+    })),
+  };
+  const state = composeConversationView({threads: [{threadId: "s", status: "ready"}], turns: [], items: []}, [view]);
+  const turn = selectConversationTimeline(state, "s")!.turns[0]!;
+  const wrapper = mount(ChatTurnGroup, {props: {turn, position: 1}});
+  await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
+  await wrapper.get(".chat-activity-group__toggle").trigger("click");
+  const rows = wrapper.findAll(".mcp-tool-row");
+  expect(rows.map(row => row.get("button strong").text())).toEqual(["查询天气 · 青岛", "查询天气 · 上海", "查询天气 · 青岛"]);
+  expect(rows.map(row => row.element.querySelector("button time")?.getAttribute("datetime"))).toEqual([
+    new Date(start).toISOString(), undefined, new Date(start + 1000).toISOString(),
+  ]);
+  await rows[0]!.get("button").trigger("click");
+  expect(rows[0]!.get(".chat-execution-details").text()).toBe("已返回天气观测。用时 2.4 秒");
+  expect(rows[0]!.find(".chat-execution-details time").exists()).toBe(false);
+});
 it("numbers visible image views across groups and shows their own result after an interrupted turn", async () => {
   const image = (id: string) => traceItem(id, "imageView", {
     toolLabel: "查看图片", toolDisplay: {provenance: "registeredTool", title: "查看图片", sourceLabel: "原生工具"},

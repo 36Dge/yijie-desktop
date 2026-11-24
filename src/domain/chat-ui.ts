@@ -11,6 +11,14 @@ export const CHAT_BOTTOM_BUTTON_THRESHOLD_PX = 160;
 export const CHAT_INPUT_MAX_BYTES = 64 * 1024;
 
 const toolSeconds = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 });
+const callClock = new Intl.DateTimeFormat("zh-CN", {hourCycle: "h23", hour: "2-digit", minute: "2-digit", second: "2-digit"});
+export function formatMcpCallTime(ms?: number) {
+  if (ms == null) return null;
+  const date = new Date(ms);
+  if (!Number.isFinite(date.valueOf())) return null;
+  return {iso: date.toISOString(), label: `${callClock.format(date)}.${String(date.getMilliseconds()).padStart(3, "0")}`};
+}
+
 export function formatToolDuration(durationMs: number): string {
   if (durationMs < 1_000) return `${durationMs} 毫秒`;
   return `${toolSeconds.format(durationMs / 1_000)} 秒`;

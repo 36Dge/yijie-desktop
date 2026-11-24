@@ -526,6 +526,7 @@ struct EventBridgeState {
 
 struct SubscriptionRecord {
     schema_version: u8,
+    include_mcp_call_times: bool,
     context_id: Uuid,
     session_id: Uuid,
     projection_sequence: u64,
@@ -686,6 +687,7 @@ impl ChatEventBridge {
         context_id: Uuid,
         session_id: Uuid,
         schema_version: u8,
+        include_mcp_call_times: bool,
     ) -> Result<Uuid, ChatIpcError> {
         if !matches!(
             schema_version,
@@ -708,6 +710,7 @@ impl ChatEventBridge {
             subscription_id,
             SubscriptionRecord {
                 schema_version,
+                include_mcp_call_times,
                 context_id,
                 session_id,
                 projection_sequence: 0,
@@ -999,13 +1002,17 @@ impl TurnProjectionSink for ChatEventBridge {
                         .is_ok()
                 })
                 .map(|(id, record)| {
+                    let mut selected = view.clone();
+                    if !record.include_mcp_call_times {
+                        super::native_conversation_storage::strip_mcp_call_times(&mut selected);
+                    }
                     super::native_conversation_generated::NativeConversationViewEvent {
                         schema_version: 6,
                         previews: None,
                         context_id: record.context_id.to_string(),
                         subscription_id: id.to_string(),
                         session_id: session_id.to_string(),
-                        view: view.clone(),
+                        view: selected,
                     }
                 })
                 .collect::<Vec<_>>();
@@ -1028,6 +1035,7 @@ impl TurnProjectionSink for ChatEventBridge {
                 .emit("chat:native-view:v7", &event)
                 .map_err(|_| ChatError::OrchestrationUnavailable)?;
             event.schema_version = 6;
+            super::native_conversation_storage::strip_mcp_call_times(&mut event.view);
             super::native_conversation::strip_publication(&mut event.view);
             window
                 .emit("chat:native-view:v6", event)
@@ -5468,6 +5476,7 @@ mod tests {
                 .unwrap();
         let mut record = SubscriptionRecord {
             schema_version: CHAT_IPC_SCHEMA_VERSION,
+            include_mcp_call_times: false,
             context_id: Uuid::parse_str("019c1a00-0000-7000-8000-000000000003").unwrap(),
             session_id: Uuid::parse_str(session_id).unwrap(),
             projection_sequence: 0,
@@ -5524,6 +5533,7 @@ mod tests {
         let subscription_id = Uuid::now_v7();
         let mut record = SubscriptionRecord {
             schema_version: CHAT_IPC_SCHEMA_VERSION,
+            include_mcp_call_times: false,
             context_id,
             session_id,
             projection_sequence: 0,
@@ -5882,6 +5892,7 @@ mod tests {
     fn feat136_retained_v5_envelope_preserves_source_version() {
         let record = SubscriptionRecord {
             schema_version: CHAT_IPC_V6_SCHEMA_VERSION,
+            include_mcp_call_times: false,
             context_id: Uuid::now_v7(),
             session_id: Uuid::now_v7(),
             projection_sequence: 1,
@@ -6115,6 +6126,7 @@ mod tests {
 
         let record = SubscriptionRecord {
             schema_version: CHAT_IPC_V4_SCHEMA_VERSION,
+            include_mcp_call_times: false,
             context_id: Uuid::now_v7(),
             session_id,
             projection_sequence: 1,
@@ -6217,6 +6229,7 @@ mod tests {
         let turn_id = Uuid::now_v7();
         let mut record = SubscriptionRecord {
             schema_version: CHAT_IPC_V4_SCHEMA_VERSION,
+            include_mcp_call_times: false,
             context_id,
             session_id,
             projection_sequence: 0,
@@ -6263,6 +6276,7 @@ mod tests {
             subscription_id,
             SubscriptionRecord {
                 schema_version: CHAT_IPC_SCHEMA_VERSION,
+                include_mcp_call_times: false,
                 context_id,
                 session_id,
                 projection_sequence: 0,
@@ -6317,6 +6331,7 @@ mod tests {
             subscription_id,
             SubscriptionRecord {
                 schema_version: CHAT_IPC_V4_SCHEMA_VERSION,
+                include_mcp_call_times: false,
                 context_id,
                 session_id,
                 projection_sequence: 0,
@@ -6360,6 +6375,7 @@ mod tests {
         let denied_subscription_id = Uuid::from_u128(0x604);
         let record = |context_id| SubscriptionRecord {
             schema_version: CHAT_IPC_V6_SCHEMA_VERSION,
+            include_mcp_call_times: false,
             context_id,
             session_id,
             projection_sequence: 0,
@@ -6409,6 +6425,7 @@ mod tests {
         let record =
             |schema_version, context_id, session_id, blocked, terminal| SubscriptionRecord {
                 schema_version,
+                include_mcp_call_times: false,
                 context_id,
                 session_id,
                 projection_sequence: 0,
@@ -7003,6 +7020,7 @@ mod tests {
         let turn_id = Uuid::parse_str("13400000-0000-4000-8000-000000000005").unwrap();
         let mut record = SubscriptionRecord {
             schema_version: CHAT_IPC_V4_SCHEMA_VERSION,
+            include_mcp_call_times: false,
             context_id,
             session_id,
             projection_sequence: 0,
@@ -7118,7 +7136,12 @@ mod tests {
         let subscription_id = runtime
             .inner
             .event_bridge
-            .subscribe(context.context_id, session_id, CHAT_IPC_V6_SCHEMA_VERSION)
+            .subscribe(
+                context.context_id,
+                session_id,
+                CHAT_IPC_V6_SCHEMA_VERSION,
+                false,
+            )
             .unwrap();
         runtime
             .cache_pending_approval_snapshot(
@@ -7205,6 +7228,7 @@ mod tests {
                 first_context.context_id,
                 session_id,
                 CHAT_IPC_V6_SCHEMA_VERSION,
+                false,
             )
             .unwrap();
         let superseded = Arc::new(Notify::new());
@@ -7406,7 +7430,7 @@ mod tests {
         let subscription_id = runtime
             .inner
             .event_bridge
-            .subscribe(context_id, session_id, CHAT_IPC_V6_SCHEMA_VERSION)
+            .subscribe(context_id, session_id, CHAT_IPC_V6_SCHEMA_VERSION, false)
             .unwrap();
         let snapshot = PendingApprovalSnapshot {
             stream_id: Uuid::now_v7(),
@@ -7724,7 +7748,9 @@ pub async fn chat_renew_context_v1(
         .renew(request.context_id, projection, now)
         .map_err(|e| map_chat_error(e, Some(request.request_id)))?;
     if let Some(renewal) = renewal {
-        renewal.deliver().await
+        renewal
+            .deliver()
+            .await
             .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request.request_id)))?;
     }
     let allowed_actions = manager
@@ -8840,16 +8866,24 @@ pub async fn chat_load_native_history_v6(
     chat_runtime: State<'_, ChatRuntime>,
     ipc_runtime: State<'_, ChatIpcRuntime>,
 ) -> Result<Value, ChatIpcError> {
-    load_native_history(request, chat_runtime, ipc_runtime, false).await
+    load_native_history(request, chat_runtime, ipc_runtime, false, false).await
 }
 
 #[tauri::command]
 pub async fn chat_load_native_history_v7(
     request: Value,
+    include_mcp_call_times: Option<bool>,
     chat_runtime: State<'_, ChatRuntime>,
     ipc_runtime: State<'_, ChatIpcRuntime>,
 ) -> Result<Value, ChatIpcError> {
-    load_native_history(request, chat_runtime, ipc_runtime, true).await
+    load_native_history(
+        request,
+        chat_runtime,
+        ipc_runtime,
+        true,
+        include_mcp_call_times.unwrap_or(false),
+    )
+    .await
 }
 
 async fn load_native_history(
@@ -8857,6 +8891,7 @@ async fn load_native_history(
     chat_runtime: State<'_, ChatRuntime>,
     ipc_runtime: State<'_, ChatIpcRuntime>,
     publication: bool,
+    include_mcp_call_times: bool,
 ) -> Result<Value, ChatIpcError> {
     let request: CommandRequest<super::native_conversation_generated::NativeHistoryRequest> =
         decode_request(request)?;
@@ -8892,8 +8927,11 @@ async fn load_native_history(
     let finished = ipc_runtime.finish_read(request.request_id);
     let mut data = result.map_err(|error| map_chat_error(error, Some(request.request_id)))?;
     finished?;
-    if !publication {
-        for view in &mut data.views {
+    for view in &mut data.views {
+        if !include_mcp_call_times {
+            super::native_conversation_storage::strip_mcp_call_times(view);
+        }
+        if !publication {
             super::native_conversation::strip_publication(view);
         }
     }
@@ -9984,6 +10022,7 @@ pub async fn chat_decide_approval_v6(
 #[tauri::command]
 pub async fn chat_subscribe_session_v1(
     request: Value,
+    include_mcp_call_times: Option<bool>,
     app: AppHandle,
     chat_runtime: State<'_, ChatRuntime>,
     ipc_runtime: State<'_, ChatIpcRuntime>,
@@ -10030,6 +10069,7 @@ pub async fn chat_subscribe_session_v1(
                 request.context_id,
                 request.payload.session_id,
                 CHAT_IPC_V6_SCHEMA_VERSION,
+                include_mcp_call_times.unwrap_or(false),
             )
             .map_err(ChatIpcError::v6)?;
         let pending = match authorized
@@ -10101,6 +10141,7 @@ pub async fn chat_subscribe_session_v1(
                 request.context_id,
                 request.payload.session_id,
                 CHAT_IPC_V5_SCHEMA_VERSION,
+                false,
             )
             .map_err(ChatIpcError::v5)?;
         return serde_json::to_value(CommandResponse::new_v5(
@@ -10146,6 +10187,7 @@ pub async fn chat_subscribe_session_v1(
                 request.context_id,
                 request.payload.session_id,
                 CHAT_IPC_V4_SCHEMA_VERSION,
+                false,
             )
             .map_err(ChatIpcError::v4)?;
         return serde_json::to_value(CommandResponse::new_v4(
@@ -10182,6 +10224,7 @@ pub async fn chat_subscribe_session_v1(
         request.context_id,
         request.payload.session_id,
         CHAT_IPC_SCHEMA_VERSION,
+        false,
     )?;
     serde_json::to_value(CommandResponse::new(
         request.request_id,
@@ -10410,7 +10453,8 @@ pub async fn chat_decide_runtime_approval_v2(
     require_runtime_permissions(r.request_id)?;
     let (app, _, manager) = applications(&chat_runtime, r.request_id).await?;
     authorize(&manager, r.context_id, ChatAction::SubmitTurn, r.request_id)?;
-    if !["approve_once", "reject", "cancel", "approve_similar"].contains(&r.payload.decision.as_str())
+    if !["approve_once", "reject", "cancel", "approve_similar"]
+        .contains(&r.payload.decision.as_str())
         && !super::runtime_permissions::native_choice_handle(&r.payload.decision)
     {
         return Err(map_chat_error(ChatError::InvalidInput, Some(r.request_id)));
@@ -10712,7 +10756,12 @@ pub async fn chat_context_window_v1(
         .map_err(|_| map_chat_error(ChatError::InvalidInput, Some(r.request_id)))?;
     let (_, app, _) = applications(&chat_runtime, r.request_id).await?;
     let value = app
-        .context_window(r.context_id, session, r.payload.include_history, r.payload.include_last_observation.unwrap_or(false))
+        .context_window(
+            r.context_id,
+            session,
+            r.payload.include_history,
+            r.payload.include_last_observation.unwrap_or(false),
+        )
         .await
         .map_err(|e| map_chat_error(e, Some(r.request_id)))?;
     Ok(CommandResponse::new(r.request_id, value))

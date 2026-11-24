@@ -1,5 +1,6 @@
 import type { NativeItem } from "../api/generated/native-conversation-private.gen";
 import { sorftimeCategoryTool } from "./sorftime-category-result";
+import type { ConversationToolExecution } from "./conversation-view";
 
 type ActionLabel = { title: string; source?: string };
 
@@ -30,17 +31,49 @@ function displayName(value?: string): string | undefined {
 const genericLabels = new Set(["工具调用", "调用工具", "连接器工具"]);
 const receiptLabels = new Set(["结果已接收", "结构化结果已接收"]);
 
+function readableMethod(tool?: string): string | undefined {
+  if (!tool || !/^[a-zA-Z][a-zA-Z0-9_.-]{0,99}$/.test(tool) || /^(m_[a-f\d]{16,}|mcp__)/i.test(tool)) return;
+  return tool.replace(/[_./-]+/g, " ");
+}
+
+export function legacyMcpTitle(execution: ConversationToolExecution): string {
+  const {serverName, toolName, resolution} = execution.identity;
+  if (resolution !== "known") return "工具调用";
+  const action = knownActions.get(`${serverName}/${toolName}`)?.title ?? readableMethod(toolName) ?? "使用工具";
+  // Only the original Host's public ASIN summary is unambiguous on legacy Items.
+  const asin = /^ASIN: ([A-Z0-9]{10})(?: · 站点: [A-Z]{2})?$/.exec(execution.argumentsSummary.text)?.[1];
+  return asin ? `${action} · ${asin}` : action;
+}
+
 export function nativeMcpLabels(item: NativeItem): ActionLabel {
   const mcp = item.mcp;
   const known = knownActions.get(`${mcp?.server}/${mcp?.tool}`);
   const source = displayName(item.toolDisplay?.sourceLabel) ?? known?.source;
+  const registered = item.toolDisplay?.provenance === "registeredTool" ? item.toolDisplay.title?.trim() : undefined;
+  if (registered?.includes(" · ") && !/\bmcp__|\bm_[a-f\d]{16,}/i.test(registered)) return {title: registered, source};
   for (const candidate of [item.toolDisplay?.title, item.toolLabel]) {
     const title = displayName(candidate);
     if (title && title !== mcp?.tool && title !== mcp?.server && !genericLabels.has(title)) return {title, source};
   }
   if (known) return {title: known.title, source};
+  const method = readableMethod(mcp?.tool);
+  if (method) return {title: method, source};
   const fallback = mcp?.server === "yijie_market" ? "使用连接器" : "使用工具";
   return {title: source ? `使用 ${source}` : fallback, source};
+}
+
+export function nativeMcpRowTitle(item: NativeItem): string {
+  const {title} = nativeMcpLabels(item);
+  if (item.toolDisplay?.provenance === "registeredTool" && item.toolDisplay.title === title) return title;
+  const mcp = item.mcp;
+  const detail = item.argumentsSummary?.trim();
+  if (mcp?.server === "sorftime" && mcp.tool === "product_detail" && detail) {
+    const asin = /^ASIN: ([A-Z0-9]{10}) · 站点: [A-Z]{2}$/.exec(detail)?.[1];
+    if (asin) return `${title} · ${asin}`;
+  }
+  if (mcp?.server !== "yijie_web" || !detail || mcp.diagnostics.some(code => code === "arguments_unavailable")) return title;
+  const webTarget = mcp.tool === "kimi_web_search_pro" || (mcp.tool === "kimi_web_fetch" && /^[a-z\d.-]{1,253}$/i.test(detail));
+  return webTarget && !title.endsWith(` · ${detail}`) ? `${title} · ${detail}` : title;
 }
 
 /** A completed call can have an empty response or no saved result details. */

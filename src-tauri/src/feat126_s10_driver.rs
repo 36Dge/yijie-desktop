@@ -1637,7 +1637,7 @@ pub(crate) async fn feat126_s10_driver_chat(
             crate::chat::ipc::chat_get_session_control_plane_v1(request, chat, ipc)
         ),
         "chat_subscribe_session_v1" => value!(crate::chat::ipc::chat_subscribe_session_v1(
-            request, app, chat, ipc
+            request, None, app, chat, ipc
         )),
         "chat_resync_session_v1" => {
             value!(crate::chat::ipc::chat_resync_session_v1(request, chat, ipc))

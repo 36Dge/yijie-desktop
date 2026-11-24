@@ -10,6 +10,7 @@ use uuid::Uuid;
 // existing records are decoded in place and are never migrated on read.
 pub const NATIVE_WRITE_FORMAT: i64 = 6;
 pub(crate) const PUBLICATION_FORMAT: i64 = 7;
+const MCP_CLOCK_FORMAT: i64 = 8;
 
 pub(crate) fn has_publication(view: &NativeConversationView) -> bool {
     view.items
@@ -18,14 +19,36 @@ pub(crate) fn has_publication(view: &NativeConversationView) -> bool {
 }
 
 fn compatible_format(format: i64) -> bool {
-    matches!(format, NATIVE_WRITE_FORMAT | PUBLICATION_FORMAT)
+    matches!(
+        format,
+        NATIVE_WRITE_FORMAT | PUBLICATION_FORMAT | MCP_CLOCK_FORMAT
+    )
 }
 
-fn saved_format(view: &NativeConversationView, previous: Option<(i64, i64)>) -> i64 {
+fn fact_format(view: &NativeConversationView, previous: Option<(i64, i64)>) -> i64 {
     if has_publication(view) || previous.is_some_and(|(_, format)| format == PUBLICATION_FORMAT) {
         PUBLICATION_FORMAT
     } else {
         NATIVE_WRITE_FORMAT
+    }
+}
+
+fn saved_format(view: &NativeConversationView, previous: Option<(i64, i64)>) -> i64 {
+    if view
+        .items
+        .iter()
+        .any(|entry| entry.call_started_at_ms.is_some())
+        || previous.is_some_and(|(_, format)| format == MCP_CLOCK_FORMAT)
+    {
+        MCP_CLOCK_FORMAT
+    } else {
+        fact_format(view, previous)
+    }
+}
+
+pub(super) fn strip_mcp_call_times(view: &mut NativeConversationView) {
+    for entry in &mut view.items {
+        entry.call_started_at_ms = None;
     }
 }
 
@@ -37,10 +60,103 @@ pub(crate) fn decode_native_view(
         return Err(ChatError::DatabaseUnavailable);
     }
     let view = serde_json::from_str(json).map_err(|_| ChatError::DatabaseUnavailable)?;
-    if format == NATIVE_WRITE_FORMAT && has_publication(&view) {
+    if format == NATIVE_WRITE_FORMAT && has_publication(&view)
+        || view.items.iter().any(|entry| {
+            entry.call_started_at_ms.is_some_and(|ms| {
+                format != MCP_CLOCK_FORMAT
+                    || entry.item.kind != "mcpToolCall"
+                    || !(0..=253_402_300_799_999).contains(&ms)
+            })
+        })
+    {
         return Err(ChatError::DatabaseUnavailable);
     }
     Ok(view)
+}
+
+// A terminal read may supply a display title that an older Host did not
+// preserve. Enrich the returned copy only; the saved facts remain authoritative.
+fn read_historical_mcp_titles(
+    view: &mut NativeConversationView,
+    turn: &super::native_conversation_generated::NativeTurn,
+) -> Result<(), ChatError> {
+    use super::native_conversation_generated::NativeToolDisplay;
+    use std::collections::HashMap;
+    let by_id: HashMap<_, _> = turn
+        .items
+        .iter()
+        .filter(|item| {
+            item.kind == "mcpToolCall"
+                && item
+                    .tool_display
+                    .as_ref()
+                    .is_some_and(|d| d.provenance == "registeredTool" && d.title.is_some())
+        })
+        .map(|item| (item.id.as_str(), item))
+        .collect();
+    if by_id.is_empty() {
+        return Ok(());
+    }
+    let mut remaining = super::native_conversation::MAX_VIEW_BYTES.saturating_sub(
+        serde_json::to_vec(&view)
+            .map_err(|_| ChatError::DatabaseUnavailable)?
+            .len(),
+    );
+    for entry in &mut view.items {
+        let item = &mut entry.item;
+        let Some(saved) = item.mcp.as_ref() else {
+            continue;
+        };
+        let Some(other) = by_id.get(item.id.as_str()) else {
+            continue;
+        };
+        let Some(current) = other.mcp.as_ref() else {
+            continue;
+        };
+        let Some(title) = other.tool_display.as_ref().and_then(|d| d.title.as_deref()) else {
+            continue;
+        };
+        if item.kind != "mcpToolCall"
+            || item.status != other.status
+            || saved.server.is_none()
+            || saved.tool.is_none()
+            || saved.server != current.server
+            || saved.tool != current.tool
+        {
+            continue;
+        }
+        if let Some(old) = item
+            .tool_display
+            .as_ref()
+            .filter(|d| d.provenance == "registeredTool")
+            .and_then(|d| d.title.as_deref())
+        {
+            // Keep an original specific title. An older action without the target may be extended.
+            if !title
+                .strip_prefix(old)
+                .is_some_and(|suffix| suffix.starts_with(" · "))
+            {
+                continue;
+            }
+        }
+        let new_display = NativeToolDisplay {
+            provenance: "registeredTool".into(),
+            title: Some(title.to_owned()),
+            source_label: item
+                .tool_display
+                .as_ref()
+                .and_then(|d| d.source_label.clone()),
+        };
+        let size = serde_json::to_vec(&new_display)
+            .map_err(|_| ChatError::DatabaseUnavailable)?
+            .len()
+            + 15;
+        if size <= remaining {
+            item.tool_display = Some(new_display);
+            remaining -= size;
+        }
+    }
+    Ok(())
 }
 
 impl ChatRepository {
@@ -180,6 +296,15 @@ impl ChatRepository {
                 .filter(|s| s.thread_id == view.runtime_thread_id)
                 .and_then(|s| s.turns.iter().find(|t| t.id == view.runtime_turn_id));
             if let Some(turn) = rebuilt {
+                if !recover
+                    && matches!(
+                        view.status.as_deref(),
+                        Some("completed" | "failed" | "interrupted")
+                    )
+                    && turn.status == view.status
+                {
+                    read_historical_mcp_titles(view, turn)?;
+                }
                 if view.terminal_observed {
                     if turn.status != view.status {
                         view.availability = "partial".into();
@@ -247,6 +372,7 @@ impl ChatRepository {
                                     item: item.clone(),
                                     ordinal: ordinal as i64,
                                     last_method: "thread/read".into(),
+                                    call_started_at_ms: None,
                                 }
                             })
                             .collect()
@@ -332,7 +458,7 @@ impl ChatRepository {
             turns: vec![fact_turn],
             availability: "partial".into(),
         };
-        tx.execute("INSERT INTO chat_native_facts(turn_id,event_id,method,fact_json,format_version) VALUES(?1,?2,'thread/read',?3,?4)",params![view.turn_id,format!("local-read:{}",Uuid::now_v7()),serde_json::to_string(&fact).map_err(|_|ChatError::DatabaseUnavailable)?,format]).map_err(|_|ChatError::DatabaseUnavailable)?;
+        tx.execute("INSERT INTO chat_native_facts(turn_id,event_id,method,fact_json,format_version) VALUES(?1,?2,'thread/read',?3,?4)",params![view.turn_id,format!("local-read:{}",Uuid::now_v7()),serde_json::to_string(&fact).map_err(|_|ChatError::DatabaseUnavailable)?,fact_format(view, revision_row)]).map_err(|_|ChatError::DatabaseUnavailable)?;
         tx.execute("INSERT INTO chat_native_views(turn_id,session_id,source,revision,view_json,format_version) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(turn_id) DO UPDATE SET source=excluded.source,revision=excluded.revision,view_json=excluded.view_json,format_version=excluded.format_version",params![view.turn_id,view.session_id,view.source,revision,serde_json::to_string(view).map_err(|_|ChatError::DatabaseUnavailable)?,format]).map_err(|_|ChatError::DatabaseUnavailable)?;
         tx.execute(
             "UPDATE chat_turns SET status=?1 WHERE id=?2 AND runtime_turn_id=?3",
@@ -423,7 +549,7 @@ impl ChatRepository {
                 )
             {
                 let fact = serde_json::to_string(n).map_err(|_| ChatError::DatabaseUnavailable)?;
-                tx.execute("INSERT OR IGNORE INTO chat_native_facts(turn_id,event_id,method,fact_json,format_version) VALUES (?1,?2,?3,?4,?5)",params![view.turn_id,event.event_id,n.method,fact,format]).map_err(|_|ChatError::DatabaseUnavailable)?;
+                tx.execute("INSERT OR IGNORE INTO chat_native_facts(turn_id,event_id,method,fact_json,format_version) VALUES (?1,?2,?3,?4,?5)",params![view.turn_id,event.event_id,n.method,fact,fact_format(&view, revision_row)]).map_err(|_|ChatError::DatabaseUnavailable)?;
             }
         }
         let json = serde_json::to_string(&view).map_err(|_| ChatError::DatabaseUnavailable)?;
@@ -503,10 +629,37 @@ mod source_reader_tests {
             "https://example.org/statistics/2025"
         );
         assert!(decode_native_view(&new_json, 3).is_err());
-        // Storage 7 was introduced with stable publication. Live IPC v8 adds
-        // ephemeral previews, with no new on-disk format.
+        // Storage 7 introduced publication; storage 8 also accepts MCP start clocks.
         assert_eq!(decode_native_view(&new_json, 7).unwrap(), new);
-        assert!(decode_native_view(&new_json, 8).is_err());
+        assert_eq!(decode_native_view(&new_json, 8).unwrap(), new);
+        assert!(decode_native_view(&new_json, 9).is_err());
         assert!(!old_json.contains("sources"));
+    }
+
+    #[test]
+    fn mcp_history_returns_only_the_title_for_each_matching_original_item() {
+        use serde_json::json;
+        let item = |id: &str, tool: &str| {
+            json!({"id":id,"type":"mcpToolCall","status":"completed","availability":"partial","durationMs":450,
+            "mcp":{"server":"catalog","tool":tool,"texts":[],"diagnostics":[],"resultKind":"empty"}})
+        };
+        let stored = json!({"sessionId":"s","turnId":"t","runtimeThreadId":"r","runtimeTurnId":"rt","source":"native_observed",
+            "revision":"7","availability":"partial","status":"completed","terminalObserved":true,
+            "items":[{"item":item("a","lookup"),"ordinal":0,"lastMethod":"item/completed"},
+                     {"item":item("b","lookup"),"ordinal":1,"lastMethod":"item/completed"}]});
+        let mut a = item("a", "lookup");
+        a["toolDisplay"] = json!({"provenance":"registeredTool","title":"查询库存 · SKU-12"});
+        let mut b = item("b", "list");
+        b["toolDisplay"] = json!({"provenance":"registeredTool","title":"查看列表"});
+        let turn = serde_json::from_value(
+            json!({"id":"rt","status":"completed","items":[b,a],"itemsComplete":true}),
+        )
+        .unwrap();
+        let mut view = decode_native_view(&stored.to_string(), 7).unwrap();
+        read_historical_mcp_titles(&mut view, &turn).unwrap();
+        let mut expected = stored;
+        expected["items"][0]["item"]["toolDisplay"] =
+            json!({"provenance":"registeredTool","title":"查询库存 · SKU-12"});
+        assert_eq!(serde_json::to_value(view).unwrap(), expected);
     }
 }

@@ -2,7 +2,7 @@ import { observedProgressMessages, tailCommentaryCandidate } from "./conversatio
 import { traceDiagnosticBlocksLive } from "./conversation-trace-liveness";
 import { reasoningSummaryIsCurrent } from "./conversation-reasoning-summary";
 import { showConversationActivity } from "./conversation-tool-visibility";
-import { deepSearchEvidence, deepSearchReceipt, activityEntriesForItem, activityNativeItem, type ConversationActivityEntry } from "./conversation-activity-entry";
+import { deepSearchEvidence, deepSearchReceipt, activityEntriesForItem, activityNativeItem, activityToolTitle, mcpCallStart, type ConversationActivityEntry } from "./conversation-activity-entry";
 import type { ConversationTimelineItemViewModel as Item, ConversationTimelineTurnViewModel as Turn } from "./conversation-timeline";
 
 export type ConversationActivityHeaderState =
@@ -44,6 +44,17 @@ export function conversationActivityPresentation(turn: Turn, attentionIds: Reado
   }
   const ordered = new Map(Array.from(searches, ([id, calls]) => [id, Array.from(calls.values())] as const));
   const rendered = new Set<string>();
+  const repeatedTitles = new Set<string>();
+  const seenTitles = new Set<string>();
+  for (const item of visibleItems) {
+    const receipt = deepSearchReceipt(item);
+    if (receipt?.operation_id && ordered.get(receipt.operation_id)?.[0]?.identity !== item.identity) continue;
+    const execution = item.execution;
+    if (execution?.kind !== "tool" || ("native" in execution && execution.native.item.type !== "mcpToolCall")) continue;
+    const title = activityToolTitle(item);
+    if (seenTitles.has(title)) repeatedTitles.add(title);
+    seenTitles.add(title);
+  }
   const searchCalls = (item: Item) => {
     const id = deepSearchReceipt(item)?.operation_id;
     return id ? ordered.get(id) : undefined;
@@ -54,7 +65,10 @@ export function conversationActivityPresentation(turn: Turn, attentionIds: Reado
     const identity = `${turn.identity}:activity:${pending[0]!.identity}`;
     const entries = pending.flatMap(item => {
       const related = searchCalls(item);
-      const itemEntries = activityEntriesForItem(item);
+      const itemEntries = activityEntriesForItem(item).map(entry => {
+        const start = repeatedTitles.has(entry.title) ? mcpCallStart(item) : undefined;
+        return start == null ? entry : {...entry, repeatCallTimeMs: start};
+      });
       if (related) return itemEntries.map(entry => ({...entry, searchCalls: related}));
       const imageViewNumber = imageViewNumbers.size > 1 ? imageViewNumbers.get(item.identity) : undefined;
       return imageViewNumber ? itemEntries.map(entry => ({...entry, imageViewNumber})) : itemEntries;

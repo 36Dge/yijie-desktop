@@ -1,6 +1,6 @@
 import type { YjIconName } from "../icons/registry";
 import type { ConversationTimelineItemViewModel as Item } from "./conversation-timeline";
-import { nativeMcpLabels } from "./native-mcp-display";
+import { legacyMcpTitle, nativeMcpLabels, nativeMcpRowTitle } from "./native-mcp-display";
 
 /** A reading row references a native fact; it is never another execution. */
 export type ConversationActivityEntry = Readonly<{
@@ -8,6 +8,7 @@ export type ConversationActivityEntry = Readonly<{
   item: Item;
   actionIndex?: number;
   imageViewNumber?: number;
+  repeatCallTimeMs?: number;
   searchCalls?: readonly Item[];
   category: "command" | "read" | "listFiles" | "search" | "tool" | "web_search" | "unknown";
   title: string;
@@ -83,8 +84,17 @@ export function activityToolSourceLabel(item: Item): string | undefined {
 export function activityToolTitle(item: Item): string {
   const native = activityNativeItem(item);
   if (native?.type === "imageView") return "查看图片";
-  if (native?.type === "mcpToolCall") return nativeMcpLabels(native).title;
+  if (native?.type === "mcpToolCall") return nativeMcpRowTitle(native);
+  if (item.execution?.kind === "tool" && !("native" in item.execution)) return legacyMcpTitle(item.execution);
   return native?.toolDisplay?.title || native?.toolLabel || native?.toolDisplay?.sourceLabel || "调用工具";
+}
+
+export function mcpCallStart(item: Item): number | undefined {
+  const execution = item.execution;
+  if (execution?.kind !== "tool") return;
+  if ("native" in execution) return execution.native.item.type === "mcpToolCall" ? execution.native.callStartedAtMs : undefined;
+  const start = Date.parse(execution.startedSource.sourceOccurredAt);
+  return Number.isFinite(start) ? start : undefined;
 }
 
 export function activityWebTitle(item: Item): string {

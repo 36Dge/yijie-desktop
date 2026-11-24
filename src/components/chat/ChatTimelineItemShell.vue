@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, useId } from "vue";
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
+import { formatMcpCallTime } from "../../domain/chat-ui";
 import type { YjIconName } from "../../icons/registry";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatActivityChevron from "./ChatActivityChevron.vue";
@@ -13,6 +14,7 @@ export type ChatTimelineDisclosureChange = Readonly<{
 const props = withDefaults(defineProps<{
   item: ConversationTimelineItemViewModel;
   label: string;
+  callTimeMs?: number;
   statusLabel: string;
   icon: YjIconName;
   statusIcon?: YjIconName;
@@ -56,6 +58,7 @@ const titleId = `${id}-title`;
 const statusId = `${id}-status`;
 const contentId = `${id}-content`;
 const busy = computed(() => props.item.busy === true);
+const callTime = computed(() => formatMcpCallTime(props.callTimeMs));
 const isAnswer = computed(() => !props.processPresentation && (props.answerCandidate || props.item.presentation === "final_answer" ||
   props.item.presentation === "assistant_unclassified"));
 const hideNormalAnswerStatus = computed(() => isAnswer.value &&
@@ -110,6 +113,7 @@ function toggle(): void {
         <span class="chat-timeline-item-shell__identity">
           <YjIcon :name="icon" size="sm" :tone="iconTone" />
           <strong :id="titleId" >{{ label }}</strong>
+          <time v-if="callTime" :datetime="callTime.iso" class="chat-timeline-item-shell__call-time" :aria-label="`调用时间 ${callTime.label}`">{{ callTime.label }}</time>
         </span>
         <span v-if="!activityRow" :id="statusId" class="chat-timeline-item-shell__status">
           <YjIcon
@@ -286,6 +290,13 @@ function toggle(): void {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-timeline-item-shell__call-time {
+  flex: none;
+  color: var(--yj-color-chat-timing);
+  font-size: var(--yj-font-size-caption);
+  font-variant-numeric: tabular-nums;
 }
 
 .chat-timeline-item-shell__status {

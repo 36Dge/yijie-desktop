@@ -9,6 +9,7 @@ import type {
 } from "../../domain/conversation-view";
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
 import { activityItemIcon } from "../../domain/conversation-activity-entry";
+import { legacyMcpTitle } from "../../domain/native-mcp-display";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatCopyAction from "./ChatCopyAction.vue";
 import ChatTimelineItemShell, {
@@ -19,6 +20,7 @@ const props = defineProps<{
   item: ConversationTimelineItemViewModel;
   processPresentation?: boolean;
   execution: ConversationToolExecution;
+  repeatCallTimeMs?: number;
 }>();
 
 const emit = defineEmits<{
@@ -84,7 +86,8 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
   <ChatTimelineItemShell
     :process-presentation="processPresentation"
     :item="item"
-    label="工具调用"
+    :label="legacyMcpTitle(execution)"
+    :call-time-ms="repeatCallTimeMs"
     :status-label="statusPresentation.label"
     :icon="activityItemIcon(item)"
     collapsible

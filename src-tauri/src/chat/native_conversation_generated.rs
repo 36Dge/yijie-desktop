@@ -456,6 +456,12 @@ pub struct NativeDisplayItem {
     pub last_method: String,
     #[serde(rename = "ordinal")]
     pub ordinal: i64,
+    #[serde(
+        rename = "callStartedAtMs",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub call_started_at_ms: Option<i64>,
 }
 impl std::fmt::Debug for NativeDisplayItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

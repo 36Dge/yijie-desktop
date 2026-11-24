@@ -8,7 +8,7 @@ use super::native_conversation_generated::{
     NativeViewCursor,
 };
 
-const MAX_VIEW_BYTES: usize = 4 * 1024 * 1024 - 4096; // reserve room for cursor and availability diagnostics
+pub(super) const MAX_VIEW_BYTES: usize = 4 * 1024 * 1024 - 4096; // reserve room for cursor and availability diagnostics
 const MAX_TEXT_BYTES: usize = 1024 * 1024;
 
 /// Bound a readonly Runtime Item set without matching it to observed Items.
@@ -315,6 +315,22 @@ impl NativeDisplayBuffer {
                         item: item.clone(),
                         last_method: n.method.clone(),
                         ordinal: index as i64,
+                        call_started_at_ms: if item.kind == "mcpToolCall" {
+                            position
+                                .and_then(|i| self.view.items[i].call_started_at_ms)
+                                .or_else(|| {
+                                    if n.method != "item/started" {
+                                        return None;
+                                    }
+                                    let ms =
+                                        chrono::DateTime::parse_from_rfc3339(&event.occurred_at)
+                                            .ok()?
+                                            .timestamp_millis();
+                                    (0..=253_402_300_799_999).contains(&ms).then_some(ms)
+                                })
+                        } else {
+                            None
+                        },
                     };
                     if let Some(i) = position {
                         if self.view.items[i]
@@ -644,6 +660,43 @@ mod tests {
             n[k] = v.clone()
         }
         serde_json::from_value(serde_json::json!({"schema_version":13,"event_id":Uuid::from_u128(100+sequence as u128),"stream_id":Uuid::from_u128(99),"sequence":sequence,"occurred_at":"2026-09-08T00:00:00Z","task_id":c.task_id,"agent_session_id":c.agent_session_id,"codex_thread_id":c.codex_thread_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":n}})).unwrap()
+    }
+    #[test]
+    fn mcp_rows_keep_the_observed_start_on_completion_and_reopen() {
+        let mut buffer = NativeDisplayBuffer::new(context(), None).unwrap();
+        let item = |id: &str, status: &str| serde_json::json!({"item":{"id":id,"type":"mcpToolCall","status":status,"availability":"available","mcp":{"server":"weather","tool":"forecast","resultKind":"absent","texts":[],"diagnostics":[]}}});
+        let first = event(1, "item/started", item("a", "inProgress"));
+        let start = chrono::DateTime::parse_from_rfc3339(&first.occurred_at)
+            .unwrap()
+            .timestamp_millis();
+        buffer.observe(&first).unwrap();
+        let mut duplicate = event(2, "item/started", item("a", "inProgress"));
+        duplicate.occurred_at = "2026-09-08T01:00:00Z".into();
+        buffer.observe(&duplicate).unwrap();
+        buffer
+            .observe(&event(3, "item/completed", item("a", "completed")))
+            .unwrap();
+        buffer
+            .observe(&event(4, "item/completed", item("b", "completed")))
+            .unwrap();
+        let encoded = serde_json::to_string(&buffer.view).unwrap();
+        let saved =
+            super::super::native_conversation_storage::decode_native_view(&encoded, 8).unwrap();
+        assert_eq!(saved.items.len(), 2);
+        assert_eq!(saved.items[0].call_started_at_ms, Some(start));
+        assert_eq!(saved.items[1].call_started_at_ms, None);
+        assert!(
+            super::super::native_conversation_storage::decode_native_view(&encoded, 7).is_err()
+        );
+        let mut legacy = saved;
+        super::super::native_conversation_storage::strip_mcp_call_times(&mut legacy);
+        assert!(
+            super::super::native_conversation_storage::decode_native_view(
+                &serde_json::to_string(&legacy).unwrap(),
+                7
+            )
+            .is_ok()
+        );
     }
     #[test]
     fn market_late_items_keep_original_turn_and_wait_for_each_started_call() {

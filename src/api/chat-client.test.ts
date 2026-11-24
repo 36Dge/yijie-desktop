@@ -66,7 +66,7 @@ describe("chat client", () => {
     const invoke = vi.fn(async () => ({schemaVersion: 1, requestId: REQUEST_ID, data}));
     const client = createChatClient(transport(invoke));
     await expect(client.loadNativeHistory(CONTEXT_ID, SESSION_ID, [TURN_ID])).resolves.toEqual(data);
-    expect(invoke).toHaveBeenCalledWith("chat_load_native_history_v7", {request: {schemaVersion: 1, requestId: REQUEST_ID, contextId: CONTEXT_ID, payload: {sessionId: SESSION_ID, turnIds: [TURN_ID]}}});
+    expect(invoke).toHaveBeenCalledWith("chat_load_native_history_v7", {includeMcpCallTimes: true, request: {schemaVersion: 1, requestId: REQUEST_ID, contextId: CONTEXT_ID, payload: {sessionId: SESSION_ID, turnIds: [TURN_ID]}}});
     invoke.mockResolvedValueOnce({schemaVersion: 9, requestId: REQUEST_ID, data});
     await expect(client.loadNativeHistory(CONTEXT_ID, SESSION_ID, [TURN_ID])).rejects.toBeDefined();
   });
@@ -130,6 +130,7 @@ describe("chat client", () => {
     expect(subscription.pendingApprovalSnapshot.streamId).toBe(HOST_STREAM_ID);
     expect(subscription.pendingApprovalSnapshot.pending).toHaveLength(1);
     expect(nativeInvoke).toHaveBeenCalledWith("chat_subscribe_session_v1", {
+      includeMcpCallTimes: true,
       request: {
         schemaVersion: 6,
         requestId: REQUEST_ID,

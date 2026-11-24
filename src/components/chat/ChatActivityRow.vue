@@ -256,7 +256,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange) { emit("app
             @approval-decision="forwardApprovalDecision"
           />
 
-          <ChatNativeToolItem :search-calls="activityEntry?.searchCalls ?? searchCalls" :image-view-number="activityEntry?.imageViewNumber"
+          <ChatNativeToolItem :search-calls="activityEntry?.searchCalls ?? searchCalls" :image-view-number="activityEntry?.imageViewNumber" :repeat-call-time-ms="activityEntry?.repeatCallTimeMs"
             v-else-if="item.presentation === 'tool' && item.execution?.kind === 'tool' && 'native' in item.execution"
             :item="item"
             :process-presentation="processPresentation"
@@ -264,6 +264,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange) { emit("app
             @disclosure-change="forwardDisclosure"
           />
           <ChatToolItem
+            :repeat-call-time-ms="activityEntry?.repeatCallTimeMs"
             v-else-if="item.presentation === 'tool' && item.execution?.kind === 'tool' && !('native' in item.execution)"
             :item="item"
             :process-presentation="processPresentation"
@@ -306,7 +307,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange) { emit("app
               ref="messageContent"
               :blocks="skillMessage?.blocks ?? item.contentBlocks"
               :positioned-skills="positionedSkills"
-              :file-links="item.kind === 'assistant_message'"
+              :file-links="item.kind === 'assistant_message' && visible"
               :link-target="linkTarget"
               :mode="item.presentation === 'user_message' ? 'plain' : item.contentMode"
               :typography="item.presentation === 'user_message' ? 'user' : !processPresentation && (answerCandidate || ['final_answer', 'assistant_unclassified'].includes(item.presentation)) ? 'answer' : 'compact'"
