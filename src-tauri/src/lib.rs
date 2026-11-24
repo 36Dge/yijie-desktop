@@ -657,6 +657,18 @@ pub fn run() {
         .build(context)
         .expect("error while building tauri application")
         .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if matches!(&event, tauri::RunEvent::Opened { urls }
+                if urls.iter().any(|url| url.as_str() == "yijie://connectors/return"))
+            {
+                // Restore the window without forwarding the link to the renderer.
+                if let Some(window) = app.get_window("main") {
+                    let _ = app.show();
+                    let _ = window.unminimize();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
             if let tauri::RunEvent::WindowEvent {
                 label,
                 event: tauri::WindowEvent::CloseRequested { api, .. },

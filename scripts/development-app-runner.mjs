@@ -93,7 +93,7 @@ export function mayReuseNativeOutput(startup, runId, binaryHash) {
 export async function inspectDevelopmentBundle(args, project = root) {
   const target = path.join(project, ".local/development/target");
   const source = path.join(target, "debug/yijie-desktop");
-  const inputs = ["src-tauri/tauri.conf.json", "src-tauri/icons/icon.icns", "pnpm-lock.yaml", "scripts/development-app-runner.mjs", "scripts/development-resources.mjs"];
+  const inputs = ["src-tauri/tauri.conf.json", "src-tauri/Info.plist", "src-tauri/icons/icon.icns", "pnpm-lock.yaml", "scripts/development-app-runner.mjs", "scripts/development-resources.mjs"];
   for (let i = 0; i < args.length; i++) if (args[i] === "--config") inputs.push(args[++i]);
   const binaryHash = await digest(source);
   const helper = path.join(target, "debug/yijie-document-render");
