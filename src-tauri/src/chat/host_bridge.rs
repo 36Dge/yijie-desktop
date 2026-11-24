@@ -971,7 +971,8 @@ impl HostBridge {
         };
         let mut request = self.authorized_request(Method::GET, &path).await?;
         if schema_version == 13 {
-            request = request.header("X-Yijie-Search-Receipt", "2");
+            request = request.header("X-Yijie-Search-Receipt", "2")
+                .header("X-Yijie-Web-Source-Titles", "1");
         }
         if let Some(cursor) = cursor {
             let value = HeaderValue::from_str(&format!("{}:{}", cursor.stream_id, cursor.sequence))

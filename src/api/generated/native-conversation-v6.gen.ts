@@ -128,6 +128,9 @@ export interface components {
             willRetry?: boolean | null;
             /** @description Only for item/agentMessage/previewDelta. UTF-8 byte offset in the bounded, cleaned public body. Offset zero starts a preview. The formal item snapshot wins; previews carry no phase or execution authority. */
             previewOffset?: number;
+            webSearchSourceTitles?: components["schemas"]["NativeSearchSourceTitle"][];
+            /** @description When true, resolve titles through the authorized native thread snapshot for this turn. Provided only to subscribers that opt into web search source titles. */
+            webSearchSourceTitlesDeferred?: boolean;
         };
         NativeThreadSnapshot: {
             /** @enum {integer} */
@@ -258,6 +261,11 @@ export interface components {
             source: "provider" | "declaration" | "subsequent_work" | "turn_commit" | "progress_step" | "final_step" | "interrupted" | "failed" | "superseded" | "display_limit";
             truncated: boolean;
         };
+        NativeSearchSourceTitle: {
+            searchItemId: string;
+            url: string;
+            title: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -325,6 +333,8 @@ export interface operations {
                 "X-Yijie-Publication"?: "2";
                 /** @description Together with publication 2, opt into a dedicated replay cursor including transient public text previews. The Host echoes this header only for a paired Runtime. */
                 "X-Yijie-Publication-Preview"?: "1";
+                /** @description Accept source title updates keyed by the original search item and URL. */
+                "X-Yijie-Web-Source-Titles"?: "1";
             };
             path: {
                 agent_session_id: string;

@@ -162,6 +162,18 @@ pub struct NativeNotification {
         skip_serializing_if = "Option::is_none"
     )]
     pub preview_offset: Option<i64>,
+    #[serde(
+        rename = "webSearchSourceTitles",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub web_search_source_titles: Option<Vec<NativeSearchSourceTitle>>,
+    #[serde(
+        rename = "webSearchSourceTitlesDeferred",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub web_search_source_titles_deferred: Option<bool>,
 }
 impl std::fmt::Debug for NativeNotification {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -444,6 +456,22 @@ pub struct NativeMessagePublication {
 impl std::fmt::Debug for NativeMessagePublication {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("NativeMessagePublication([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeSearchSourceTitle {
+    #[serde(rename = "searchItemId")]
+    pub search_item_id: String,
+    #[serde(rename = "url")]
+    pub url: String,
+    #[serde(rename = "title")]
+    pub title: String,
+}
+impl std::fmt::Debug for NativeSearchSourceTitle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NativeSearchSourceTitle([REDACTED])")
     }
 }
 

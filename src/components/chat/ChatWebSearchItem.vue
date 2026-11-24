@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, useId, watch } from "vue";
+import { computed, inject, ref, useId, watch } from "vue";
+import { chatTracePresentationKey, createChatTracePresentationStore } from "../../stores/chat-trace-presentation.store";
 import { webSearchQueryTitle } from "../../domain/web-search-presentation";
 import { activityItemIcon } from "../../domain/conversation-activity-entry";
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
@@ -11,7 +12,9 @@ import ChatShortScrollbar from "./ChatShortScrollbar.vue";
 
 const props = withDefaults(defineProps<{ item: ConversationTimelineItemViewModel; processPresentation?: boolean; searchOccurrence?: number }>(), {searchOccurrence: 1});
 const emit = defineEmits<{ "disclosure-change": [change: ChatTimelineDisclosureChange] }>();
-const expanded = ref(false);
+const choices = inject(chatTracePresentationKey, null) ?? createChatTracePresentationStore();
+const stateKey = computed(() => `web-search:${props.item.identity}`);
+const expanded = computed(() => choices.get(stateKey.value, false));
 const viewport = ref<HTMLElement | null>(null);
 const content = ref<HTMLElement | null>(null);
 const { icons, open, openError } = useWebSources(() => props.item, () => expanded.value);
@@ -42,10 +45,15 @@ const emptyMessage = computed(() => props.item.busy ? "正在等待网页搜索�
     : !props.item.webSearch || !detail.value ? "该记录未提供可展示的网页活动详情。" : null);
 
 function toggle() {
-  expanded.value = !expanded.value;
+  choices.set(stateKey.value, !expanded.value);
   emit("disclosure-change", { itemIdentity: props.item.identity, expanded: expanded.value });
 }
-watch(() => props.item.identity, () => { expanded.value = false; });
+function rememberScroll() {
+  if (viewport.value) choices.setScrollTop(stateKey.value, viewport.value.scrollTop);
+}
+watch([viewport, stateKey], ([element, key]) => {
+  if (element) element.scrollTop = choices.scrollTop(key);
+}, { flush: "post" });
 </script>
 
 <template>
@@ -61,7 +69,7 @@ watch(() => props.item.identity, () => { expanded.value = false; });
     <p v-if="stateMessage" class="chat-web-search__notice" role="note">{{ stateMessage }}</p>
     <div v-if="expanded" class="chat-web-search__details">
       <div class="chat-web-search__scroll-frame">
-        <div :id="contentId" ref="viewport" class="chat-web-search__viewport" role="region" aria-label="网页活动详情" tabindex="0">
+        <div :id="contentId" ref="viewport" class="chat-web-search__viewport" role="region" aria-label="网页活动详情" tabindex="0" @scroll.passive="rememberScroll">
           <div ref="content" class="chat-web-search__content yj-selectable-text">
           <section v-if="item.webSearch?.sources?.length" :aria-describedby="sourceNoteId" aria-label="搜索来源">
             <p :id="sourceNoteId" class="chat-web-search__sr-only">以下页面由搜索返回，不代表回答已逐项引用或核验。</p>

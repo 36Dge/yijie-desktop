@@ -296,6 +296,10 @@ impl ChatRepository {
                 .filter(|s| s.thread_id == view.runtime_thread_id)
                 .and_then(|s| s.turns.iter().find(|t| t.id == view.runtime_turn_id));
             if let Some(turn) = rebuilt {
+                if view.diagnostic.as_deref() == Some("web_search_titles_pending") {
+                    view.diagnostic = None;
+                    super::native_conversation::apply_history_search_titles(view, turn)?;
+                }
                 if !recover
                     && matches!(
                         view.status.as_deref(),

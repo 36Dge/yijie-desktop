@@ -342,6 +342,17 @@
           "minimum": 0,
           "maximum": 262144,
           "description": "Only for item/agentMessage/previewDelta. UTF-8 byte offset in the bounded, cleaned public body. Offset zero starts a preview. The formal item snapshot wins; previews carry no phase or execution authority."
+        },
+        "webSearchSourceTitles": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "$ref": "#/definitions/NativeSearchSourceTitle"
+          }
+        },
+        "webSearchSourceTitlesDeferred": {
+          "type": "boolean",
+          "description": "When true, resolve titles through the authorized native thread snapshot for this turn. Provided only to subscribers that opt into web search source titles."
         }
       }
     },
@@ -932,6 +943,32 @@
         }
       },
       "description": "Published by the negotiated Runtime. order is the original turn observation order. afterItemId anchors a delayed message. Undelivered text is never an agentMessage or an execution terminal."
+    },
+    "NativeSearchSourceTitle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "searchItemId",
+        "url",
+        "title"
+      ],
+      "properties": {
+        "searchItemId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "url": {
+          "type": "string",
+          "maxLength": 2048,
+          "pattern": "^https?://"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
     },
     "NativeDisplayItem": {
       "type": "object",

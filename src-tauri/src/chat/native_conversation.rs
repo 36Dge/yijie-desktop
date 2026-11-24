@@ -89,6 +89,90 @@ pub struct NativeDisplayBuffer {
     previews: Vec<NativeTextPreview>,
 }
 
+fn apply_search_titles<'a>(
+    view: &mut NativeConversationView,
+    rows: impl Iterator<Item = (&'a str, &'a str, &'a str)>,
+) -> Result<(), ChatError> {
+    use std::collections::HashMap;
+    let titles: HashMap<_, _> = rows
+        .filter(|(_, _, title)| !title.trim().is_empty())
+        .map(|(id, url, title)| ((id, url), title))
+        .collect();
+    if titles.is_empty() {
+        return Ok(());
+    }
+    let size = serde_json::to_vec(&view)
+        .map_err(|_| ChatError::OrchestrationUnavailable)?
+        .len();
+    let mut available = MAX_VIEW_BYTES.saturating_sub(size);
+    for entry in &mut view.items {
+        if entry.item.kind != "webSearch" {
+            continue;
+        }
+        let Some(sources) = entry
+            .item
+            .web_search
+            .as_mut()
+            .filter(|s| s.action == "search")
+            .and_then(|s| s.sources.as_mut())
+        else {
+            continue;
+        };
+        for source in sources {
+            if source
+                .title
+                .as_deref()
+                .is_some_and(|title| !title.trim().is_empty())
+            {
+                continue;
+            }
+            let Some(title) = titles.get(&(entry.item.id.as_str(), source.url.as_str())) else {
+                continue;
+            };
+            let added = serde_json::to_vec(title)
+                .map_err(|_| ChatError::OrchestrationUnavailable)?
+                .len()
+                + 9;
+            if added > available {
+                view.availability = "partial".into();
+                view.diagnostic = Some("display_limit".into());
+                return Ok(());
+            }
+            available -= added;
+            source.title = Some((*title).to_owned());
+        }
+    }
+    Ok(())
+}
+
+/// A deferred notification authorizes refreshing only display titles in this turn.
+/// Existing observed search rows continue to own membership, order and lifecycle.
+pub(super) fn apply_history_search_titles(
+    view: &mut NativeConversationView,
+    turn: &super::native_conversation_generated::NativeTurn,
+) -> Result<(), ChatError> {
+    if view.runtime_turn_id != turn.id {
+        return Ok(());
+    }
+    let rows = turn
+        .items
+        .iter()
+        .filter(|item| item.kind == "webSearch")
+        .flat_map(|item| {
+            item.web_search
+                .iter()
+                .filter(|s| s.action == "search")
+                .filter_map(|s| s.sources.as_ref())
+                .flatten()
+                .filter_map(move |s| {
+                    s.title
+                        .as_deref()
+                        .map(|title| (item.id.as_str(), s.url.as_str(), title))
+                })
+        });
+    apply_search_titles(view, rows)
+}
+
 impl NativeDisplayBuffer {
     pub fn new(
         context: ActiveTurnContext,
@@ -505,6 +589,22 @@ impl NativeDisplayBuffer {
             }
             _ => self.mark_unavailable("unsupported_notification"),
         }
+        if let Some(rows) = n
+            .web_search_source_titles
+            .as_deref()
+            .filter(|_| matches!(n.method.as_str(), "item/completed" | "turn/completed"))
+        {
+            apply_search_titles(
+                &mut self.view,
+                rows.iter().map(|row| {
+                    (
+                        row.search_item_id.as_str(),
+                        row.url.as_str(),
+                        row.title.as_str(),
+                    )
+                }),
+            )?;
+        }
         Ok(true)
     }
 }
@@ -661,6 +761,113 @@ mod tests {
         }
         serde_json::from_value(serde_json::json!({"schema_version":13,"event_id":Uuid::from_u128(100+sequence as u128),"stream_id":Uuid::from_u128(99),"sequence":sequence,"occurred_at":"2026-09-08T00:00:00Z","task_id":c.task_id,"agent_session_id":c.agent_session_id,"codex_thread_id":c.codex_thread_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":n}})).unwrap()
     }
+    #[test]
+    fn search_titles_preserve_large_research_in_live_and_deferred_views() {
+        use super::super::native_conversation_generated::NativeTurn;
+        let mut live = NativeDisplayBuffer::new(context(), None).unwrap();
+        let mut titles = Vec::new();
+        let mut history = Vec::new();
+        for call in 0..14 {
+            let id = format!("city-{call}");
+            let mut sources = Vec::new();
+            let mut labeled = Vec::new();
+            for source in 0..10 {
+                let url = format!("https://example.org/city/{call}/{source}");
+                let title = format!("城市来源 {call}/{source}");
+                sources.push(serde_json::json!({"url":url}));
+                labeled.push(serde_json::json!({"url":url,"title":title}));
+                titles.push(serde_json::json!({"searchItemId":id,"url":url,"title":title}));
+            }
+            let mut item = serde_json::json!({"id":id,"type":"webSearch","availability":"available","webSearch":{"action":"search","queries":[id],"sources":sources}});
+            live.observe(&event(
+                call + 1,
+                "item/completed",
+                serde_json::json!({"item":item}),
+            ))
+            .unwrap();
+            item["webSearch"]["sources"] = serde_json::Value::Array(labeled);
+            history.push(item);
+        }
+        let mut deferred = live.view.clone();
+        let turn = serde_json::json!({"id":context().runtime_turn_id,"status":"completed","items":[],"itemsComplete":false});
+        live.observe(&event(
+            15,
+            "turn/completed",
+            serde_json::json!({"turn":turn,"webSearchSourceTitles":titles}),
+        ))
+        .unwrap();
+        let src: NativeTurn=serde_json::from_value(serde_json::json!({"id":context().runtime_turn_id,"status":"completed","items":history,"itemsComplete":false})).unwrap();
+        apply_history_search_titles(&mut deferred, &src).unwrap();
+        for (observed, restored) in live.view.items.iter().zip(&deferred.items) {
+            assert_eq!(observed, restored);
+            assert!(observed
+                .item
+                .web_search
+                .as_ref()
+                .unwrap()
+                .sources
+                .as_ref()
+                .unwrap()
+                .iter()
+                .all(|s| s.title.is_some()));
+        }
+        assert_eq!(live.view.items.len(), 14);
+    }
+
+    #[test]
+    fn search_titles_update_only_original_urls_and_survive_reopen() {
+        let mut buffer = NativeDisplayBuffer::new(context(), None).unwrap();
+        let search = |id: &str, url: &str| {
+            serde_json::json!({"item":{
+            "id":id,"type":"webSearch","availability":"available",
+            "webSearch":{"action":"search","queries":[id],"sources":[{"url":url}]}}})
+        };
+        let sh = "https://example.org/shanghai";
+        let bj = "https://example.org/beijing";
+        buffer
+            .observe(&event(1, "item/completed", search("sh", sh)))
+            .unwrap();
+        buffer
+            .observe(&event(2, "item/completed", search("bj", bj)))
+            .unwrap();
+        let done = event(
+            3,
+            "turn/completed",
+            serde_json::json!({
+                "turn":{"id":context().runtime_turn_id,"status":"completed","items":[],"itemsComplete":false},
+                "webSearchSourceTitles":[{"searchItemId":"sh","url":bj,"title":"北京"},
+                    {"searchItemId":"bj","url":bj,"title":"北京"},{"searchItemId":"sh","url":sh,"title":"上海"}]
+            }),
+        );
+        buffer.observe(&done).unwrap();
+        assert!(!buffer.observe(&done).unwrap());
+        let encoded = serde_json::to_string(&buffer.view).unwrap();
+        let saved =
+            super::super::native_conversation_storage::decode_native_view(&encoded, 8).unwrap();
+        let rows: Vec<_> = saved
+            .items
+            .iter()
+            .map(|entry| {
+                let sources = entry
+                    .item
+                    .web_search
+                    .as_ref()
+                    .unwrap()
+                    .sources
+                    .as_ref()
+                    .unwrap();
+                assert_eq!(sources.len(), 1);
+                assert_eq!(entry.last_method, "item/completed");
+                (
+                    entry.item.id.as_str(),
+                    sources[0].url.as_str(),
+                    sources[0].title.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(rows, [("sh", sh, Some("上海")), ("bj", bj, Some("北京"))]);
+    }
+
     #[test]
     fn mcp_rows_keep_the_observed_start_on_completion_and_reopen() {
         let mut buffer = NativeDisplayBuffer::new(context(), None).unwrap();

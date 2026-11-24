@@ -5,6 +5,7 @@ import type { NativeConversationView, NativeWebSearchDisplay } from "../../api/g
 import { composeConversationView } from "../../domain/conversation-view";
 import { selectConversationTimeline } from "../../domain/conversation-timeline";
 import { webSourceActionsKey } from "../../composables/useWebSources";
+import { chatTracePresentationKey, createChatTracePresentationStore } from "../../stores/chat-trace-presentation.store";
 import ChatWebSearchItem from "./ChatWebSearchItem.vue";
 
 enableAutoUnmount(afterEach);
@@ -82,6 +83,24 @@ describe("compact native web search disclosure", () => {
     expect(wrapper.get("button").attributes("aria-expanded")).toBe("false");
     await wrapper.get("button").trigger("click");
     expect(wrapper.text()).toContain("未提供可展示的搜索来源");
+  });
+
+  it("restores the expanded source and its scroll position after the live activity is regrouped", async () => {
+    const choices = createChatTracePresentationStore();
+    const global = {provide: {[chatTracePresentationKey as symbol]: choices}};
+    const live = mount(ChatWebSearchItem, {props: {item: item()}, global});
+    await live.get("button").trigger("click");
+    const viewport = live.get<HTMLElement>(".chat-web-search__viewport");
+    viewport.element.scrollTop = 52;
+    await viewport.trigger("scroll");
+    live.unmount();
+
+    const completed = mount(ChatWebSearchItem, {props: {item: item()}, global});
+    await flushPromises();
+    expect(completed.get("button").attributes("aria-expanded")).toBe("true");
+    expect(completed.get<HTMLElement>(".chat-web-search__viewport").element.scrollTop).toBe(52);
+    await completed.setProps({item: item({action: "search", queries: ["北京"]}, false, "new-search")});
+    expect(completed.get("button").attributes("aria-expanded")).toBe("false");
   });
 
   it("keeps unavailable, interrupted, and permission notes visible while collapsed", async () => {

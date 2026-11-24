@@ -3379,6 +3379,7 @@ impl ConversationApplication {
         let mut dispatch = tokio::time::interval(PROGRESS_FLUSH_INTERVAL);
         dispatch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut market_deadline = None;
+        let mut deferred_search_titles = false;
         loop {
             if self.stopping()
                 || matches!(
@@ -3449,6 +3450,28 @@ impl ConversationApplication {
                             self.flush_native_buffer(&mut buffer,None,sink).await?;continue
                         },
                         Ok(true)=>{}
+                    }
+                    let notice = &event.payload.native;
+                    let same_turn = notice.source == "runtime_notification"
+                        && notice.turn_id.as_deref() == Some(buffer.view.runtime_turn_id.as_str());
+                    let deferred_now = same_turn && notice.web_search_source_titles_deferred == Some(true)
+                        && matches!(notice.method.as_str(), "item/completed" | "turn/completed");
+                    let terminal_retry = same_turn && deferred_search_titles && notice.method == "turn/completed";
+                    if deferred_now || terminal_retry {
+                        deferred_search_titles = !buffer.view.terminal_observed;
+                        match host.read_native_thread(context.agent_session_id).await {
+                            Ok(snapshot) if snapshot.thread_id == buffer.view.runtime_thread_id => {
+                                if let Some(turn) = snapshot.turns.iter().find(|t| t.id == buffer.view.runtime_turn_id) {
+                                    if buffer.view.diagnostic.as_deref() == Some("web_search_titles_pending") {
+                                        buffer.view.diagnostic = None;
+                                    }
+                                    super::native_conversation::apply_history_search_titles(&mut buffer.view,turn)?;
+                                } else {
+                                    buffer.mark_unavailable("web_search_titles_pending");
+                                }
+                            }
+                            _ => buffer.mark_unavailable("web_search_titles_pending"),
+                        }
                     }
                     // Anchor before awaiting SQL/IPC, even when the pending-item
                     // display is temporarily empty. Later events cannot renew it.
