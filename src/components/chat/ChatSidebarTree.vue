@@ -69,7 +69,6 @@ const history = computed(() => buildChatSidebarHistory(chatStore.projects, chatS
 const historyGroups = computed(() => history.value.groups);
 const topLevelSessions = computed(() => [...history.value.projectlessSessions, ...history.value.removedProjectSessions]);
 const hasHistory = computed(() => historyGroups.value.length > 0 || topLevelSessions.value.length > 0);
-const treeLoading = computed(() => chatStore.phase === "binding" || chatStore.phase === "loading");
 const treeError = computed(() => {
   if (chatStore.phase === "permission-denied" && !chatStore.hasAction("read_sessions")) {
     return "无权读取任务记录";
@@ -148,10 +147,11 @@ async function startProjectTask(projectId: string): Promise<void> {
   actionError.value = null;
   try {
     const result = await router.push("/chat");
-    if ((result && !isNavigationFailure(result, NavigationFailureType.duplicated)) || router.currentRoute.value.fullPath !== "/chat") return;
+    const newTaskRoute = router.currentRoute.value;
+    if ((result && !isNavigationFailure(result, NavigationFailureType.duplicated)) || newTaskRoute.fullPath !== "/chat") return;
     if (chatStore.context?.contextId !== contextId || !available()) return;
     await chatStore.clearSelectedSession();
-    if (router.currentRoute.value.fullPath !== "/chat" || chatStore.selectedSessionId !== null || chatStore.context?.contextId !== contextId || !available()) return;
+    if (router.currentRoute.value !== newTaskRoute || chatStore.selectedSessionId !== null || chatStore.context?.contextId !== contextId || !available()) return;
     expandedProjectIds.value = new Set([...expandedProjectIds.value, projectId]);
     composerDrafts.newWorkspaceTask = { contextId, projectId };
   } catch {
@@ -348,10 +348,10 @@ async function confirmRemoveProject(): Promise<void> {
 
 <template>
   <Teleport to="body"><div ref="menuOverlay" class="chat-control-overlay" /></Teleport>
-  <section class="chat-tree" aria-label="任务：项目与对话" :aria-busy="treeLoading">
+  <section class="chat-tree" aria-label="任务：项目与对话" :aria-busy="chatStore.taskListLoading">
     <p v-if="actionError" class="chat-tree__error" role="alert">{{ actionError }}</p>
     <p v-if="treeError" class="chat-tree__error" role="alert">{{ treeError }}</p>
-    <p v-if="treeLoading" class="chat-tree__state" role="status">
+    <p v-if="chatStore.taskListLoading" class="chat-tree__state" role="status">
       正在读取本地任务…
     </p>
     <p v-else-if="!hasHistory && !treeError" class="chat-tree__state">暂无任务记录</p>
@@ -407,7 +407,7 @@ async function confirmRemoveProject(): Promise<void> {
                 class="chat-tree__new-task"
                 type="button"
                 :aria-label="`在工作空间 ${group.label} 中新建任务`"
-                :disabled="actionPending || treeLoading || !group.project.available"
+                :disabled="actionPending || !group.project.available"
                 @click.stop="startProjectTask(group.projectId)"
               ><YjIcon name="newTask" size="xs" tone="muted" :stroke-width="1.5" /></button>
             </YjTooltip>

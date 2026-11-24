@@ -106,6 +106,45 @@ describe("ChatSidebarTree", () => {
     wrapper.unmount();
   });
 
+  it.each([false, true])("keeps the task tree mounted while switching from another chat to a workspace draft (revisit=%s)", async revisit => {
+    const { wrapper, store, router } = await mountTree(store => {
+      store.context = { ...store.context!, allowedActions: [...store.context!.allowedActions, "create_session", "use_project"] };
+      store.sessions = [{ ...store.sessions[0]!, projectId: null }];
+      store.selectedSessionId = SESSION_ID;
+      store.draftTarget = { type: "session", sessionId: SESSION_ID };
+      store.draftTargetReady = true;
+    });
+    let finishDraftRead!: () => void;
+    vi.spyOn(chatClient, "listDraftAttachments").mockImplementation(() =>
+      new Promise(resolve => { finishDraftRead = () => resolve([]); }),
+    );
+    const folder = wrapper.get(".chat-tree__project-toggle").element;
+    const row = wrapper.get(".chat-tree__session-link").element;
+    try {
+      await wrapper.get(".chat-tree__new-task").trigger("click");
+      await flushPromises();
+      await wrapper.setProps({ currentPath: router.currentRoute.value.path });
+      expect(router.currentRoute.value.path).toBe("/chat");
+      expect(store.draftTargetReady).toBe(false);
+      expect(wrapper.text()).not.toContain("正在读取本地任务");
+      expect(wrapper.get(".chat-tree").attributes("aria-busy")).toBe("false");
+      expect(wrapper.get(".chat-tree__project-toggle").element).toBe(folder);
+      expect(wrapper.get(".chat-tree__session-link").element).toBe(row);
+      expect(row.hasAttribute("aria-current")).toBe(false);
+      expect(wrapper.text()).toContain("暂无对话");
+      if (revisit) {
+        await router.push(`/chat/${SESSION_ID}`);
+        await router.push("/chat");
+      }
+    } finally {
+      finishDraftRead();
+      await flushPromises();
+      wrapper.unmount();
+    }
+    expect(store.draftTargetReady).toBe(true);
+    expect(useChatComposerDraftStore().newWorkspaceTask).toEqual(revisit ? null : { contextId: store.context!.contextId, projectId: PROJECT_ID });
+  });
+
   it("disables unavailable workspaces and hides new-task actions without create permission", async () => {
     const { wrapper, store } = await mountTree(store => {
       store.context = { ...store.context!, allowedActions: [...store.context!.allowedActions, "create_session", "use_project"] };

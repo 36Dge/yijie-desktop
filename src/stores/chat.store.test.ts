@@ -1670,6 +1670,71 @@ describe("chat view-model store", () => {
     expect(listDraftAttachments).toHaveBeenCalledOnce();
   });
 
+  it("shares the pending new draft read between route and workspace selection", async () => {
+    const harness = fakeClient();
+    const store = createStore(harness.client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    const attachments = new Deferred<readonly ChatAttachment[]>();
+    const read = vi.spyOn(harness.client, "listDraftAttachments").mockReturnValue(attachments.promise);
+    const routeSelection = store.clearSelectedSession();
+    const workspaceSelection = store.clearSelectedSession();
+    expect(store.selectedSessionId).toBeNull();
+    expect(store.canSend).toBe(false);
+    expect(read).toHaveBeenCalledTimes(1);
+    attachments.resolve([attachment()]);
+    await Promise.all([routeSelection, workspaceSelection]);
+    expect(store.phase).toBe("ready");
+    expect(store.draftAttachments).toEqual([attachment()]);
+    expect(store.canSend).toBe(true);
+  });
+
+  it("finishes loading an empty task list before the initial draft is ready", async () => {
+    const draftStarted = new Deferred<void>();
+    const attachments = new Deferred<readonly ChatAttachment[]>();
+    const store = createStore(fakeClient({
+      listSessions: async () => ({ sessions: [], nextCursor: null }),
+      listDraftAttachments: () => {
+        draftStarted.resolve();
+        return attachments.promise;
+      },
+    }).client);
+    const binding = store.bind(TENANT);
+    expect(store.taskListLoading).toBe(true);
+    await draftStarted.promise;
+    expect(store.taskListLoading).toBe(false);
+    expect(store.sessions).toEqual([]);
+    expect(store.draftTargetReady).toBe(false);
+    attachments.resolve([]);
+    await binding;
+    expect(store.phase).toBe("ready");
+  });
+
+  it("keeps a newer new-task draft loading when a superseded read finishes", async () => {
+    const harness = fakeClient();
+    const store = createStore(harness.client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    const first = new Deferred<readonly ChatAttachment[]>();
+    const second = new Deferred<readonly ChatAttachment[]>();
+    const read = vi.spyOn(harness.client, "listDraftAttachments").mockReturnValueOnce(first.promise);
+    const firstSelection = store.clearSelectedSession();
+    const recovery = store.retryDraftRecovery();
+    await store.selectSession(SESSION_B);
+    read.mockReturnValueOnce(second.promise);
+    const secondSelection = store.clearSelectedSession();
+    first.resolve([attachment()]);
+    await firstSelection;
+    expect(await recovery).toBe(false);
+    expect(store.phase).toBe("loading");
+    expect(store.draftTargetReady).toBe(false);
+    expect(store.draftAttachments).toEqual([]);
+    second.resolve([]);
+    await secondSelection;
+    expect(store.phase).toBe("ready");
+    expect(store.draftTargetReady).toBe(true);
+  });
+
   it("retains only the closed bind failure stage and error code", async () => {
     const unavailable = () => new ChatClientError({
       schemaVersion: 1,

@@ -395,6 +395,7 @@ export function createChatStoreDefinition(
     const context = shallowRef<BoundChatContext | null>(null);
     const projects = shallowRef<readonly ChatProject[]>(Object.freeze([]));
     const sessions = shallowRef<readonly ChatSession[]>(Object.freeze([]));
+    const taskListLoading = ref(false);
     const sessionsCursor = ref<string | null>(null);
     const selectedSessionId = ref<string | null>(null);
     const backgroundTurns = computed(() => sessions.value.filter(session =>
@@ -590,6 +591,7 @@ export function createChatStoreDefinition(
     let artifactRefreshPromise: Promise<void> | null = null;
     let artifactRefreshTrailingRequested = false;
     let draftEpoch = 0;
+    let pendingDraftRead: Promise<void> | null = null;
     let activeAttachmentImport: ActiveAttachmentImport | null = null;
     let pendingSubmission: Readonly<{ key: string; operationId: string }> | null = null;
     let activeSubmissionToken: symbol | null = null;
@@ -897,6 +899,7 @@ export function createChatStoreDefinition(
 
     function dropDraftReferences(): void {
       draftEpoch += 1;
+      pendingDraftRead = null;
       draftAttachments.value = Object.freeze([]);
       attachmentImportAttempt.value = null;
       activeAttachmentImport = null;
@@ -937,23 +940,34 @@ export function createChatStoreDefinition(
       );
     }
 
-    async function switchDraftTarget(nextTarget: ChatDraftTarget): Promise<void> {
+    function switchDraftTarget(nextTarget: ChatDraftTarget): Promise<void> {
       const bound = context.value;
-      if (!bound || (sameDraftTarget(draftTarget.value, nextTarget) && draftTargetReady.value)) return;
+      if (!bound) return Promise.resolve();
+      if (sameDraftTarget(draftTarget.value, nextTarget)) {
+        if (draftTargetReady.value) return Promise.resolve();
+        if (pendingDraftRead) return pendingDraftRead;
+      }
 
       dropDraftReferences();
       draftTarget.value = nextTarget;
       draftTargetReady.value = false;
-      const epoch = draftEpoch;
       attachmentImporting.value = true;
+      const epoch = draftEpoch;
+      pendingDraftRead = readDraftAttachments(bound.contextId, nextTarget, epoch).finally(() => {
+        if (draftEpoch === epoch) {
+          pendingDraftRead = null;
+          attachmentImporting.value = false;
+        }
+      });
+      return pendingDraftRead;
+    }
 
+    async function readDraftAttachments(contextId: string, target: ChatDraftTarget, epoch: number): Promise<void> {
+      const isCurrent = () => context.value?.contextId === contextId && draftEpoch === epoch &&
+        sameDraftTarget(draftTarget.value, target);
       try {
-        const attachments = await client.listDraftAttachments(bound.contextId, nextTarget);
-        if (
-          context.value?.contextId !== bound.contextId ||
-          draftEpoch !== epoch ||
-          !sameDraftTarget(draftTarget.value, nextTarget)
-        ) return;
+        const attachments = await client.listDraftAttachments(contextId, target);
+        if (!isCurrent()) return;
         const attachmentIds = new Set(attachments.map((attachment) => attachment.attachmentId));
         if (
           attachments.length > CHAT_DRAFT_ATTACHMENT_LIMIT ||
@@ -970,23 +984,11 @@ export function createChatStoreDefinition(
         draftAttachments.value = Object.freeze([...attachments]);
         draftTargetReady.value = true;
       } catch (error: unknown) {
-        if (
-          context.value?.contextId === bound.contextId &&
-          draftEpoch === epoch &&
-          sameDraftTarget(draftTarget.value, nextTarget)
-        ) {
+        if (isCurrent()) {
           attachmentErrorCode.value = error instanceof ChatClientError
             ? error.shape.attachmentIssue ?? error.shape.code
             : "chat_temporarily_unavailable";
           throw error;
-        }
-      } finally {
-        if (
-          context.value?.contextId === bound.contextId &&
-          draftEpoch === epoch &&
-          sameDraftTarget(draftTarget.value, nextTarget)
-        ) {
-          attachmentImporting.value = false;
         }
       }
     }
@@ -1008,6 +1010,7 @@ export function createChatStoreDefinition(
       context.value = null;
       projects.value = Object.freeze([]);
       sessions.value = Object.freeze([]);
+      taskListLoading.value = false;
       sessionsCursor.value = null;
       localReadiness.value = null;
       phase.value = nextPhase;
@@ -2189,6 +2192,7 @@ export function createChatStoreDefinition(
 
     async function bind(tenantSelector: string, managementOnly = false): Promise<void> {
       clearAuthority("binding");
+      taskListLoading.value = !managementOnly;
       boundTenantSelector = tenantSelector;
       const bindEpoch = authorityEpoch;
       lastErrorCode.value = null;
@@ -2233,6 +2237,7 @@ export function createChatStoreDefinition(
         sessions.value = nextSessions.sessions;
         sessionsCursor.value = nextSessions.nextCursor;
         localReadiness.value = nextReadiness;
+        taskListLoading.value = false;
         if (hasAction("create_session")) {
           await atBindStage("draft_attachments", switchDraftTarget(CHAT_NEW_DRAFT_TARGET));
         } else {
@@ -2787,15 +2792,20 @@ export function createChatStoreDefinition(
       return selectSessionInternal(sessionId);
     }
 
+    function isCurrentNewDraftSelection(contextId: string, epoch: number): boolean {
+      return selectionEpoch === epoch && context.value?.contextId === contextId && selectedSessionId.value === null;
+    }
+
     async function clearSelectedSession(): Promise<void> {
       const bound = context.value;
-      if (
-        bound &&
-        selectedSessionId.value === null &&
-        sameDraftTarget(draftTarget.value, CHAT_NEW_DRAFT_TARGET) &&
-        draftTargetReady.value
-      ) {
-        return;
+      if (bound && selectedSessionId.value === null && sameDraftTarget(draftTarget.value, CHAT_NEW_DRAFT_TARGET)) {
+        if (draftTargetReady.value) return;
+        if (pendingDraftRead) {
+          // Route synchronization and the workspace shortcut can select the same new draft.
+          // The caller that started the read also publishes its ready or error state.
+          await pendingDraftRead.catch(() => undefined);
+          return;
+        }
       }
       const targetSync = bound && hasAction("create_session")
         ? switchDraftTarget(CHAT_NEW_DRAFT_TARGET)
@@ -2808,14 +2818,15 @@ export function createChatStoreDefinition(
         void client.unsubscribeSession(bound.contextId, oldSubscription).catch(() => false);
       }
       if (!bound) return;
+      const epoch = selectionEpoch;
       lastErrorCode.value = null;
       phase.value = "loading";
       try {
         await targetSync;
-        if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== null) return;
+        if (!isCurrentNewDraftSelection(bound.contextId, epoch)) return;
         phase.value = "ready";
       } catch (error: unknown) {
-        if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== null) return;
+        if (!isCurrentNewDraftSelection(bound.contextId, epoch)) return;
         lastErrorCode.value = error instanceof ChatClientError ? error.shape.code : "chat_protocol_error";
         phase.value = phaseForError(error);
       }
@@ -2840,16 +2851,17 @@ export function createChatStoreDefinition(
         return phase.value === "ready" && draftTargetReady.value;
       }
 
+      const epoch = selectionEpoch;
       lastErrorCode.value = null;
       phase.value = "loading";
       try {
         await switchDraftTarget(CHAT_NEW_DRAFT_TARGET);
-        if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== null) return false;
+        if (!isCurrentNewDraftSelection(bound.contextId, epoch)) return false;
         lastBindFailureStage.value = null;
         phase.value = "ready";
         return true;
       } catch (error: unknown) {
-        if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== null) return false;
+        if (!isCurrentNewDraftSelection(bound.contextId, epoch)) return false;
         lastErrorCode.value = error instanceof ChatClientError ? error.shape.code : "chat_protocol_error";
         phase.value = phaseForError(error);
         return false;
@@ -4544,6 +4556,7 @@ export function createChatStoreDefinition(
       context,
       projects,
       sessions,
+      taskListLoading,
       sessionsCursor,
       hasBackgroundTurns: computed(() => backgroundTurns.value.length > 0),
       refreshBackgroundTurnStatuses,
