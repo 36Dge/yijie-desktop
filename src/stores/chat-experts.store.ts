@@ -10,6 +10,9 @@ export function bindingTurnIntent(view: BindingView | null | undefined): ExpertT
 }
 const unsettled = (view: BindingView) => view.state === "applying" || view.state === "unknown";
 const same = (a: ExpertSelection | null, b: ExpertSelection | null) => a === null ? b === null : b !== null && a.expertId === b.expertId && a.version === b.version;
+export function sameExpertTurnIntent(a: ExpertTurnIntent | undefined, b: ExpertTurnIntent | undefined): boolean {
+  return a?.expectedBindingRevision === b?.expectedBindingRevision && same(a?.expert ?? null, b?.expert ?? null);
+}
 
 /** Native is the binding authority. Only original in-flight intents live here. */
 export function createChatExpertsStoreDefinition(client: ExpertNativeClient, id = "chat-experts") {

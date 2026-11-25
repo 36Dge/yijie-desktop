@@ -7,11 +7,11 @@ export type ExpertInvocation =
   | { kind: "selected" }
   | { kind: "select"; entry: CatalogEntry };
 
-// Only a direct request addressed to a named expert can change the binding.
-// Description text, ordinary domain keywords and quoted/reported speech do not.
+// Text can select an expert only when the composer has no effective selection.
 const shortName = /^([^，,。！？?!：:；;\n“”「」"'《》]{1,80}?专家)/u;
 
 export function explicitExpertInvocation(text: string, entries: readonly CatalogEntry[], selected: ExpertDisplay | null): ExpertInvocation {
+  if (selected) return { kind: "selected" };
   const input = text.trim().normalize("NFKC").toLowerCase();
   const prefix = invocationPrefix.exec(input);
   if (!prefix) return { kind: "none" };
@@ -26,10 +26,6 @@ export function explicitExpertInvocation(text: string, entries: readonly Catalog
     return name.length > 2 && (name === shorthand || expert.expertId.startsWith("linkfox-")) && full.endsWith(name);
   };
   const candidates = entries.filter((entry) => matches(entry.display));
-  if (selected && matches(selected) && candidates.every(entry => entry.display.expertId === selected.expertId)) {
-    // Preserve the exact historical version when the same expert is still bound.
-    return { kind: "selected" };
-  }
   if (!shorthand && candidates.length === 0) return { kind: "none" };
   return candidates.length === 1 ? { kind: "select", entry: candidates[0] } : { kind: "ambiguous" };
 }

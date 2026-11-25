@@ -14,6 +14,12 @@ describe("explicit expert invocation", () => {
     expect(explicitExpertInvocation("请用漫剧编剧与分镜师写分镜", [expert], null)).toEqual({kind:"select", entry:expert});
     expect(explicitExpertInvocation("请用漫剧编剧与分镜师的名字造句", [expert], null).kind).toBe("none");
   });
+  it("keeps the picker expert when the message names another expert or an ambiguous one", () => {
+    const selected = { ...entry.display, expertId: "agentgrid-comic-storyboard-director", displayName: "漫剧编剧与分镜师" };
+    for (const text of ["如何使用这个专家", "请用人台换模特图专家出图", "请用其他专家出图"]) {
+      expect(explicitExpertInvocation(text, [entry], selected)).toEqual({ kind: "selected" });
+    }
+  });
   it("preserves normal generation, questions and quotations", () => {
     for (const text of ["把人台换成真人", "不要用人台换模特图专家", "人台换模特图专家有什么功能？", "请解释“用人台换模特图专家出图”"]) {
       expect(explicitExpertInvocation(text, [entry], null).kind).toBe("none");

@@ -3067,6 +3067,46 @@ it("FEAT158 retained binding uses its Native checked version when the market onl
   wrapper.unmount();
 });
 
+it("FEAT158 sends the confirmed picker binding when the text names a different available expert", async () => {
+  expertFlag.enabled = true;
+  const { wrapper, store, pinia } = await mountPage(`/chat/${SESSION_ID}`, true);
+  const other = { ...expertDisplay, expertId: "another-expert", displayName: "另一位专家" };
+  useExpertsStore(pinia).snapshot = { ...expertSnapshot({ ...expertEntry, display: other, state: "ready" }), executionAvailable: true };
+  const rebind = vi.spyOn(expertNativeClient, "setBinding");
+  const submit = vi.spyOn(store, "submitTurnWithResult").mockResolvedValue({ status: "not_accepted" });
+  const text = "请用另一位专家，整理之前的清单。";
+  await wrapper.get("textarea").setValue(text);
+  await wrapper.get('[aria-label="发送任务"]').trigger("click");
+  await flushPromises();
+  expect(rebind).not.toHaveBeenCalled();
+  expect(submit).toHaveBeenCalledWith(text, replyModelArgs[0], undefined, {
+    expectedBindingRevision: 1, expert: { expertId: expertDisplay.expertId, version: expertDisplay.version },
+  });
+  wrapper.unmount();
+});
+
+it("FEAT158 keeps the draft if its binding revision changes during send preparation", async () => {
+  expertFlag.enabled = skillFlag.enabled = true;
+  const { wrapper, store, pinia } = await mountPage(`/chat/${SESSION_ID}`, true);
+  const skills = useSkillStore(pinia);
+  skills.phase = "loading";
+  let finish!: () => void;
+  const prepare = vi.spyOn(skills, "open").mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+  const submit = vi.spyOn(store, "submitTurnWithResult");
+  const text = "如何使用这个专家";
+  await wrapper.get("textarea").setValue(text);
+  await wrapper.get('[aria-label="发送任务"]').trigger("click");
+  expect(prepare).toHaveBeenCalled();
+  const bindings = useChatExpertsStore(pinia);
+  bindings.bindings = { [SESSION_ID]: { ...bindings.bindings[SESSION_ID]!, bindingRevision: 3 } };
+  finish();
+  await flushPromises();
+  expect(submit).not.toHaveBeenCalled();
+  expect(wrapper.get("textarea").element.value).toBe(text);
+  expect(wrapper.text()).toContain("专家选择已变化");
+  wrapper.unmount();
+});
+
 it.each(["resource", "execution"])("FEAT158 retained binding still blocks when Native reports unavailable %s", async (unavailable) => {
   expertFlag.enabled = true;
   const { wrapper, store, pinia } = await mountPage(`/chat/${SESSION_ID}`, true);

@@ -51,7 +51,7 @@ import type { CatalogEntry } from "../../domain/experts-v2.generated";
 import { skillMarketplaceUiEnabled } from "../../authorization/skill-marketplace-ui-config";
 import { expertsUiEnabled } from "../../authorization/experts-ui-config";
 import ChatExpertChip from "../../components/experts/ChatExpertChip.vue";
-import { bindingTurnIntent, useChatExpertsStore, type ExpertTurnIntent } from "../../stores/chat-experts.store";
+import { bindingTurnIntent, sameExpertTurnIntent, useChatExpertsStore, type ExpertTurnIntent } from "../../stores/chat-experts.store";
 import { useExpertsStore } from "../../stores/experts.store";
 import { useChatExpertsBinding } from "../../composables/useChatExpertsBinding";
 import { useExpertsBinding } from "../../composables/useExpertsBinding";
@@ -1090,7 +1090,11 @@ async function submitDraft(recoverExpert: boolean): Promise<void> {
   }
   if (!normalPurposeReady.value || (!recoverExpert && !permissionCanSend.value)) return;
   if (!recoverExpert && !expertSendReady.value) return;
-  if (recoverExpert && !expertSubmission.value) return;
+  const frozenExpert = recoverExpert ? expertSubmission.value : undefined;
+  if (recoverExpert && !frozenExpert) return;
+  let turnExpert = frozenExpert
+    ? { expectedBindingRevision: frozenExpert.expectedBindingRevision, expert: frozenExpert.expert }
+    : expertIntent.value;
   expertSubmitError.value = null;
   const draftTargetAtStart = composerDraftTargetKey.value;
   const draftTextAtStart = prompt.value;
@@ -1101,9 +1105,15 @@ async function submitDraft(recoverExpert: boolean): Promise<void> {
   const projectAtStart = availableProjectId.value;
   const attachmentIds = () => chatStore.draftAttachments.map(item => item.attachmentId).join(",");
   const attachmentsAtStart = attachmentIds();
-  const currentDraft = () => route.fullPath === routeAtStart && composerDraftTargetKey.value === draftTargetAtStart &&
-    chatStore.context?.contextId === contextAtStart && prompt.value === draftTextAtStart && skillSelection.value === pickedSkills &&
-    models.profile.value === profileAtStart && availableProjectId.value === projectAtStart && attachmentIds() === attachmentsAtStart;
+  const currentDraft = () => {
+    if (route.fullPath !== routeAtStart || composerDraftTargetKey.value !== draftTargetAtStart || chatStore.context?.contextId !== contextAtStart) return false;
+    if (!sameExpertTurnIntent(turnExpert, expertIntent.value)) {
+      transientNotice.value = "专家选择已变化，已保留草稿，请核对当前专家后发送。";
+      return false;
+    }
+    return prompt.value === draftTextAtStart && skillSelection.value === pickedSkills &&
+      models.profile.value === profileAtStart && availableProjectId.value === projectAtStart && attachmentIds() === attachmentsAtStart;
+  };
   const permission = permissions.state.value;
   if (!recoverExpert && !isSessionRoute.value && permission?.mode === "full" && !permission.fullAccessConfirmed) {
     if (!prepareConnectorSubmit()) return;
@@ -1155,14 +1165,17 @@ async function submitDraft(recoverExpert: boolean): Promise<void> {
         transientNotice.value = expertPicker.error.value ?? "专家选择未完成，请检查专家状态后再发送。";
         return;
       }
-      // Completing resource preparation clears the busy flag and starts the
-      // normal model-catalog refresh. Wait for an authoritative intent before
-      // freezing the new turn. No model call occurs during a catalog read.
+      // This successful text selection is the only binding change initiated by
+      // this send. Freeze it before waiting for the normal model-catalog refresh.
+      const applied = expertIntent.value;
+      if (applied?.expert?.expertId !== named.entry.display.expertId || applied.expert.version !== named.entry.display.version) {
+        transientNotice.value = "已保留草稿，请核对当前专家后发送。";
+        return;
+      }
+      turnExpert = applied;
       await nextTick();
       if (!models.ready.value) await models.refresh();
-      if (!currentDraft() || !expertSendReady.value || !permissionCanSend.value || !models.ready.value ||
-        selectedExpert.value?.expertId !== named.entry.display.expertId ||
-        selectedExpert.value.version !== named.entry.display.version) {
+      if (!currentDraft() || !expertSendReady.value || !permissionCanSend.value || !models.ready.value) {
         transientNotice.value = "已保留草稿，请核对当前专家、模型和附件后发送。";
         return;
       }
@@ -1177,8 +1190,6 @@ async function submitDraft(recoverExpert: boolean): Promise<void> {
   transientNotice.value = null;
   skillFeedback.value = "";
   let focusRestoreTarget = draftTargetAtStart;
-  const frozenExpert = recoverExpert ? expertSubmission.value : undefined;
-  const turnExpert = frozenExpert ? { expectedBindingRevision: frozenExpert.expectedBindingRevision, expert: frozenExpert.expert } : expertIntent.value;
   const sameTarget = () => route.fullPath === routeAtStart && chatStore.context?.contextId === contextAtStart;
   function reportNotAccepted(): void {
     if (sameTarget() && !(turnExpert && expertSubmission.value)) actionErrorCode.value = chatStore.lastErrorCode ?? "chat_host_not_ready";
