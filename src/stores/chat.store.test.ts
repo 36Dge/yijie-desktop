@@ -1,6 +1,7 @@
 import { expertNativeClient, ExpertClientError } from "../api/expert-native-client";
 import { useChatExpertsStore } from "./chat-experts.store";
 import { expertDisplay } from "../test/expert-fixture";
+import { CHAT_COMPOSER_DEFAULT_PROFILE } from "../domain/chat-composer-draft";
 import type { NativeSubmissionResult } from "../domain/experts-v2.generated";
 import { marketHostNativeClient, MarketChatError } from "../api/market-host-native-client";
 import type {NativeConversationViewEvent} from "../api/generated/native-conversation-private.gen";
@@ -1049,7 +1050,7 @@ describe("chat view-model store", () => {
     const store = createStore(client); await store.bind(TENANT);
     try {
       const intent = { expectedBindingRevision: 0, expert: { expertId: expertDisplay.expertId, version: expertDisplay.version } };
-      const result = await store.createSessionWithResult(null, "普通专家问题", { profileId: "kimi-k3-max-v1", expectedRevision: 0 }, [], intent);
+      const result = await store.createSessionWithResult(null, "普通专家问题", { profileId: CHAT_COMPOSER_DEFAULT_PROFILE, expectedRevision: 0 }, [], intent);
       expect(result.status).toBe("local_durable_accepted");
       expect(send).toHaveBeenCalledWith(CONTEXT, expect.objectContaining({ ...intent, submission: expect.objectContaining({ contentBlocks: [{ type: "text", text: "普通专家问题" }], selection: [] }) }));
       expect(legacy).not.toHaveBeenCalled(); expect(store.liveTurnStatus).toBe("queued");
@@ -1089,9 +1090,9 @@ describe("chat view-model store", () => {
     const send = vi.spyOn(expertNativeClient, "submit").mockRejectedValue(new ExpertClientError("outcome_unknown"));
     try {
       const intent = { expectedBindingRevision: 2, expert: null };
-      await expect(store.submitTurnWithResult("普通后续问题", { profileId: "kimi-k3-max-v1", expectedRevision: 1 }, [], intent)).rejects.toMatchObject({ code: "outcome_unknown" });
+      await expect(store.submitTurnWithResult("普通后续问题", { profileId: CHAT_COMPOSER_DEFAULT_PROFILE, expectedRevision: 1 }, [], intent)).rejects.toMatchObject({ code: "outcome_unknown" });
       const original = send.mock.calls[0]![1];
-      await expect(store.submitTurnWithResult("普通后续问题", { profileId: "kimi-k3-max-v1", expectedRevision: 1 }, [], intent)).rejects.toMatchObject({ code: "outcome_unknown" });
+      await expect(store.submitTurnWithResult("普通后续问题", { profileId: CHAT_COMPOSER_DEFAULT_PROFILE, expectedRevision: 1 }, [], intent)).rejects.toMatchObject({ code: "outcome_unknown" });
       expect(send.mock.calls[1]![1]).toEqual(original);
       await expect(store.submitTurnWithResult("普通后续问题")).rejects.toMatchObject({ code: "binding_unavailable" });
       expect(legacy).not.toHaveBeenCalled(); expect(expert.submissions[SESSION_A]).toEqual(original);
@@ -1107,7 +1108,7 @@ describe("chat view-model store", () => {
     const waiting = new Deferred<NativeSubmissionResult>();
     const send = vi.spyOn(expertNativeClient, "submit").mockImplementation(() => waiting.promise);
     const intent = { expectedBindingRevision: 0, expert: { expertId: expertDisplay.expertId, version: expertDisplay.version } };
-    const model = { profileId: "kimi-k3-max-v1" as const, expectedRevision: kind === "create" ? 0 : 1 };
+    const model = { profileId: CHAT_COMPOSER_DEFAULT_PROFILE, expectedRevision: kind === "create" ? 0 : 1 } as const;
     const target = kind === "create" ? "new" : SESSION_A;
     const submit = () => kind === "create"
       ? store.createSessionWithResult(null, "保留原专家问题", model, [], intent)
@@ -1115,11 +1116,13 @@ describe("chat view-model store", () => {
     try {
       const attempt = submit();
       expect(send).toHaveBeenCalledOnce();
+      expect(expert.submissionStatus(target)).toBe("sending");
       const original = send.mock.calls[0]![1];
       await store.selectSession(SESSION_B);
       waiting.resolve({ bindingRevision: 0, expert: expertDisplay, receipt: { outcome: "local_durable_accepted", sessionId: SESSION_A, localTurnId: TURN_A, submissionOperationId: original.submission.operationId, turnOperationId: TURN_A, selectionDigest: "a".repeat(64) } });
       expect(await attempt).toEqual({ status: "not_accepted" });
       expect(expert.submissions[target]).toEqual(original);
+      expect(expert.submissionStatus(target)).toBe("accepted");
       expect(original.submission.contentBlocks).toContainEqual({ type: "file", attachmentId: attachment().attachmentId });
       if (kind === "create") await store.clearSelectedSession();
       else await store.selectSession(SESSION_A);
@@ -3165,6 +3168,25 @@ describe("chat view-model store", () => {
       turnId: TURN_A,
       operationId: "019c1a00-0000-7000-8000-00000000000c",
     });
+  });
+
+  it("keeps a newly created task visible when pinned tasks fill the first page", async () => {
+    const pinned = Array.from({ length: 20 }, (_, index) => ({
+      ...session(`019c1a00-0000-7000-8000-${(100 + index).toString(16).padStart(12, "0")}`), pinnedAt: 100 - index,
+    }));
+    const nextCursor = "abcdef0123456789";
+    const listSessions = vi.fn<ChatClient["listSessions"]>()
+      .mockResolvedValueOnce({ sessions: pinned, nextCursor: null })
+      .mockResolvedValueOnce({ sessions: pinned, nextCursor })
+      .mockResolvedValueOnce({ sessions: [session(SESSION_A)], nextCursor: null });
+    const store = createStore(fakeClient({ listSessions }).client);
+    await store.bind(TENANT);
+    await store.createSessionWithResult(null, "new task");
+    await vi.waitFor(() => expect(store.sessionsCursor).toBe(nextCursor));
+    const ids = [...pinned.map(row => row.sessionId), SESSION_A];
+    expect(store.sessions.map(row => row.sessionId)).toEqual(ids);
+    await store.loadMoreSessions();
+    expect(store.sessions.map(row => row.sessionId)).toEqual(ids);
   });
 
   it("rejects over-limit UTF-8 create input before project validation or native dispatch", async () => {

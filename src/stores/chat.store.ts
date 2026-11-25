@@ -4020,7 +4020,11 @@ export function createChatStoreDefinition(
             context.value?.contextId !== bound.contextId ||
             selectedSessionId.value !== created.sessionId
           ) return;
-          sessions.value = page.sessions;
+          // A page filled with pinned tasks can omit the new row we just read on selection.
+          const createdRow = sessions.value.find(row => row.sessionId === created.sessionId);
+          sessions.value = page.nextCursor && createdRow && !page.sessions.some(row => row.sessionId === created.sessionId)
+            ? Object.freeze([...page.sessions, createdRow])
+            : page.sessions;
           sessionsCursor.value = page.nextCursor;
         };
         void synchronizeCreatedSession().catch((error: unknown) => {

@@ -23,10 +23,24 @@ export function scheduledSidebarState(record: RunRecord, turnStatus: string): Sc
   return turnStatus === "queued" ? "created" : "unknown";
 }
 
-/** Native session list order, including user-pinned rows and equal activity timestamps. */
+function comparePins(a: { pinnedAt: number | null }, b: { pinnedAt: number | null }): number {
+  return (b.pinnedAt ?? -1) - (a.pinnedAt ?? -1);
+}
+
+/** Keep the store in native page order when merging scheduled session updates. */
 export function compareSidebarSessions(a: ChatSession, b: ChatSession): number {
-  if (a.pinnedAt !== b.pinnedAt) return a.pinnedAt === null ? 1 : b.pinnedAt === null ? -1 : b.pinnedAt - a.pinnedAt;
-  return b.lastActivityAt - a.lastActivityAt || b.sessionId.localeCompare(a.sessionId);
+  return comparePins(a, b) || b.lastActivityAt - a.lastActivityAt || b.sessionId.localeCompare(a.sessionId);
+}
+
+function creationTimeMs(session: ChatSession): number {
+  // Native allocates UUIDv7 at creation, including for managed tasks. Its first
+  // 48 bits are Unix milliseconds. Older ID formats only expose activity seconds.
+  const timestamp = /^([\da-f]{8})-([\da-f]{4})-7/i.exec(session.sessionId);
+  return timestamp ? Number.parseInt(timestamp[1] + timestamp[2], 16) : session.lastActivityAt * 1000;
+}
+
+function compareTasksByCreation(a: ChatSession, b: ChatSession): number {
+  return comparePins(a, b) || creationTimeMs(b) - creationTimeMs(a) || b.sessionId.localeCompare(a.sessionId);
 }
 
 export interface ChatHistoryProjectGroup {
@@ -62,6 +76,10 @@ export function buildChatSidebarHistory(
     grouped.set(session.projectId, group);
   }
 
+  for (const members of grouped.values()) members.sort(compareTasksByCreation);
+  projectlessSessions.sort(compareTasksByCreation);
+  removedProjectSessions.sort(compareTasksByCreation);
+
   const groups: ChatHistoryProjectGroup[] = projects.map((project) => ({
     projectId: project.projectId,
     project,
@@ -76,8 +94,6 @@ export function buildChatSidebarHistory(
     }
   }
   // Stable sorting preserves the native order of unpinned groups and pin-time ties.
-  groups.sort((a, b) => a.pinnedAt === null ? (b.pinnedAt === null ? 0 : 1)
-    : b.pinnedAt === null ? -1 : b.pinnedAt - a.pinnedAt);
-  // Sidebar removal never changes native availability or the authoritative session order.
+  groups.sort(comparePins);
   return { groups, removedProjectSessions, projectlessSessions };
 }

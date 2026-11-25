@@ -17,6 +17,7 @@ import { useChatStore } from "../../stores/chat.store";
 import { useSidebarStore } from "../../stores/sidebar.store";
 import { useChatReadingStore } from "../../stores/chat-reading.store";
 import { useChatComposerDraftStore } from "../../stores/chat-composer-drafts.store";
+import ChatSidebarSessionRow from "./ChatSidebarSessionRow.vue";
 import ChatSidebarTree from "./ChatSidebarTree.vue";
 import taskRunning from "../../icons/custom/task-running.svg?no-inline";
 
@@ -465,8 +466,9 @@ describe("ChatSidebarTree", () => {
     expect(wrapper.find('[aria-label="任务 Background Session 的操作菜单"]').exists()).toBe(false);
     const selected = wrapper.get('.chat-tree__session-link[aria-current="page"]');
     const background = wrapper.findAll(".chat-tree__session-link").find(row => row.text() === "Background Session")!;
-    const menu = wrapper.findAllComponents(NDropdown)[1]!;
-    const backgroundMenu = wrapper.findAllComponents(NDropdown)[2]!;
+    const rows = wrapper.findAllComponents(ChatSidebarSessionRow);
+    const menu = rows.find(row => row.props("session").sessionId === SESSION_ID)!.getComponent(NDropdown);
+    const backgroundMenu = rows.find(row => row.props("session").title === "Background Session")!.getComponent(NDropdown);
     expect(selected.attributes("aria-haspopup")).toBe("menu");
     expect(background.attributes("aria-haspopup")).toBe("menu");
     const nativeEvent = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 80, button: 2 });
@@ -519,8 +521,8 @@ describe("ChatSidebarTree", () => {
     const rename = vi.spyOn(store, "renameSession").mockResolvedValue();
     const select = vi.spyOn(store, "selectSession");
     const row = wrapper.findAll(".chat-tree__session-link").find(entry => entry.text() === "Background Session")!;
-    const menu = wrapper.findAllComponents(NDropdown)[2]!;
     await row.trigger("contextmenu");
+    const menu = wrapper.findAllComponents(NDropdown).find(entry => entry.props("show"))!;
     menu.vm.$emit("select", "pin");
     await flushPromises();
     expect(pin).toHaveBeenCalledWith(backgroundId, true);
@@ -669,7 +671,9 @@ describe("ChatSidebarTree", () => {
     const deletedTargets: Array<string | null> = [];
     const deletion = vi.spyOn(store, "deleteSelected").mockImplementation(async () => { deletedTargets.push(store.selectedSessionId); return null; });
     const selection = vi.spyOn(store, "selectSession").mockImplementation(async id => { store.selectedSessionId = id; });
-    wrapper.findAllComponents(NDropdown)[2]!.vm.$emit("select", "delete");
+    const target = wrapper.findAllComponents(ChatSidebarSessionRow).find(row => row.props("session").sessionId === targetId)!;
+    await target.get(".chat-tree__session-link").trigger("contextmenu");
+    target.getComponent(NDropdown).vm.$emit("select", "delete");
     await flushPromises();
     expect(document.body.querySelector('[role="alertdialog"]')?.textContent).toContain("Background Session");
     expect(deletion).not.toHaveBeenCalled();
@@ -818,6 +822,45 @@ describe("ChatSidebarTree", () => {
     await flushPromises();
     expect(wrapper.find(".chat-tree__project").exists()).toBe(false);
     expect(wrapper.text()).not.toContain("暂无任务记录");
+  });
+
+  it("keeps all folders first and shows newer tasks first within each section after creation, refresh and paging", async () => {
+    const { wrapper, store } = await mountTree();
+    const original = store.sessions[0]!;
+    const session = (sequence: number, projectId: string | null, title: string) => ({
+      ...original, sessionId: `019c1a00-${sequence.toString(16).padStart(4, "0")}-7000-8000-000000000001`, projectId, title,
+    });
+    const folderTask = session(2, PROJECT_ID, "目录内的新任务");
+    const olderStandalone = session(1, null, "较早的独立任务");
+    const newestStandalone = session(5, null, "最新的独立任务");
+    const managedTask = session(3, "managed", "定时任务");
+    const titles = () => wrapper.findAll(".chat-tree__session-title").map(row => row.text());
+
+    store.sessions = [original, olderStandalone, managedTask, folderTask];
+    await flushPromises();
+    const selectedRow = wrapper.get('[aria-current="page"]').element;
+    store.sessions = [...store.sessions, newestStandalone];
+    await flushPromises();
+    const expected = [folderTask.title, original.title, managedTask.title, newestStandalone.title, olderStandalone.title];
+    expect(titles()).toEqual(expected);
+    expect(wrapper.findAll(".chat-tree__projects > li").map(row => row.classes()[0])).toEqual([
+      "chat-tree__project", "chat-tree__project", "chat-tree__session", "chat-tree__session",
+    ]);
+
+    // A refresh can deliver a recently continued older task first.
+    store.sessions = [{ ...olderStandalone, lastActivityAt: 2_000_000_000 }, original, newestStandalone, folderTask, managedTask];
+    await flushPromises();
+    expect(titles()).toEqual(expected);
+    expect(wrapper.get('[aria-current="page"]').element).toBe(selectedRow);
+
+    const middle = session(4, null, "分页读到的独立任务");
+    store.sessionsCursor = "next-page";
+    vi.spyOn(chatClient, "listSessions").mockResolvedValue({ sessions: [middle], nextCursor: null });
+    await flushPromises();
+    await wrapper.get(".chat-tree__load-more").trigger("click");
+    await flushPromises();
+    expect(titles()).toEqual([folderTask.title, original.title, managedTask.title, newestStandalone.title, middle.title, olderStandalone.title]);
+    wrapper.unmount();
   });
 
   it("moves every session out of a collapsed directory after confirming removal", async () => {
