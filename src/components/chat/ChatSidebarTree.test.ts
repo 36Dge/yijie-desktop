@@ -4,9 +4,14 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { readFileSync } from "node:fs";
 import { NDropdown, NModal } from "naive-ui";
 import { createPinia, setActivePinia } from "pinia";
+import { effectScope } from "vue";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { chatClient } from "../../api/chat-client";
+import { createScheduledTaskNativeClient } from "../../api/scheduled-task-native-client";
+import type { ImportantUpdate, RunRecord } from "../../api/generated/scheduled-task-ipc-v2.gen";
+import { useScheduledUpdates } from "../../pages/schedules/use-scheduled-updates";
+import { usePermissionStore } from "../../stores/permission.store";
 import type { ChatSessionPage } from "../../domain/chat-ipc";
 import { useChatStore } from "../../stores/chat.store";
 import { useSidebarStore } from "../../stores/sidebar.store";
@@ -223,6 +228,131 @@ describe("ChatSidebarTree", () => {
     await wrapper.setProps({ currentPath: "/chat" });
     expect(wrapper.find(".chat-tree__session-completed").exists()).toBe(true);
     wrapper.unmount();
+  });
+
+  it("discovers a scheduled conversation and follows its exact turn from creation to its terminal state", async () => {
+    const { wrapper, store } = await mountTree();
+    const original = store.sessions[0]!;
+    store.selectedSessionId = original.sessionId;
+    store.sessionsCursor = "preserve-loaded-page";
+    const permission = usePermissionStore();
+    permission.phase = "ready"; permission.selectedTenantId = crypto.randomUUID(); permission.authorizationRevision = 1;
+    vi.spyOn(permission, "hasCapability").mockReturnValue(true);
+    const sessionId = crypto.randomUUID(), turnId = crypto.randomUUID(), runId = crypto.randomUUID(), planId = crypto.randomUUID();
+    const projectId = crypto.randomUUID();
+    const record: RunRecord = {
+      kind:"run", key:{kind:"run",run_id:runId},
+      plan:{plan_id:planId,name:"每日巡检",revision:1,raw_state:"enabled",effective_state:"enabled",target_mode:"dedicated_chat",target_state:"ready"},
+      run:{run_id:runId,plan_id:planId,plan_revision:1,schedule_epoch:1,request_id:crypto.randomUUID(),operation_id:crypto.randomUUID(),
+        trigger:"automatic",logical_slot:"2026-11-25T11:22",grant_id:crypto.randomUUID(),snapshot_digest:"a".repeat(64),workspace:{source:"managed_schedule",resource_id:projectId},
+        permission_mode:"ask",delivery_state:"reserved",native_outcome:"unobserved",needs_attention:false},
+      conversation:{status:"available",conversation_id:sessionId,local_turn_id:turnId},
+      timing:{execution_time:"unknown",duration:"unknown",source:"no_execution_clock"},attention:"none",business_result:"not_evaluated",
+    };
+    let feed: ImportantUpdate[] = [], latestId = turnId, turnStatus = "queued", truncated = false;
+    const detail = vi.spyOn(chatClient, "resyncSession").mockImplementation(async () => ({
+      session:{...original, sessionId, projectId, title:original.title, lastActivityAt:10, latestTurnStatus:turnStatus},
+      history:{turns:[{turnId:latestId,status:turnStatus,terminalAt:null,reasoningStatus:"complete",reasoningReasonCode:null,messages:[],reasoning:[]}],nextCursor:null},
+      cleanup:null,
+    }));
+    const requests: string[] = [];
+    const client = createScheduledTaskNativeClient(async (command, args) => {
+      requests.push(command);
+      const requestId = (args.request as {requestId:string}).requestId;
+      return {schemaVersion:1,requestId,data:command === "schedule_list_important_updates_v1" ? {items:feed,truncated} : {items:[record]}};
+    });
+    const scope = effectScope();
+    const observer = scope.run(() => useScheduledUpdates(vi.fn(),vi.fn(),client))!;
+    try {
+      await flushPromises();
+      feed = [{run_id:runId,plan_id:planId,name:"每日巡检",state:"pending"}];
+      await observer.refresh(); await flushPromises();
+      expect(requests).toContain("schedule_list_records_v1");
+      expect(detail).toHaveBeenCalledWith(store.context!.contextId, sessionId, 1, expect.any(AbortSignal));
+      const row = () => wrapper.findAll(".chat-tree__session-link").find(button => button.attributes("aria-current") !== "page")!;
+      const description = () => document.getElementById(row().attributes("aria-describedby") ?? "")?.textContent;
+      expect(row().text()).toBe(original.title);
+      expect(description()).toBe("定时任务已新建");
+      expect(row().get(".chat-tree__session-status").element.childElementCount).toBe(0);
+      expect(wrapper.get('[aria-current="page"]').text()).toBe(original.title);
+      expect(store.sessions.filter(s => s.sessionId === sessionId)).toHaveLength(1);
+      turnStatus = "streaming"; record.run.delivery_state = "accepted";
+      await observer.refresh(); await flushPromises();
+      expect(row().text()).toBe(original.title);
+      expect(description()).toBe("定时任务执行中");
+      expect(row().find(".chat-tree__session-running").exists()).toBe(true);
+      const reads = detail.mock.calls.length;
+      await observer.refresh();
+      expect(detail).toHaveBeenCalledTimes(reads);
+      turnStatus = "completed";
+      vi.spyOn(chatClient, "listSessions").mockResolvedValueOnce({
+        sessions:[{...original,sessionId,projectId,lastActivityAt:11,latestTurnStatus:"completed"}],nextCursor:null,
+      });
+      await store.refreshBackgroundTurnStatuses(new AbortController().signal); await flushPromises();
+      expect(row().find(".chat-tree__session-completed").exists()).toBe(true);
+      expect(description()).toBe("定时任务已结束，尚未查看");
+      record.run.native_outcome = "completed"; record.run.delivery_state = "terminal"; feed[0]!.state = "completed";
+      await observer.refresh(); await flushPromises();
+      expect(row().text()).toBe(original.title);
+      expect(row().find(".chat-tree__session-completed").exists()).toBe(true);
+      expect(store.sessionsCursor).toBe("preserve-loaded-page");
+      expect(store.selectedSessionId).toBe(original.sessionId);
+      expect(store.sessions.find(s => s.sessionId === original.sessionId)).toBe(original);
+      // A later ordinary turn in the same chat cannot inherit an old run's badge.
+      latestId = crypto.randomUUID(); turnStatus = "queued";
+      store.sessions = store.sessions.map(s => s.sessionId === sessionId ? {...s, latestTurnStatus:turnStatus} : s);
+      feed[0]!.state = "needs_attention"; record.attention = "needs_attention";
+      await observer.refresh(); await flushPromises();
+      expect(description()).toBeUndefined();
+      // Short runs can already be terminal when they are first observed, even outside the attention-prioritized feed.
+      truncated = true; feed = []; record.attention = "none";
+      for (const outcome of ["failed","interrupted"] as const) {
+        record.key.run_id = record.run.run_id = crypto.randomUUID();
+        record.conversation.local_turn_id = latestId = crypto.randomUUID();
+        record.run.native_outcome = outcome; turnStatus = outcome;
+        await observer.refresh(); await flushPromises();
+        expect(row().text()).toBe(original.title);
+        expect(row().get(".chat-tree__session-status").element.childElementCount).toBe(0);
+        expect(description()).toBe(outcome === "failed" ? "定时任务执行失败" : "定时任务已停止");
+      }
+      const rowsBeforeSignOut = store.sessions;
+      const readStarted = vi.fn();
+      let release!: () => void;
+      const waiting = new Promise<void>(resolve => { release = resolve; });
+      const nextSession = crypto.randomUUID();
+      record.key.run_id = record.run.run_id = crypto.randomUUID();
+      record.conversation.conversation_id = nextSession;
+      record.run.native_outcome = "unobserved"; record.run.delivery_state = "reserved";
+      detail.mockImplementationOnce(async () => {
+        readStarted();
+        await waiting;
+        return {session:{...original,sessionId:nextSession,latestTurnStatus:"queued"},history:{turns:[{
+          turnId:latestId,status:"queued",terminalAt:null,reasoningStatus:"complete",reasoningReasonCode:null,messages:[],reasoning:[],
+        }],nextCursor:null},cleanup:null};
+      });
+      const pending = observer.refresh();
+      await vi.waitFor(() => expect(readStarted).toHaveBeenCalledOnce());
+      permission.selectedTenantId = null;
+      release(); await pending;
+      expect(store.sessions).toBe(rowsBeforeSignOut);
+      expect(store.scheduledSidebar.size).toBe(0);
+      expect(new Set(requests)).toEqual(new Set(["schedule_list_important_updates_v1","schedule_list_records_v1"]));
+    } finally { scope.stop(); wrapper.unmount(); }
+  });
+
+  it("reveals the scheduled task's directory once per new turn and respects a subsequent collapse", async () => {
+    const { wrapper, store } = await mountTree();
+    try {
+      const toggle = wrapper.get(".chat-tree__project-toggle");
+      await toggle.trigger("click");
+      expect(toggle.attributes("aria-expanded")).toBe("false");
+      const marker = {turnId:crypto.randomUUID(),state:"created" as const,activity:2,turnStatus:"queued"};
+      store.scheduledSidebar.set(SESSION_ID, marker); await flushPromises();
+      expect(toggle.attributes("aria-expanded")).toBe("true");
+      await toggle.trigger("click");
+      store.scheduledSidebar.set(SESSION_ID,{...marker,state:"running"}); await flushPromises();
+      expect(toggle.attributes("aria-expanded")).toBe("false");
+    } finally { wrapper.unmount(); }
   });
 
   it("follows a background task from queue to completion without switching conversations or dropping loaded pages", async () => {

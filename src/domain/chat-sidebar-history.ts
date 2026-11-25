@@ -1,8 +1,32 @@
 import type { ChatProject, ChatSession } from "./chat-ipc";
 import type { TaskDirectoryPreference } from "./task-directory-preference";
+import type { RunRecord } from "../api/generated/scheduled-task-ipc-v2.gen";
 
 export function isChatSessionRunning(status: ChatSession["latestTurnStatus"]): boolean {
   return status === "streaming" || status === "inProgress";
+}
+
+export const scheduledSidebarLabels = {
+  created: "已新建", running: "执行中", stopping: "停止中", completed: "已结束",
+  failed: "执行失败", interrupted: "已停止", cancelled: "已取消", attention: "需处理", unknown: "待确认",
+} as const;
+export type ScheduledSidebarState = keyof typeof scheduledSidebarLabels;
+
+export function scheduledSidebarState(record: RunRecord, turnStatus: string): ScheduledSidebarState {
+  if (record.run.native_outcome !== "unobserved") return record.run.native_outcome;
+  if (record.run.delivery_state === "cancelled") return "cancelled";
+  if (turnStatus === "completed" || turnStatus === "failed" || turnStatus === "interrupted") return turnStatus;
+  if (record.attention === "needs_attention") return "attention";
+  if (record.run.delivery_state === "uncertain" || record.run.delivery_state === "terminal") return "unknown";
+  if (turnStatus === "stopping") return "stopping";
+  if (isChatSessionRunning(turnStatus) || record.timing.duration === "in_progress") return "running";
+  return turnStatus === "queued" ? "created" : "unknown";
+}
+
+/** Native session list order, including user-pinned rows and equal activity timestamps. */
+export function compareSidebarSessions(a: ChatSession, b: ChatSession): number {
+  if (a.pinnedAt !== b.pinnedAt) return a.pinnedAt === null ? 1 : b.pinnedAt === null ? -1 : b.pinnedAt - a.pinnedAt;
+  return b.lastActivityAt - a.lastActivityAt || b.sessionId.localeCompare(a.sessionId);
 }
 
 export interface ChatHistoryProjectGroup {

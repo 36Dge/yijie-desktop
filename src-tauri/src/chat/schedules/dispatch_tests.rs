@@ -1291,7 +1291,10 @@ async fn feat155_draft_http_readonly_recovery_and_later_coordinator_never_post()
         )
         .await
         .unwrap();
-        f.app.native_schedule_tick().await.unwrap();
+        f.app
+            .native_schedule_tick(&NoopProjectionSink)
+            .await
+            .unwrap();
         assert_eq!(f.app.dispatch_next().await.unwrap(), DispatchOutcome::Idle);
     }
     assert_eq!(f.server.state.lock().unwrap().posts(), 0);
@@ -1301,7 +1304,10 @@ async fn feat155_draft_http_readonly_recovery_and_later_coordinator_never_post()
     let count = f.server.state.lock().unwrap().posts();
     assert_eq!(count, 2);
     for _ in 0..2 {
-        f.app.native_schedule_tick().await.unwrap();
+        f.app
+            .native_schedule_tick(&NoopProjectionSink)
+            .await
+            .unwrap();
         assert_eq!(f.app.dispatch_next().await.unwrap(), DispatchOutcome::Idle);
     }
     assert_eq!(f.server.state.lock().unwrap().posts(), count);

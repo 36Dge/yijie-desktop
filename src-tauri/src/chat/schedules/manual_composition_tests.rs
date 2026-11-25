@@ -66,7 +66,10 @@ pub(super) async fn prepare(
         )
         .unwrap()
         .context_id;
-    f.app.native_schedule_tick().await.unwrap();
+    f.app
+        .native_schedule_tick(&NoopProjectionSink)
+        .await
+        .unwrap();
     let host = f.app.host().unwrap().instance_nonce().to_owned();
     let epoch = f.gate.epoch();
     f.db.call(move |r| {

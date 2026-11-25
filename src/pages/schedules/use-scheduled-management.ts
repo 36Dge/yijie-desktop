@@ -4,6 +4,7 @@ import type { Requests, Responses, PlanCard, RecordRow, PlanCardOrder, FilterSta
 import type { SavePlanRequest } from "../../domain/scheduled-plan-v2.generated";
 import { useChatStore } from "../../stores/chat.store";
 import { usePermissionStore } from "../../stores/permission.store";
+import { onScheduledRunChanges } from "./scheduled-run-changes";
 
 type Command = keyof Requests;
 type Pending = Readonly<{ id: string; scope: string; kind: "save"; payload: SavePlanRequest } | { id: string; scope: string; kind: "pause" | "delete" | "enable"; payload: PlanMutation }>;
@@ -27,30 +28,65 @@ export function useScheduledManagement(client = createScheduledTaskNativeClient(
     if (disposed || context.value !== bound) throw new ScheduledTaskNativeError("context_invalid", id);
     return response.data;
   }
-  async function refresh(more = false) {
-    const current = ++epoch; error.value = null;
+  let liveRequested = false, liveReading = false;
+  async function refresh(more = false, live = false) {
+    const current = ++epoch;
+    if (!live) error.value = null;
     if (!context.value) { loading.value = false; return; }
-    loading.value = true;
+    if (!live) loading.value = true;
     try {
-      const caps = await call("schedule_operation_capabilities_v1", {});
-      if (current !== epoch) return;
+      const caps = live ? capabilities.value : await call("schedule_operation_capabilities_v1", {});
+      if (current !== epoch || !caps) return;
       capabilities.value = caps;
       if (!caps.save.available && caps.save.reason === "authority_missing") pending.value = null;
       if (!caps.read.available) { cards.value = []; records.value = []; cursor.value = undefined; return; }
-      const common = { limit: 20, search: search.value.trim(), state: state.value, ...(more && cursor.value ? { cursor: cursor.value } : {}) };
+      const common = { limit: 20, search: search.value.trim(), state: state.value };
+      // A live read replaces the loaded prefix as one snapshot, retaining filters, sort order and pagination.
+      async function readPages<T>(previous: T[], load: (after?: string) => Promise<{ items: T[]; next_cursor?: string }>) {
+        const items = more ? previous.slice() : [];
+        let after = more ? cursor.value : undefined;
+        do {
+          const page = await load(after);
+          if (current !== epoch) return;
+          items.push(...page.items);
+          after = page.next_cursor;
+        } while (live && after && items.length < previous.length);
+        cursor.value = after;
+        return items;
+      }
       if (tab.value === "plans") {
-        const page = await call("schedule_list_plan_cards_v1", { ...common, order: order.value });
-        if (current !== epoch) return;
-        cards.value = more ? [...cards.value, ...page.items] : page.items; cursor.value = page.next_cursor;
+        const items = await readPages(cards.value, after => call("schedule_list_plan_cards_v1", {
+          ...common, order:order.value, ...(after ? {cursor:after} : {}),
+        }));
+        if (current !== epoch || !items) return;
+        cards.value = items;
       } else {
-        const page = await call("schedule_list_record_rows_v1", { ...common, ...(planFilter.value ? { plan_id: planFilter.value } : {}) });
-        if (current !== epoch) return;
-        records.value = more ? [...records.value, ...page.items] : page.items; cursor.value = page.next_cursor;
+        const items = await readPages(records.value, after => call("schedule_list_record_rows_v1", {
+          ...common, ...(planFilter.value ? {plan_id:planFilter.value} : {}), ...(after ? {cursor:after} : {}),
+        }));
+        if (current !== epoch || !items) return;
+        records.value = items;
       }
       refreshVersion.value++;
     } catch (e) { if (current === epoch) error.value = errorCode(e); }
     finally { if (current === epoch) loading.value = false; }
   }
+  async function refreshLive() {
+    if (!liveRequested || liveReading || loading.value || writing.value || pending.value || disposed) return;
+    liveRequested = false;
+    if (!context.value || !permissions.isReady || !permissions.hasCapability("schedule.read") || !capabilities.value?.read.available) return;
+    liveReading = true;
+    try { await refresh(false, true); }
+    finally { liveReading = false; if (liveRequested) void refreshLive(); }
+  }
+  const stopLive = onScheduledRunChanges((id, plans) => {
+    if (id !== context.value) return;
+    if (tab.value === "plans" && state.value === "all" && !cards.value.some(card => plans.has(card.summary.plan_id))) return;
+    if (tab.value === "records" && planFilter.value && !plans.has(planFilter.value)) return;
+    liveRequested = true;
+    void refreshLive();
+  });
+  watch([loading, writing, pending], () => { void refreshLive(); });
   async function runPending(): Promise<boolean> {
     const action = pending.value;
     if (!action || action.scope !== scope.value || writing.value || !context.value) return false;
@@ -105,11 +141,11 @@ export function useScheduledManagement(client = createScheduledTaskNativeClient(
   }
   watch(scope, () => { pending.value = null; receipt.value = null; cards.value = []; records.value = []; notice.value = ""; }, { flush: "sync" });
   watch(() => permissions.isReady && !permissions.hasCapability("schedule.read"), revoked => { if (revoked) pending.value = null; }, { flush: "sync" });
-  watch(context, () => { epoch++; cards.value = []; records.value = []; cursor.value = undefined; capabilities.value = null; void refresh(); }, { immediate: true });
+  watch(context, () => { epoch++; liveRequested = false; cards.value = []; records.value = []; cursor.value = undefined; capabilities.value = null; void refresh(); }, { immediate: true });
   watch([tab, search, state, order, planFilter], () => {
     epoch++; cursor.value = undefined; clearTimeout(timer);
     timer = setTimeout(() => { void refresh(); }, 220);
   });
-  onScopeDispose(() => { disposed = true; epoch++; clearTimeout(timer); pending.value = null; });
+  onScopeDispose(() => { disposed = true; stopLive(); epoch++; clearTimeout(timer); pending.value = null; });
   return { tab, search, state, order, planFilter, cards, records, capabilities, cursor, loading, writing, error, notice, success, refreshVersion, pending, receipt, context, canManage, call, refresh, save, mutate, queryReceipt, retryMutation: runPending };
 }

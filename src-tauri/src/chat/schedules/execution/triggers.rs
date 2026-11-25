@@ -724,18 +724,19 @@ impl ChatRepository {
         }
         Ok(result)
     }
+    /// True only after the automatic run and its local turn have been committed.
     pub(crate) fn process_schedule_due(
         &mut self,
         c: DueCandidate,
         remote_reason: Option<&str>,
         now: i64,
-    ) -> Result<(), crate::chat::error::ChatError> {
+    ) -> Result<bool, crate::chat::error::ChatError> {
         use crate::chat::error::ChatError as E;
         let Some(authority) = self.schedule_dispatch_authority.clone() else {
-            return Ok(());
+            return Ok(false);
         };
         let Some(lifecycle) = self.schedule_trigger_lifecycle.clone() else {
-            return Ok(());
+            return Ok(false);
         };
         let a = authority
             .schedule_authority(now)
@@ -743,17 +744,17 @@ impl ChatRepository {
         let p = plan(&self.connection, &self.scope, &c.slot.plan)
             .map_err(|_| E::DatabaseUnavailable)?;
         if !super::super::model_retirement::execution_available(&p.definition) {
-            return Ok(());
+            return Ok(false);
         }
         if p.revision != c.slot.revision
             || p.schedule_epoch != c.slot.epoch
             || p.next_at != Some(c.slot.at)
         {
-            return Ok(());
+            return Ok(false);
         }
         // An epoch change is reconciled by clock recovery, never interpreted as late awake work.
         if lifecycle.ticket().ok().as_ref() != Some(&c.slot.ticket) {
-            return Ok(());
+            return Ok(false);
         }
         let h =
             hold(&self.connection, &self.scope, &p.plan_id).map_err(|_| E::DatabaseUnavailable)?;
@@ -805,7 +806,7 @@ impl ChatRepository {
                 &Trigger::Automatic(c.slot.clone()),
                 now,
             ) {
-                Ok(_) => return Ok(()),
+                Ok(_) => return Ok(true),
                 Err(Error::ReservationBusy) => Some("busy"),
                 Err(Error::TargetUnavailable) => Some("target_unavailable"),
                 Err(Error::PermissionDenied) => Some("permission_denied"),
@@ -817,11 +818,11 @@ impl ChatRepository {
                 ) => Some("unauthorized"),
                 Err(Error::ExecutionNotReady) => {
                     if lifecycle.ticket().ok().as_ref() != Some(&c.slot.ticket) {
-                        return Ok(());
+                        return Ok(false);
                     }
                     Some("missed_late")
                 }
-                Err(Error::RevisionConflict | Error::RequestConflict) => return Ok(()),
+                Err(Error::RevisionConflict | Error::RequestConflict) => return Ok(false),
                 Err(_) => Some("resource_unavailable"),
             }
         } else {
@@ -836,7 +837,7 @@ impl ChatRepository {
                 .map_err(|_| E::DatabaseUnavailable)?;
             let fresh = plan(&tx, &scope, &p.plan_id).map_err(|_| E::DatabaseUnavailable)?;
             if fresh.revision != p.revision || fresh.next_at != Some(c.slot.at) {
-                return Ok(());
+                return Ok(false);
             }
             let changed=tx.execute("UPDATE chat_scheduled_occurrences SET disposition=?1,missed_through=?2 WHERE plan_id=?3 AND schedule_epoch=?4 AND logical_slot=?5 AND disposition='planned' AND run_id IS NULL",params![reason,now.max(c.slot.at),p.plan_id,p.schedule_epoch,c.slot.slot]).map_err(|_|E::DatabaseUnavailable)?;
             if changed == 1 {
@@ -854,7 +855,7 @@ impl ChatRepository {
             }
             tx.commit().map_err(|_| E::DatabaseUnavailable)?;
         }
-        Ok(())
+        Ok(false)
     }
     /// At most the single currently reserved run. Never re-POST attempted operations.
     pub(crate) fn expire_automatic(

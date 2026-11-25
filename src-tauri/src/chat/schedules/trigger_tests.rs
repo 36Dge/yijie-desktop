@@ -832,7 +832,10 @@ async fn feat155_3c2_pending_approval_is_not_unknown_and_wake_recovery_ignores_o
         .unwrap();
     f.gate.transition(Phase::Suspended);
     f.gate.transition(Phase::Recovering);
-    f.app.native_schedule_tick().await.unwrap();
+    f.app
+        .native_schedule_tick(&NoopProjectionSink)
+        .await
+        .unwrap();
     assert_eq!(f.disposition(&p.plan_id).await.0, "skipped_paused");
     assert_eq!(f.counts().await.1, 1);
     f.close().await;
@@ -1022,6 +1025,21 @@ async fn feat155_3c2_long_sse_uses_same_tick_and_records_busy() {
 }
 #[tokio::test]
 async fn feat155_3c2_original_coordinator_automatically_reaches_terminal_and_stops() {
+    struct Observer {
+        server: Arc<Mutex<ServerState>>,
+        posts_at_creation: Mutex<Vec<usize>>,
+    }
+    impl TurnProjectionSink for Observer {
+        fn scheduled_run_created(&self) {
+            self.posts_at_creation
+                .lock()
+                .unwrap()
+                .push(self.server.lock().unwrap().posts());
+        }
+        fn publish(&self, _: LiveTurnProjection) -> Result<(), ChatError> {
+            Ok(())
+        }
+    }
     let f = Fixture::new_mode(true, true).await;
     let at = unix_seconds().unwrap() / 60 * 60;
     f.continuous(at - 20).await;
@@ -1035,14 +1053,23 @@ async fn feat155_3c2_original_coordinator_automatically_reaches_terminal_and_sto
         )
         .await;
     f.server.state.lock().unwrap().complete = false;
-    let coordinator =
-        ConversationCoordinator::start(f.app.clone(), Duration::from_millis(10)).unwrap();
+    let observer = Arc::new(Observer {
+        server: f.server.state.clone(),
+        posts_at_creation: Mutex::new(Vec::new()),
+    });
+    let coordinator = ConversationCoordinator::start_with_projection_sink(
+        f.app.clone(),
+        Duration::from_millis(10),
+        observer.clone(),
+    )
+    .unwrap();
     let pid = e.plan.plan_id.clone();
     let result=tokio::time::timeout(Duration::from_secs(8),async{
         loop {let pid=pid.clone();let done=f.db.call(move|r|Ok(r.connection.query_row("SELECT EXISTS(SELECT 1 FROM chat_scheduled_runs WHERE plan_id=?1 AND native_outcome='completed')",[pid],|r|r.get::<_,bool>(0)).unwrap())).await.unwrap();if done{break}tokio::time::sleep(Duration::from_millis(20)).await;}
     }).await;
     coordinator.stop().await.unwrap();
     assert!(result.is_ok());
+    assert_eq!(*observer.posts_at_creation.lock().unwrap(), vec![0]);
     assert_eq!(f.server.state.lock().unwrap().posts(), 2);
     assert_eq!(
         f.service.list_plans().await.unwrap()[0].state,

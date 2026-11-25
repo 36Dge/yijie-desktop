@@ -8,14 +8,15 @@ import type { SelectionRef, SelectedSkillRef } from "../domain/market-selection-
 import { chatModelClient, executionModelIntent, type ModelIntent } from "../api/chat-model-client";
 import { chatWorkspaceClient } from "../api/chat-workspace-client";
 import type { WorkspaceCreation } from "../domain/chat-workspace";
-import { isChatSessionRunning } from "../domain/chat-sidebar-history";
+import { compareSidebarSessions, isChatSessionRunning, scheduledSidebarState, type ScheduledSidebarState } from "../domain/chat-sidebar-history";
+import type { RunRecord } from "../api/generated/scheduled-task-ipc-v2.gen";
 import type { SessionPurpose } from "../domain/chat-session-purpose.generated";
 import {conversationMessageItemId} from "../api/chat-conversation-adapter";
 import {selectConversationItem, type ConversationItemSnapshot} from "../domain/conversation-view";
 import type {LocalSubmissionView} from "../api/generated/native-conversation-history.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { defineStore } from "pinia";
-import { computed,ref,shallowRef,watch } from "vue";
+import { computed,ref,shallowReactive,shallowRef,watch } from "vue";
 import {
 approvalDecisionResultV6ToDomain,
 createApprovalDecisionIntentV6,
@@ -395,6 +396,17 @@ export function createChatStoreDefinition(
     const context = shallowRef<BoundChatContext | null>(null);
     const projects = shallowRef<readonly ChatProject[]>(Object.freeze([]));
     const sessions = shallowRef<readonly ChatSession[]>(Object.freeze([]));
+    const scheduledSidebar = shallowReactive(new Map<string, {
+      turnId: string; state: ScheduledSidebarState; activity: number; turnStatus: string | null; record?: RunRecord;
+    }>());
+    watch(sessions, rows => {
+      if (!scheduledSidebar.size) return;
+      const current = new Map(rows.map(row => [row.sessionId, row]));
+      for (const [id, marker] of scheduledSidebar) {
+        const row = current.get(id);
+        if (!row || marker.activity !== row.lastActivityAt || marker.turnStatus !== row.latestTurnStatus) scheduledSidebar.delete(id);
+      }
+    }, { flush: "sync" });
     const taskListLoading = ref(false);
     const sessionsCursor = ref<string | null>(null);
     const selectedSessionId = ref<string | null>(null);
@@ -1879,7 +1891,12 @@ export function createChatStoreDefinition(
       // Only an explicit native status controls sending. Availability never closes a turn.
       if (latest.source === "native_observed" && latest.status != null) {
         liveTurnStatus.value = latest.status === "inProgress" ? "streaming" : latest.status;
-        sessions.value = sessions.value.map(session => session.sessionId === sessionId ? {...session, latestTurnStatus: liveTurnStatus.value} : session);
+        sessions.value = sessions.value.map(session => {
+          if (session.sessionId !== sessionId) return session;
+          const row = { ...session, latestTurnStatus: liveTurnStatus.value };
+          retainScheduledMarker(row, latest.turnId);
+          return row;
+        });
       }
     }
 
@@ -2956,6 +2973,8 @@ export function createChatStoreDefinition(
       const projectedSessionIndex = sessions.value.findIndex((session) =>
         session.sessionId === projection.session.sessionId,
       );
+      const lastTurn = projection.history.turns[projection.history.turns.length - 1];
+      if (lastTurn && lastTurn.status === authoritativeLatestTurnStatus) retainScheduledMarker(authoritativeSession, lastTurn.turnId);
       sessions.value = projectedSessionIndex === -1
         ? Object.freeze([authoritativeSession, ...sessions.value])
         : Object.freeze(sessions.value.map((session, index) =>
@@ -4121,6 +4140,49 @@ export function createChatStoreDefinition(
       sessionsCursor.value = page.nextCursor;
     }
 
+    function publishScheduledMarker(row: ChatSession, turnId: string, status: string, record: RunRecord) {
+      const state = scheduledSidebarState(record, status);
+      scheduledSidebar.set(row.sessionId, { turnId, state, activity: row.lastActivityAt, turnStatus: status, record });
+      return state;
+    }
+
+    function retainScheduledMarker(row: ChatSession, turnId: string) {
+      const marker = scheduledSidebar.get(row.sessionId);
+      if (marker?.record && marker.turnId === turnId && row.latestTurnStatus
+        && (marker.turnStatus !== row.latestTurnStatus || marker.activity !== row.lastActivityAt)) {
+        publishScheduledMarker(row, turnId, row.latestTurnStatus, marker.record);
+      }
+    }
+
+    // Read the bound row and its latest turn without selecting it, subscribing to it, or replacing any loaded page.
+    // A terminal, superseded or off-page historical turn is settled. Live and concurrent changes need another observation.
+    async function syncScheduledSidebarTurn(record: RunRecord, discover: boolean, signal: AbortSignal): Promise<boolean> {
+      const { conversation_id: id, local_turn_id: turnId } = record.conversation;
+      const bound = context.value;
+      if (!id || !turnId || record.conversation.status !== "available") return false;
+      const before = sessions.value.find(row => row.sessionId === id);
+      const beforeMarker = scheduledSidebar.get(id);
+      if (!discover && !before) return true;
+      if (!bound || !hasAction("read_sessions") || signal.aborted || phase.value === "binding" || phase.value === "loading") return false;
+      const snapshot = await client.resyncSession(bound.contextId, id, 1, signal);
+      if (signal.aborted || context.value?.contextId !== bound.contextId || !hasAction("read_sessions")
+        || sessions.value.find(row => row.sessionId === id) !== before || scheduledSidebar.get(id) !== beforeMarker) return false;
+      const row = snapshot.session;
+      const latest = snapshot.history.turns[0];
+      if (snapshot.cleanup || row.sessionId !== id || latest?.turnId !== turnId) {
+        if (scheduledSidebar.get(id)?.turnId === turnId) scheduledSidebar.delete(id);
+        return true;
+      }
+      if (row.latestTurnStatus !== latest.status || (before && before.lastActivityAt > row.lastActivityAt)) return false;
+      const state = publishScheduledMarker(row, turnId, latest.status, record);
+      if (!before || before.lastActivityAt !== row.lastActivityAt || before.latestTurnStatus !== row.latestTurnStatus
+        || before.title !== row.title || before.titleSource !== row.titleSource || before.projectId !== row.projectId
+        || before.pinnedAt !== row.pinnedAt || before.projectAvailable !== row.projectAvailable) {
+        sessions.value = Object.freeze([...sessions.value.filter(item => item.sessionId !== id), row].sort(compareSidebarSessions));
+      }
+      return state === "completed" || state === "failed" || state === "interrupted" || state === "cancelled";
+    }
+
     async function refreshBackgroundTurnStatuses(signal: AbortSignal): Promise<void> {
       const bound = context.value;
       if (!bound || !hasAction("read_sessions") || signal.aborted || !backgroundTurns.value.length) return;
@@ -4137,6 +4199,13 @@ export function createChatStoreDefinition(
           if (!previous) continue;
           pending.delete(fresh.sessionId);
           if (fresh.latestTurnStatus !== previous.latestTurnStatus) {
+            const scheduled = scheduledSidebar.get(fresh.sessionId)?.record;
+            if (scheduled) {
+              // A list row has no turn ID. Verify the binding and publish the row and badge together.
+              await syncScheduledSidebarTurn(scheduled, false, signal);
+              if (signal.aborted || context.value?.contextId !== bound.contextId || !hasAction("read_sessions")) return;
+              if (scheduledSidebar.has(fresh.sessionId)) continue;
+            }
             updates.set(previous, { ...previous, latestTurnStatus: fresh.latestTurnStatus, lastActivityAt: fresh.lastActivityAt });
           }
         }
@@ -4560,6 +4629,8 @@ export function createChatStoreDefinition(
       sessionsCursor,
       hasBackgroundTurns: computed(() => backgroundTurns.value.length > 0),
       refreshBackgroundTurnStatuses,
+      scheduledSidebar,
+      syncScheduledSidebarTurn,
       selectedSessionId,
       selectedAccessMode,
       selectedSessionPurpose,

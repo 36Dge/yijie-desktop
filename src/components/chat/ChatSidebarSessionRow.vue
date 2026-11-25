@@ -2,13 +2,14 @@
 import { computed, ref, useId, watch } from "vue";
 import { NDropdown, type DropdownOption } from "naive-ui";
 import type { ChatSession } from "../../domain/chat-ipc";
-import { isChatSessionRunning } from "../../domain/chat-sidebar-history";
+import { isChatSessionRunning, scheduledSidebarLabels, type ScheduledSidebarState } from "../../domain/chat-sidebar-history";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatSidebarSessionTitle from "./ChatSidebarSessionTitle.vue";
 
 const props = defineProps<{
   session: ChatSession;
   completionUnread: boolean;
+  scheduledState?: ScheduledSidebarState;
   currentPath: string;
   options: DropdownOption[];
   actionPending: boolean;
@@ -24,9 +25,15 @@ const emit = defineEmits<{
 
 const selected = computed(() => props.currentPath === `/chat/${props.session.sessionId}`);
 const status = computed(() => {
+  if (props.scheduledState) {
+    if (props.scheduledState === "running") return "running";
+    return props.scheduledState === "completed" && props.completionUnread ? "completed" : null;
+  }
   if (isChatSessionRunning(props.session.latestTurnStatus)) return "running";
   return props.completionUnread && props.session.latestTurnStatus === "completed" ? "completed" : null;
 });
+const description = computed(() => props.scheduledState ? `定时任务${scheduledSidebarLabels[props.scheduledState]}${status.value === "completed" ? "，尚未查看" : ""}`
+  : status.value === "running" ? "任务执行中" : status.value === "completed" ? "任务已完成，尚未查看" : "");
 const statusDescriptionId = useId();
 const hasMenu = computed(() => props.options.length > 0);
 const trigger = ref<HTMLButtonElement | null>(null);
@@ -89,7 +96,7 @@ function selectAction(key: string | number): void {
       :class="{ 'chat-tree__session-link--active': selected }"
       type="button"
       :aria-current="selected ? 'page' : undefined"
-      :aria-describedby="status ? statusDescriptionId : undefined"
+      :aria-describedby="description ? statusDescriptionId : undefined"
       :aria-haspopup="hasMenu ? 'menu' : undefined"
       :aria-expanded="hasMenu ? menuVisible : undefined"
       :aria-keyshortcuts="hasMenu ? 'Shift+F10' : undefined"
@@ -113,7 +120,7 @@ function selectAction(key: string | number): void {
         <span v-else-if="status === 'completed'" class="chat-tree__session-completed" />
       </span>
     </button>
-    <span v-if="status" :id="statusDescriptionId" class="chat-tree__session-description">{{ status === "running" ? "任务执行中" : "任务已完成，尚未查看" }}</span>
+    <span v-if="description" :id="statusDescriptionId" class="chat-tree__session-description">{{ description }}</span>
     <YjIcon v-if="session.pinnedAt !== null" name="pin" size="xs" tone="muted" />
     <n-dropdown
       v-if="hasMenu"
@@ -182,7 +189,9 @@ function selectAction(key: string | number): void {
 
 .chat-tree__session-status .chat-tree__session-running { color: inherit; }
 @media (prefers-reduced-motion: no-preference) {
-  .chat-tree__session-running {
+  /* Rotate the SVG artwork so WebKit repaints the spokes inside the stationary status slot. */
+  .chat-tree__session-running :deep(use) {
+    transform-box: view-box;
     transform-origin: center;
     animation: chat-task-spin var(--yj-motion-chat-task-spin) linear infinite;
   }

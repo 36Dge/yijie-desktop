@@ -2,8 +2,9 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { effectScope, nextTick, reactive } from "vue";
 import { createScheduledTaskNativeClient } from "../../api/scheduled-task-native-client";
-import type { Requests } from "../../api/generated/scheduled-task-ipc-v2.gen";
+import type { PlanCard, PlanCardPage, PlanCardQuery, Requests } from "../../api/generated/scheduled-task-ipc-v2.gen";
 import { useScheduledManagement } from "./use-scheduled-management";
+import { publishScheduledRunChanges } from "./scheduled-run-changes";
 
 const stores = vi.hoisted(() => ({ chat: {} as object, permission: {} as object }));
 vi.mock("../../stores/chat.store", () => ({ useChatStore: () => stores.chat }));
@@ -14,7 +15,7 @@ const plan = { plan_id: crypto.randomUUID(), revision: 1, schedule_epoch: 1, def
 const summary = { plan_id: plan.plan_id, name: definition.name, revision: 1, raw_state: "enabled" as const, effective_state: "enabled" as const, target_mode: "dedicated_chat" as const, target_state: "unbound" as const };
 const cleanup: (() => void)[] = [];
 afterEach(() => { cleanup.splice(0).forEach(f => f()); });
-function harness() {
+function harness(listCards: (query: PlanCardQuery) => PlanCardPage = () => ({items:[]})) {
   const chat = reactive({ context: { contextId: crypto.randomUUID() } as {contextId:string} | null });
   const permission = reactive({ selectedTenantId: scopeId as string | null, isReady: true, hasCapability: () => true });
   stores.chat = chat; stores.permission = permission;
@@ -25,7 +26,7 @@ function harness() {
     let data: unknown;
     switch (command) {
       case "schedule_operation_capabilities_v1": data = Object.fromEntries(["read","save","manual","automatic","draft","single_run"].map(k => [k, { available: k === "read" || k === "save", reason: k === "read" || k === "save" ? "ready" : "candidate_disabled" }])); break;
-      case "schedule_list_plan_cards_v1": data = {items: []}; break;
+      case "schedule_list_plan_cards_v1": data = listCards((request as Requests["schedule_list_plan_cards_v1"]).payload); break;
       case "schedule_get_plan_v1": data = { plan, summary }; break;
       case "schedule_save_active_plan_v1": if (uncertain) throw { schemaVersion: 1, requestId: request.requestId, code: "operation_unknown" }; data = plan; break;
       case "schedule_delete_plan_v1": deleted = true; if (uncertain) throw { schemaVersion: 1, requestId: request.requestId, code: "operation_unknown" }; data = { ...plan, state: "deleted" }; break;
@@ -37,6 +38,27 @@ function harness() {
   const scope = effectScope(); const state = scope.run(() => useScheduledManagement(native))!; cleanup.push(() => scope.stop());
   return { state, calls, chat, permission, uncertainty: (value: boolean) => { uncertain = value; }, observation: (value: boolean) => { observed = value; } };
 }
+it("updates a completed once plan and its next time without dropping loaded cards or showing a loading skeleton", async () => {
+  const cursor = crypto.randomUUID();
+  const cards: PlanCard[] = Array.from({length:23}, (_, i) => ({
+    summary:{...summary,plan_id:i ? crypto.randomUUID() : summary.plan_id,next_at:1790038800},
+    rule:{frequency:"once",local_time:"12:00",local_date:"2026-11-25",time_zone:"Asia/Shanghai"},content_preview:"单次任务",
+  }));
+  const h = harness(query => query.cursor ? {items:cards.slice(20)} : {items:cards.slice(0,20),next_cursor:cursor});
+  await vi.waitFor(() => expect(h.state.cards.value).toHaveLength(20));
+  await h.state.refresh(true);
+  expect(h.state.cards.value).toHaveLength(23);
+  const before = h.calls.length;
+  cards[0] = {...cards[0]!,summary:{...summary,raw_state:"completed",effective_state:"completed"}};
+  publishScheduledRunChanges("other-context", new Set([summary.plan_id]));
+  expect(h.calls).toHaveLength(before);
+  publishScheduledRunChanges(h.chat.context!.contextId, new Set([summary.plan_id]));
+  expect(h.state.loading.value).toBe(false);
+  await vi.waitFor(() => expect(h.state.cards.value[0]!.summary.raw_state).toBe("completed"));
+  expect(h.state.cards.value[0]!.summary.next_at).toBeUndefined();
+  expect(h.state.cards.value).toHaveLength(23);
+  expect(h.calls.slice(before).map(c=>c.command)).toEqual(["schedule_list_plan_cards_v1","schedule_list_plan_cards_v1"]);
+});
 it("saves and enables in one native write without a separate authorization", async () => {
   const h = harness(); await vi.waitFor(() => expect(h.state.canManage.value).toBe(true));
   expect(await h.state.save({definition})).toBe(true);

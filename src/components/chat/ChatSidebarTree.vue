@@ -47,6 +47,7 @@ const actionPending = ref(false);
 const actionError = ref<string | null>(null);
 let lastDialogTrigger: HTMLElement | null = null;
 let knownProjectIds = new Set<string>();
+const revealedScheduledTurns = new Map<string, string>();
 
 watch(() => chatStore.sessions, sessions => readingStore.observeSessions(sessions), { immediate: true, flush: "sync" });
 
@@ -69,6 +70,19 @@ const history = computed(() => buildChatSidebarHistory(chatStore.projects, chatS
 const historyGroups = computed(() => history.value.groups);
 const topLevelSessions = computed(() => [...history.value.projectlessSessions, ...history.value.removedProjectSessions]);
 const hasHistory = computed(() => historyGroups.value.length > 0 || topLevelSessions.value.length > 0);
+watch(() => props.visible ? Array.from(chatStore.scheduledSidebar) : [], markers => {
+  if (!props.visible) return;
+  const rows = new Map(chatStore.sessions.map(row => [row.sessionId, row]));
+  for (const id of revealedScheduledTurns.keys()) if (!rows.has(id)) revealedScheduledTurns.delete(id);
+  for (const [id, marker] of markers) {
+    if ((marker.state !== "created" && marker.state !== "running") || revealedScheduledTurns.get(id) === marker.turnId) continue;
+    revealedScheduledTurns.set(id, marker.turnId);
+    const group = rows.get(id)?.projectId;
+    if (group && !expandedProjectIds.value.has(group) && historyGroups.value.some(item => item.projectId === group)) {
+      expandedProjectIds.value = new Set([...expandedProjectIds.value, group]);
+    }
+  }
+}, { immediate: true, flush: "post" });
 const treeError = computed(() => {
   if (chatStore.phase === "permission-denied" && !chatStore.hasAction("read_sessions")) {
     return "无权读取任务记录";
@@ -103,6 +117,7 @@ watch([() => props.currentPath, () => chatStore.context?.allowedActions, actionP
   if (readingStore.latestRequest && props.currentPath !== `/chat/${readingStore.latestRequest.sessionId}`) readingStore.cancelLatest();
 });
 watch(() => chatStore.context?.contextId, () => {
+  revealedScheduledTurns.clear();
   projectMenuId.value = null;
   activeSessionMenuId.value = null;
   removeProjectTarget.value = null;
@@ -419,6 +434,7 @@ async function confirmRemoveProject(): Promise<void> {
             v-for="session in group.sessions"
             :key="session.sessionId"
             :session="session"
+            :scheduled-state="chatStore.scheduledSidebar.get(session.sessionId)?.state"
             :completion-unread="readingStore.hasUnreadCompletion(session)"
             :current-path="currentPath"
             :options="sessionMenuOptions(session)"
@@ -436,6 +452,7 @@ async function confirmRemoveProject(): Promise<void> {
         v-for="session in topLevelSessions"
         :key="session.sessionId"
         :session="session"
+        :scheduled-state="chatStore.scheduledSidebar.get(session.sessionId)?.state"
         :completion-unread="readingStore.hasUnreadCompletion(session)"
         :current-path="currentPath"
         :options="sessionMenuOptions(session)"

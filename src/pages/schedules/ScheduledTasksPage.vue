@@ -4,7 +4,8 @@ import { chatModelsEnabled, kimiK31Candidate } from "../../api/chat-model-client
 import { computed, inject, nextTick, ref, shallowRef, watch } from "vue";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import { queueScheduleDraftIntent, clearScheduleDraftIntent } from "../../domain/scheduled-draft-intent";
-import { NAlert, NButton, NCard, NInput, NModal, NSelect, NSkeleton, NSwitch, NTag, useMessage } from "naive-ui";
+import { NAlert, NButton, NCard, NConfigProvider, NInput, NModal, NSelect, NSkeleton, NSwitch, NTag, useMessage } from "naive-ui";
+import { scheduleFieldTheme } from "../../design/theme/schedule-field-theme";
 import YjIcon from "../../components/yijie/YjIcon.vue";
 import YjPage from "../../components/yijie/YjPage.vue";
 import YjPageHeader from "../../components/yijie/YjPageHeader.vue";
@@ -214,16 +215,20 @@ onBeforeRouteLeave(() => {
   <YjPage>
     <div class="schedules-page">
       <YjPageHeader title="定时任务" description="按设定时间自动执行任务，随时开启或关闭。">
-        <template #actions><NButton :disabled="!canManage || writing || autoBusy || autoPending || runningAction || runPending" @click="createThroughConversation">通过对话创建</NButton><NButton type="primary" :disabled="!canManage || writing || autoBusy || autoPending || runningAction || runPending" @click="create">新建定时任务</NButton></template>
+        <template #actions>
+          <NButton :disabled="!canManage || writing || autoBusy || autoPending || runningAction || runPending" @click="createThroughConversation">通过对话创建</NButton>
+          <NButton type="primary" :bordered="false" :theme-overrides="{ rippleColorPrimary: 'transparent' }"
+            :disabled="!canManage || writing || autoBusy || autoPending || runningAction || runPending" @click="create">新建定时任务</NButton>
+        </template>
       </YjPageHeader>
       <div class="schedules-controls">
         <YjTabs v-model="tab" class="schedules-tabs" :items="tabs" panel-id="scheduled-panel" aria-label="定时任务页面" />
-        <div v-if="context && !unavailable" class="schedules-toolbar" :class="{ 'schedules-toolbar--records': tab === 'records' }">
+        <NConfigProvider v-if="context && !unavailable" :theme-overrides="scheduleFieldTheme" class="schedules-toolbar" :class="{ 'schedules-toolbar--records': tab === 'records' }">
           <NInput v-model:value="search" clearable :maxlength="80" :placeholder="tab === 'plans' ? '搜索计划名称或内容' : '搜索执行记录'" :input-props="{ 'aria-label': '搜索任务名称或内容' }" />
           <NSelect v-model:value="state" :options="stateOptions" aria-label="计划状态筛选" />
           <NSelect v-if="tab === 'plans'" v-model:value="order" :options="sorts" aria-label="创建时间排序" />
           <NSelect v-else v-model:value="planFilter" :options="planOptions" :loading="optionsLoading" clearable filterable remote placeholder="全部任务" :consistent-menu-width="false" :menu-props="{ style: { maxWidth: 'calc(100vw - var(--yj-space-8))' } }" aria-label="按任务筛选" @search="searchOptions" @update:show="value => { if (value) loadOptions(); }" />
-        </div>
+        </NConfigProvider>
       </div>
       <NAlert v-if="notice" type="info" role="status" :show-icon="false">{{ notice }}</NAlert>
       <ScheduledDeleteDialog :name="deleting?.name ?? null" :busy="writing" :disabled="deleteDisabled || error === 'revision_conflict' || error === 'not_found'" :error="scheduleError(error)" @cancel="deleting = null" @confirm="deletePlan" @closed="restoreDeleteFocus" />
@@ -289,6 +294,10 @@ onBeforeRouteLeave(() => {
 .schedules-page { display: grid; gap: var(--yj-space-5); min-width: 0; }
 .schedules-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--yj-space-4); }
 .schedules-tabs { flex: none; flex-wrap: nowrap; }
+.schedules-tabs :deep([role="tab"][aria-selected="true"]) {
+  border-color: transparent;
+  transition-property: color, background-color;
+}
 .schedules-toolbar { --schedule-last-filter-width: var(--yj-layout-schedule-sort-width); --toolbar-width: calc(var(--yj-layout-schedule-search-width) + var(--yj-layout-schedule-state-width) + var(--schedule-last-filter-width) + var(--yj-space-3) * 2); display: grid; grid-template-columns: minmax(0, var(--yj-layout-schedule-search-width)) var(--yj-layout-schedule-state-width) minmax(0, var(--schedule-last-filter-width)); flex: 1 1 var(--toolbar-width); min-width: 0; max-width: var(--toolbar-width); margin-left: auto; gap: var(--yj-space-3); align-items: center; }
 .schedules-toolbar--records { --schedule-last-filter-width: var(--yj-layout-schedule-plan-filter-width); }
 .schedules-empty { min-height: var(--yj-layout-schedule-empty-min-height); }

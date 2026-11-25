@@ -111,5 +111,5 @@ main h1[tabindex="-1"]:focus {
    Error, focus and disabled use their own variables and remain independent. */
 [data-theme="dark"] :is(.n-modal, .n-popover, .n-drawer)
   :is(.n-input:not(.n-input--disabled), .n-base-selection:not(.n-base-selection--disabled)) {
-  --n-border: 1px solid var(--yj-color-border-control-hover) !important;
+  --n-border: 1px solid var(--yj-elevated-field-border, var(--yj-color-border-control-hover)) !important;
 }

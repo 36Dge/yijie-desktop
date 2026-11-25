@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { executionProfile, defaultModelProfile, kimiK31Candidate } from "../../api/chat-model-client";
 import { computed, onBeforeUnmount, reactive, ref, useId, watch } from "vue";
-import { NAlert, NButton, NCard, NCheckbox, NCheckboxGroup, NForm, NFormItem, NInput, NModal, NSelect, useDialog } from "naive-ui";
+import { NAlert, NButton, NCard, NCheckbox, NCheckboxGroup, NConfigProvider, NForm, NFormItem, NInput, NModal, NSelect, useDialog } from "naive-ui";
+import { scheduleFieldTheme } from "../../design/theme/schedule-field-theme";
 import type { PlanDefinition, PlanView, TimePreview, TimeRule } from "../../domain/scheduled-plan-v2.generated";
 import type { TargetPage } from "../../api/generated/scheduled-task-ipc-v2.gen";
 import { frequencyLabels, targetLabels, timeLabel } from "../../domain/scheduled-task-ui";
 import { chatModelsEnabled, type ProfileId } from "../../api/chat-model-client";
 import { useScheduledPlanModel } from "../../composables/useScheduledPlanModel";
+import ScheduledTimePicker from "./ScheduledTimePicker.vue";
+import ScheduledDatePicker from "./ScheduledDatePicker.vue";
 const props = defineProps<{ plan: PlanView | null; boundConversationId?: string | null; initialDefinition?: PlanDefinition; confirmation?: boolean; busy: boolean; uncertain: boolean; error: string; preview: (rule: TimeRule) => Promise<TimePreview>; targets: (search: string, cursor?: string) => Promise<TargetPage> }>();
 const emit = defineEmits<{ close: []; query: []; retry: []; save: [definition: PlanDefinition] }>();
 const dialog = useDialog();
@@ -33,6 +36,7 @@ const valid = computed(() => (!chatModelsEnabled || (!!executionProfile(form.mod
 watch(rule, () => {
   const epoch = ++previewEpoch; previewValid.value = false; previewText.value = "正在计算…";
   clearTimeout(previewTimer);
+  if (form.frequency === "once" && !form.localDate) { previewText.value = "请选择运行日期。"; return; }
   previewTimer = setTimeout(async () => {
     try {
       const result = await props.preview(rule.value);
@@ -72,6 +76,7 @@ defineExpose({ dirty, close });
   <NModal :show="true" :mask-closable="false" :close-on-esc="!blocked" @update:show="close">
     <NCard class="schedule-form" :title="title" :closable="!blocked" :theme-overrides="{ borderRadius: 'var(--yj-radius-xl)', paddingMedium: 'var(--yj-space-6)' }" content-style="min-height: 0; overflow-y: auto" footer-style="border-top: var(--yj-border-width) solid var(--yj-color-border-subtle); padding-top: var(--yj-space-4)" role="dialog" aria-modal="true" :aria-label="title" :aria-describedby="`${formId}-intro`" @close="close">
       <p :id="`${formId}-intro`" class="schedule-form__intro">{{ requiresModelReview ? '保存后为关闭状态。请审阅模型与任务内容，再明确开启或单次授权；旧授权不会沿用。' : plan ? '保存后保留当前开关状态，可随时在任务列表中调整。' : confirmation && chatModelsEnabled ? '确认后仅保存为关闭状态；审阅模型和任务内容后，可另行开启或单次执行。' : '创建后自动开启，按设定时间执行，可随时关闭。' }}</p>
+      <NConfigProvider abstract :theme-overrides="scheduleFieldTheme">
       <NForm :id="formId" class="schedule-form__body" label-placement="top" :show-feedback="false" :disabled="blocked" @submit.prevent="submit">
         <NAlert v-if="error" type="error" role="alert">{{ error }}</NAlert>
         <NAlert v-if="uncertain" type="warning">保存结果待查证。<div class="schedule-form__recovery"><NButton :disabled="busy" @click="emit('query')">查证原请求</NButton><NButton :disabled="busy" @click="emit('retry')">重试同一请求</NButton></div></NAlert>
@@ -80,12 +85,14 @@ defineExpose({ dirty, close });
           <NFormItem label="计划时间" required>
             <div class="schedule-form__grid">
               <NSelect v-model:value="form.frequency" :options="frequencyOptions" aria-label="频率" />
-              <NInput v-model:value="form.localTime" placeholder="09:00" :input-props="{ 'aria-label': '当地时间', 'aria-describedby': `${formId}-time-hint` }" />
+              <ScheduledTimePicker v-model="form.localTime" :disabled="blocked" :described-by="`${formId}-time-hint`" />
             </div>
           </NFormItem>
-          <NFormItem v-if="form.frequency === 'once'" label="运行日期" required><NInput v-model:value="form.localDate" placeholder="YYYY-MM-DD，例如 2026-10-01" :input-props="{ 'aria-label': '运行日期' }" /></NFormItem>
+          <NFormItem v-if="form.frequency === 'once'" label="运行日期" required>
+            <ScheduledDatePicker v-model="form.localDate" :time-zone="form.timeZone" :disabled="blocked" :described-by="`${formId}-time-hint`" />
+          </NFormItem>
           <NFormItem v-if="form.frequency === 'weekly'" label="每周运行日" required><NCheckboxGroup v-model:value="form.weekdays" class="schedule-form__weekdays" aria-label="每周运行日"><NCheckbox v-for="(label,index) in weekLabels" :key="label" :value="index+1" :label="`周${label}`" /></NCheckboxGroup></NFormItem>
-          <p :id="`${formId}-time-hint`" class="schedule-form__hint">时间格式为 HH:mm。<span role="status">{{ previewText }}</span></p>
+          <p :id="`${formId}-time-hint`" class="schedule-form__hint" role="status">{{ previewText }}</p>
         </div>
         <NFormItem v-if="chatModelsEnabled" label="执行模型" required><div><NSelect v-model:value="form.modelProfile" :options="visibleModelOptions" :disabled="blocked || !modelReady || modelLocked" aria-label="执行模型" /><p class="schedule-form__hint" role="status">{{ modelNotice }}</p></div></NFormItem>
         <NFormItem label="任务内容" required><NInput v-model:value="form.content" type="textarea" placeholder="描述任务要做什么，例如：汇总商品信息，列出价格变化和待优化项。" :autosize="{ minRows: 5, maxRows: 8 }" :maxlength="10000" show-count :input-props="{ 'aria-label': '任务内容' }" /></NFormItem>
@@ -106,12 +113,13 @@ defineExpose({ dirty, close });
           </div>
         </details>
       </NForm>
+      </NConfigProvider>
       <template #footer><div class="schedule-form__actions"><NButton :disabled="blocked" @click="close">取消</NButton><NButton type="primary" attr-type="submit" :form="formId" :disabled="!valid || blocked" :loading="busy">保存</NButton></div></template>
     </NCard>
   </NModal>
 </template>
 <style scoped>
-.schedule-form { width: min(var(--yj-layout-schedule-form-width), calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-8))); max-height: calc(var(--yj-ui-viewport-height, 100vh) - var(--yj-space-8)); overflow: hidden; }
+.schedule-form { --yj-elevated-field-border: var(--yj-color-border-subtle); width: min(var(--yj-layout-schedule-form-width), calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-8))); max-height: calc(var(--yj-ui-viewport-height, 100vh) - var(--yj-space-8)); overflow: hidden; }
 .schedule-form__intro { margin: 0 0 var(--yj-space-5); color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-body); line-height: var(--yj-line-height-body); }
 .schedule-form__body, .schedule-form__settings-body { display: grid; gap: var(--yj-space-4); }
 .schedule-form__grid { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--yj-space-3); }

@@ -844,6 +844,8 @@ impl Debug for LiveTurnProjection {
 }
 
 pub trait TurnProjectionSink: Send + Sync {
+    fn scheduled_run_created(&self) {}
+
     fn publish_native(
         &self,
         _view: super::native_conversation_generated::NativeConversationView,
@@ -2614,7 +2616,7 @@ impl ConversationApplication {
     }
 
     /// Both the outer coordinator and an open native SSE use this same tick.
-    async fn native_schedule_tick(&self) -> Result<(), ChatError> {
+    async fn native_schedule_tick(&self, sink: &dyn TurnProjectionSink) -> Result<(), ChatError> {
         let now = unix_seconds()?;
         self.lifecycle.observe_clock(now);
         let epoch = self.lifecycle.epoch();
@@ -2698,9 +2700,13 @@ impl ConversationApplication {
             } else {
                 None
             };
-            self.database
+            let created = self
+                .database
                 .call(move |r| r.process_schedule_due(c, reason, unix_seconds()?))
                 .await?;
+            if created {
+                sink.scheduled_run_created();
+            }
             tokio::task::yield_now().await;
         }
         recovery.map(|_| ())
@@ -2870,7 +2876,7 @@ impl ConversationApplication {
         ) {
             return Ok(CoordinatorOutcome::Idle);
         }
-        let recovery_result = self.native_schedule_tick().await;
+        let recovery_result = self.native_schedule_tick(sink).await;
         let background_only = self
             .database
             .call(|r| Ok(r.schedule_background_only))
@@ -3177,7 +3183,7 @@ impl ConversationApplication {
         }
         // This future is polled alongside every SSE. A slow normal Host request
         // cannot stop the other sessions' notification readers.
-        let _ = self.native_schedule_tick().await;
+        let _ = self.native_schedule_tick(sink).await;
         if let Ok(outcome) = self.dispatch_next().await {
             if outcome != DispatchOutcome::Idle {
                 sink.publish_coordinator(&CoordinatorOutcome::Dispatched(outcome))?;
@@ -3412,7 +3418,7 @@ impl ConversationApplication {
             tokio::select! {
                 _=dispatch.tick()=>{
                     if dispatch_background {
-                        let _=self.native_schedule_tick().await;
+                        let _=self.native_schedule_tick(sink).await;
                         // Direct single-session observation retains its dispatcher;
                         // the multi-session coordinator dispatches once for all streams.
                         if let Ok(outcome)=self.dispatch_next().await {

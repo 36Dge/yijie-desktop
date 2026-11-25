@@ -55,6 +55,7 @@ pub const CHAT_IPC_V4_SCHEMA_VERSION: u8 = 4;
 pub const CHAT_IPC_V5_SCHEMA_VERSION: u8 = 5;
 pub const CHAT_IPC_V6_SCHEMA_VERSION: u8 = 6;
 pub const CHAT_EVENT_CHANNEL: &str = "yijie:chat:event:v1";
+const SCHEDULED_RUN_CREATED_CHANNEL: &str = "yijie://scheduled-run-created-v1";
 pub const CHAT_CONTROL_PLANE_EVENT_CHANNEL: &str = "yijie:chat:control-plane:event:v1";
 pub const CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL: &str = "yijie:chat:attachment-import:event:v2";
 pub const CHAT_ARTIFACT_LIVE_EVENT_CHANNEL: &str = "yijie:chat:artifact:changed:v1";
@@ -964,6 +965,14 @@ fn emit_artifact_events(app: &AppHandle, events: &[ArtifactLiveEventDto]) -> boo
 }
 
 impl TurnProjectionSink for ChatEventBridge {
+    fn scheduled_run_created(&self) {
+        let app = self.inner.lock().ok().and_then(|state| state.app.clone());
+        if let Some(window) = app.and_then(|app| app.get_webview_window("main")) {
+            // A missing renderer must never hold up the committed run.
+            let _ = window.emit(SCHEDULED_RUN_CREATED_CHANNEL, json!({"schemaVersion": 1}));
+        }
+    }
+
     fn publish_native(
         &self,
         view: super::native_conversation_generated::NativeConversationView,

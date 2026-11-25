@@ -9,8 +9,9 @@ vi.mock("../../stores/chat.store", () => ({ useChatStore: () => stores.chat }));
 vi.mock("../../stores/permission.store", () => ({ usePermissionStore: () => stores.permission }));
 const cleanup: (() => void)[] = [];
 afterEach(() => { cleanup.splice(0).forEach(f => f()); });
-function harness() {
-  const chat = reactive({ context: { contextId: crypto.randomUUID() } as { contextId: string } | null });
+function harness(sidebarReadable = false) {
+  const chat = reactive({ context: { contextId: crypto.randomUUID() } as { contextId: string } | null,
+    hasAction: () => sidebarReadable, scheduledSidebar: new Map() });
   const permission = reactive({ selectedTenantId: crypto.randomUUID(), authorizationRevision: 1, isReady: true, canRead: true, hasCapability: () => permission.canRead });
   stores.chat = chat; stores.permission = permission;
   let items: ImportantUpdate[] = []; let delay: Promise<void> | null = null;
@@ -22,11 +23,34 @@ function harness() {
     return { schemaVersion: 1, requestId: request.requestId, data: { items: snapshot, truncated: false } };
   });
   const changed = vi.fn(); const clear = vi.fn(); const scope = effectScope();
-  const observer = scope.run(() => useScheduledUpdates(changed, clear, createScheduledTaskNativeClient(read)))!;
+  let created = () => {};
+  const unlisten = vi.fn();
+  const observer = scope.run(() => useScheduledUpdates(changed, clear, createScheduledTaskNativeClient(read),
+    async handler => { created = handler; return unlisten; }))!;
   cleanup.push(() => scope.stop());
-  return { chat, permission, read, changed, clear, observer, items: (v: ImportantUpdate[]) => { items = v; }, delay: (v: Promise<void> | null) => { delay = v; }, stop: () => scope.stop() };
+  return { chat, permission, read, changed, clear, observer, wake: () => created(), unlisten, items: (v: ImportantUpdate[]) => { items = v; }, delay: (v: Promise<void> | null) => { delay = v; }, stop: () => scope.stop() };
 }
 const item = (state: ImportantUpdate["state"]): ImportantUpdate => ({ run_id: crypto.randomUUID(), plan_id: crypto.randomUUID(), name: "同名计划", state });
+it("reads immediately on creation and coalesces a wake received during the current read", async () => {
+  vi.useFakeTimers();
+  const h = harness(true);
+  try {
+    await vi.advanceTimersByTimeAsync(0);
+    h.read.mockClear();
+    let release!: () => void;
+    h.delay(new Promise(resolve => { release = resolve; }));
+    h.wake(); h.wake(); h.wake();
+    expect(h.read).toHaveBeenCalledOnce();
+    h.delay(null); release();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.read).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1600);
+    expect(h.read).toHaveBeenCalledTimes(5);
+    h.stop(); h.wake(); await vi.advanceTimersByTimeAsync(4000);
+    expect(h.read).toHaveBeenCalledTimes(5);
+    expect(h.unlisten).toHaveBeenCalledOnce();
+  } finally { vi.useRealTimers(); }
+});
 it("deduplicates run identity and state, never announces old completions on first read", async () => {
   const h = harness(); await vi.waitFor(() => expect(h.read).toHaveBeenCalledOnce());
   await h.observer.refresh();
