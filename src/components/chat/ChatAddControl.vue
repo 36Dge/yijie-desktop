@@ -102,6 +102,12 @@ async function setOpen(value: boolean, restoreFocus = false): Promise<void> {
   } else if (restoreFocus) { await nextTick(); trigger.value?.focus({ preventScroll: true }); }
 }
 function close(): Promise<void> { return setOpen(false, true); }
+async function openExpertPicker(): Promise<void> {
+  if (props.disabled || !props.expertsAvailable) return;
+  await setOpen(true);
+  await showView("experts", true);
+}
+defineExpose({ openExpertPicker });
 async function closeSubmenu(): Promise<void> {
   const parent = resourceTrigger(); cancelClose(); view.value = null;
   await nextTick(); parent?.focus({ preventScroll: true });

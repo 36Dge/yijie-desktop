@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { chatRenderMeasurements, setChatRenderMeasurementEnabled } from "../../domain/chat-render-performance";
 import ChatAttachmentChip from "../../components/chat/ChatAttachmentChip.vue";
-import { createExpertNativeClient, expertNativeClient } from "../../api/expert-native-client";
+import { createExpertNativeClient, ExpertClientError, expertNativeClient } from "../../api/expert-native-client";
 import { expertDisplay, expertEntry, expertSnapshot } from "../../test/expert-fixture";
 import { usePermissionStore } from "../../stores/permission.store";
 import { useChatComposerDraftStore } from "../../stores/chat-composer-drafts.store";
@@ -2924,6 +2924,94 @@ it("FEAT158 chip details carry the exact selected expert version", async () => {
   wrapper.unmount();
 });
 
+it.skipIf(!chatModelsEnabled).each([true, false])("keeps normal submission and binding reads quiet (expert=%s)", async withExpert => {
+  expertFlag.enabled = true;
+  const { wrapper, router, store, pinia } = await mountPage("/chat");
+  function gate() {
+    let release!: () => void;
+    const promise = new Promise<void>(resolve => { release = resolve; });
+    return { promise, release };
+  }
+  const receipt = gate(), binding = gate(), history = gate();
+  vi.spyOn(chatClient, "getSessionPurpose").mockImplementation(async () => {
+    await history.promise;
+    return { sessionId: SESSION_ID, purpose: "ordinary" };
+  });
+  vi.mocked(expertNativeClient.binding).mockImplementation(async () => {
+    await binding.promise;
+    return { sessionId: SESSION_ID, managed: withExpert, bindingRevision: 0, expert: withExpert ? expertDisplay : null, state: withExpert ? "ready" : "none" };
+  });
+  const expertSend = vi.spyOn(expertNativeClient, "submit").mockImplementation(async (_context, { submission }) => {
+    await receipt.promise;
+    return { bindingRevision: 0, expert: expertDisplay, receipt: { outcome: "local_durable_accepted", sessionId: SESSION_ID, localTurnId: TURN_ID,
+      submissionOperationId: submission.operationId, turnOperationId: TURN_ID, selectionDigest: "a".repeat(64) } };
+  });
+  const ordinarySend = vi.spyOn(chatModelClient, "submit").mockImplementation(async (_context, _project, _session, _blocks, operationId) => {
+    await receipt.promise;
+    return { sessionId: SESSION_ID, turnId: TURN_ID, operationId };
+  });
+  try {
+    if (withExpert) useChatComposerDraftStore(pinia).setExpert("new", expertDisplay);
+    await wrapper.get("textarea").setValue("整理当前任务");
+    await wrapper.get('[aria-label="发送任务"]').trigger("click");
+    wrapper.getComponent(ChatComposer).vm.$emit("submit");
+    await flushPromises();
+    expect(expertSend).toHaveBeenCalledTimes(withExpert ? 1 : 0);
+    expect(ordinarySend).toHaveBeenCalledTimes(withExpert ? 0 : 1);
+    expect(wrapper.find(".chat-submission-notice, .chat-workspace__composer-error").exists()).toBe(false);
+    receipt.release(); await flushPromises();
+    expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
+    expect(useChatExpertsStore(pinia).busy.has(SESSION_ID)).toBe(true);
+    expect(wrapper.find(".chat-expert-chip").exists()).toBe(withExpert);
+    if (withExpert) expect(wrapper.get(".chat-expert-chip").text()).toBe(expertDisplay.displayName);
+    expect(wrapper.find(".chat-submission-notice, .chat-workspace__composer-error").exists()).toBe(false);
+    binding.release(); await flushPromises();
+    expect(wrapper.find(".chat-submission-notice").exists()).toBe(false);
+  } finally {
+    wrapper.unmount(); await store.dispose();
+    receipt.release(); binding.release(); history.release();
+  }
+});
+
+it.skipIf(!chatModelsEnabled)("preserves an uncertain expert request and checks it with the original operation ID", async () => {
+  expertFlag.enabled = true;
+  const { wrapper, pinia } = await mountPage("/chat");
+  useChatComposerDraftStore(pinia).setExpert("new", expertDisplay);
+  const send = vi.spyOn(expertNativeClient, "submit").mockRejectedValue(new ExpertClientError("outcome_unknown"));
+  const ordinary = vi.spyOn(chatModelClient, "submit");
+  await wrapper.get("textarea").setValue("保留我的问题");
+  await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();
+  const notice = wrapper.get('[role="status"].chat-submission-notice--warning');
+  expect(notice.text()).toContain("暂时无法确认这次提交的结果");
+  expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+  expect(wrapper.get("textarea").element.value).toBe("保留我的问题");
+  expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
+  expect(notice.get("button").text()).toBe("查看提交状态");
+  await notice.get("button").trigger("click"); await flushPromises();
+  expect(send).toHaveBeenCalledTimes(2);
+  expect(send.mock.calls[1]).toEqual(send.mock.calls[0]);
+  expect(ordinary).not.toHaveBeenCalled();
+  wrapper.unmount();
+});
+
+it.skipIf(!chatModelsEnabled)("lets the user reselect an unavailable expert in place after a definite rejection", async () => {
+  expertFlag.enabled = true;
+  const { wrapper, pinia, router } = await mountPage("/chat");
+  useChatComposerDraftStore(pinia).setExpert("new", expertDisplay);
+  const send = vi.spyOn(expertNativeClient, "submit").mockRejectedValue(new ExpertClientError("version_unavailable"));
+  await wrapper.get("textarea").setValue("保留我的问题");
+  await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();
+  const notice = wrapper.get('[role="alert"].chat-submission-notice--error');
+  expect(notice.text()).toContain("此专家版本当前不可用");
+  expect(notice.get("button").text()).toBe("重新选择专家");
+  await notice.get("button").trigger("click"); await flushPromises();
+  expect(document.querySelector('.expert-menu [role="radio"]')).not.toBeNull();
+  expect(router.currentRoute.value.path).toBe("/chat");
+  expect(wrapper.get("textarea").element.value).toBe("保留我的问题");
+  expect(send).toHaveBeenCalledOnce();
+  wrapper.unmount();
+});
+
 it.each(["new", "existing"] as const)("inline expert picker applies the %s selection without navigation or sending", async target => {
   expertFlag.enabled = true;
   const active = target === "existing", path = active ? `/chat/${SESSION_ID}` : "/chat";
@@ -3075,8 +3163,8 @@ it("FEAT158 uncertain accepted submission offers only an original-status read", 
   const read = vi.spyOn(store, "resyncSelected").mockResolvedValue();
   const submit = vi.spyOn(store, "submitTurnWithResult");
   await flushPromises();
-  expect(wrapper.text()).toContain("原提交结果尚未确认，请勿重复发送");
-  await wrapper.findAll("button").find(button => button.text() === "重新读取原提交")!.trigger("click");
+  expect(wrapper.get(".chat-submission-notice--warning").text()).toContain("暂时无法确认这次提交的结果");
+  await wrapper.findAll("button").find(button => button.text() === "查看提交状态")!.trigger("click");
   expect(read).toHaveBeenCalledOnce();
   expect(submit).not.toHaveBeenCalled();
   wrapper.unmount();

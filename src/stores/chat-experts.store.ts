@@ -21,12 +21,13 @@ export function createChatExpertsStoreDefinition(client: ExpertNativeClient, id 
     const pending = shallowRef<Readonly<Record<string, BindingSetPayload>>>({});
     const submissions = shallowRef<Readonly<Record<string, NativeSubmitPayload>>>({});
     const acceptedSubmissions = shallowRef<Readonly<Record<string, NativeSubmissionResult>>>({});
+    const sending = ref(new Set<string>());
     let epoch = 0;
-    function clear() { epoch++; contextId.value = null; scope.value = null; bindings.value = {}; errors.value = {}; busy.value = new Set(); pending.value = {}; submissions.value = {}; acceptedSubmissions.value = {}; }
+    function clear() { epoch++; contextId.value = null; scope.value = null; bindings.value = {}; errors.value = {}; busy.value = new Set(); pending.value = {}; submissions.value = {}; acceptedSubmissions.value = {}; sending.value.clear(); }
     function bind(context: string | null, authorityScope: string | null) {
       if (!authorityScope) { clear(); return; }
       if (scope.value !== authorityScope) { clear(); scope.value = authorityScope; }
-      if (contextId.value !== context) { epoch++; contextId.value = context; bindings.value = {}; busy.value = new Set(); errors.value = {}; }
+      if (contextId.value !== context) { epoch++; contextId.value = context; bindings.value = {}; busy.value = new Set(); errors.value = {}; sending.value.clear(); }
     }
     function setBusy(session: string, value: boolean) { const next = new Set(busy.value); if (value) next.add(session); else next.delete(session); busy.value = next; }
     function error(session: string, value: string | null) { const next = { ...errors.value }; if (value) next[session] = value; else delete next[session]; errors.value = next; }
@@ -91,14 +92,23 @@ export function createChatExpertsStoreDefinition(client: ExpertNativeClient, id 
         return false;
       } finally { if (generation === epoch) setBusy(session, false); }
     }
+    function submissionStatus(target: string) {
+      const original = submissions.value[target];
+      if (!original) return "idle";
+      if (acceptedSubmissions.value[target]) return "accepted";
+      return sending.value.has(original.submission.operationId) ? "sending" : "uncertain";
+    }
     async function submit(context: string, payload: NativeSubmitPayload) {
       const target = payload.submission.sessionId ?? "new", prior = submissions.value[target], generation = epoch;
       if (context !== contextId.value) throw new ExpertClientError("context_invalid");
       if (prior && JSON.stringify(prior) !== JSON.stringify(payload)) throw new ExpertClientError("operation_pending");
       const accepted = acceptedSubmissions.value[target];
       if (prior && accepted) return accepted;
+      const operationId = payload.submission.operationId;
+      if (sending.value.has(operationId)) throw new ExpertClientError("operation_pending");
       // Freeze the complete original wrapper before I/O; unknown is never a new send.
       const original = prior ?? JSON.parse(JSON.stringify(payload)) as NativeSubmitPayload;
+      sending.value.add(operationId);
       submissions.value = { ...submissions.value, [target]: original };
       try {
         const result = await client.submit(context, original);
@@ -115,6 +125,8 @@ export function createChatExpertsStoreDefinition(client: ExpertNativeClient, id 
           const next = { ...submissions.value }; delete next[target]; submissions.value = next;
         }
         throw failure;
+      } finally {
+        if (generation === epoch) sending.value.delete(operationId);
       }
     }
     function acknowledgeSubmission(operationId: string): void {
@@ -123,7 +135,7 @@ export function createChatExpertsStoreDefinition(client: ExpertNativeClient, id 
       const next = { ...submissions.value }; delete next[target]; submissions.value = next;
       const accepted = { ...acceptedSubmissions.value }; delete accepted[target]; acceptedSubmissions.value = accepted;
     }
-    return { contextId, scope, bindings, errors, busy, pending, submissions, bind, clear, refresh, select, recover, submit, acknowledgeSubmission };
+    return { contextId, scope, bindings, errors, busy, pending, submissions, submissionStatus, bind, clear, refresh, select, recover, submit, acknowledgeSubmission };
   });
 }
 export const useChatExpertsStore = createChatExpertsStoreDefinition(expertNativeClient);

@@ -57,6 +57,7 @@ import { useChatExpertsBinding } from "../../composables/useChatExpertsBinding";
 import { useExpertsBinding } from "../../composables/useExpertsBinding";
 import { ExpertClientError } from "../../api/expert-native-client";
 import { expertErrorMessage } from "../../domain/expert-ui";
+import ChatSubmissionNotice, { type SubmissionNotice } from "../../components/chat/ChatSubmissionNotice.vue";
 import { skillNativeFailureMessage, useSkillStore } from "../../stores/skill.store";
 import MarketChatActivity from "../../components/chat/MarketChatActivity.vue";
 import { useMarketChat } from "../../composables/useMarketChat";
@@ -295,6 +296,9 @@ if (expertsUiEnabled) {
 }
 const expertBinding = computed(() => routeSessionId.value ? chatExperts.bindings[routeSessionId.value] : null);
 const expertSubmission = computed(() => expertsUiEnabled ? chatExperts.submissions[routeSessionId.value ?? "new"] : undefined);
+const expertSubmissionStatus = computed(() => chatExperts.submissionStatus(routeSessionId.value ?? "new"));
+const expertSubmitError = ref<ExpertClientError["code"] | null>(null);
+const submitRequested = ref(false);
 const selectedExpert = computed(() => !expertsUiEnabled || isDraftMode.value ? null : routeSessionId.value ? expertBinding.value?.expert ?? null : sharedDrafts.expert("new"));
 const expertPicker = useChatExpertPicker(() => routeSessionId.value, () =>
   !expertsUiEnabled || isDraftMode.value || !normalPurposeReady.value || !permissionScope.hasCapability("plugin.read") ||
@@ -307,6 +311,7 @@ async function refreshExpertPicker(): Promise<void> {
 }
 async function selectExpert(entry: CatalogEntry, close: () => void): Promise<void> {
   if (!await expertPicker.select(entry)) return;
+  expertSubmitError.value = null;
   close();
   await nextTick();
   composer.value?.focusInput?.();
@@ -315,28 +320,19 @@ const expertContextBlocked = computed(() => expertsUiEnabled && !isDraftMode.val
   !expertBinding.value || chatExperts.busy.has(routeSessionId.value) || !!chatExperts.errors[routeSessionId.value] || !["none", "ready"].includes(expertBinding.value.state)
 ));
 const expertBusy = computed(() => expertContextBlocked.value || !!expertSubmission.value || expertPicker.pending.value);
-const expertSendReady = computed(() => !expertBusy.value && (!selectedExpert.value || (
+const expertResourceReady = computed(() => !selectedExpert.value || (
   expertResources.snapshot?.executionAvailable === true && (
     // Native refresh checks the exact retained version for an existing binding.
     // The market directory contains only the latest version of each expert.
     routeSessionId.value ? expertBinding.value?.state === "ready" :
       expertResources.entries.some(entry => entry.display.expertId === selectedExpert.value?.expertId && entry.display.version === selectedExpert.value?.version && entry.state === "ready")
   )
-)));
+));
+const expertSendReady = computed(() => !expertBusy.value && expertResourceReady.value);
 const expertIntent = computed<ExpertTurnIntent | undefined>(() => {
   if (!expertsUiEnabled || isDraftMode.value) return undefined;
   if (routeSessionId.value) return bindingTurnIntent(expertBinding.value);
   return selectedExpert.value ? { expectedBindingRevision: 0, expert: { expertId: selectedExpert.value.expertId, version: selectedExpert.value.version } } : undefined;
-});
-const expertNotice = computed(() => {
-  if (!expertsUiEnabled || isDraftMode.value) return null;
-  if (expertSubmission.value) return "原提交结果待确认。已保留完整请求，请确认原提交后再编辑或切换。";
-  if (expertPicker.pending.value) return "正在选择专家…";
-  if (expertPicker.error.value) return expertPicker.error.value;
-  if (routeSessionId.value && chatExperts.errors[routeSessionId.value]) return chatExperts.errors[routeSessionId.value];
-  if (expertContextBlocked.value) return "正在确认会话专家状态，确认前不能发送或切换。";
-  if (selectedExpert.value && !expertSendReady.value) return "所选专家资源或执行环境暂不可用，请重新读取或移除专家。";
-  return null;
 });
 const expertRecoveryOperation = computed(() => {
   const session = routeSessionId.value;
@@ -357,7 +353,8 @@ async function recoverExpertBinding(): Promise<void> {
   await chatExperts.recover(original.session, original.operation);
 }
 async function refreshExpert(): Promise<void> {
-  if (expertSubmission.value) { await submit(true); return; }
+  expertSubmitError.value = null;
+  expertPicker.error.value = null;
   await expertResources.refresh();
   if (routeSessionId.value) await chatExperts.refresh(routeSessionId.value);
 }
@@ -412,7 +409,7 @@ function handleEntryFocus(event: FocusEvent): void {
 const composerSubmissionState = computed<ChatComposerSubmissionState>(() => {
   if (draft.writing.value) return "submitting";
   if (chatStore.submissionState !== "idle") return chatStore.submissionState;
-  return submitting.value ? "submitting" : "idle";
+  return submitting.value || (expertsUiEnabled && expertSubmissionStatus.value === "sending") ? "submitting" : "idle";
 });
 const actionErrorCode = ref<string | null>(null);
 const transientNotice = ref<string | null>(null);
@@ -532,6 +529,58 @@ const draftExecutionPending = computed(() => Object.values(chatStore.conversatio
 const uncertainLocalSubmission = computed(() => !isDraftMode.value && Object.values(chatStore.conversationState.turns).some(turn =>
   turn.threadId === routeSessionId.value && turn.source === "local_submission" && turn.submissionStatus === "uncertain",
 ));
+watch([routeSessionId, () => chatStore.context?.contextId, () => selectedExpert.value?.expertId, () => selectedExpert.value?.version], () => {
+  expertSubmitError.value = null;
+});
+const submissionNotice = computed<SubmissionNotice | null>(() => {
+  if (isDraftMode.value) return null;
+  const unknown = "暂时无法确认这次提交的结果。";
+  if (expertSubmission.value) {
+    if (expertSubmissionStatus.value === "sending" || submitRequested.value) return null;
+    if (expertSubmissionStatus.value === "accepted") {
+      return { tone: "neutral", message: "这次提交已受理。", actionLabel: "查看已提交的任务", action: () => submit(true) };
+    }
+    // Native checks the original receipt first and can finish admission with the same ID.
+    const detail = expertSubmitError.value ? expertErrorMessage(expertSubmitError.value) : "";
+    return { tone: "warning", message: unknown + detail + "核对时，尚未受理的原请求会继续提交。", actionLabel: "查看提交状态", action: () => submit(true) };
+  }
+  if (uncertainLocalSubmission.value) {
+    return { tone: "warning", message: unknown, actionLabel: "查看提交状态", action: () => chatStore.resyncSelected(),
+      disabled: chatStore.phase === "resyncing" || !chatStore.hasAction("read_sessions") };
+  }
+  if (!expertsUiEnabled) return null;
+  const code = expertSubmitError.value;
+  if (code) {
+    const message = expertErrorMessage(code);
+    if (["not_found", "version_unavailable", "resource_unavailable", "selection_stale"].includes(code)) {
+      return { tone: "error", message, actionLabel: "重新选择专家", action: () => composer.value?.openExpertPicker(),
+        disabled: expertRemovalBlocked.value || !permissionScope.hasCapability("plugin.read") };
+    }
+    if (code === "model_unavailable") {
+      return { tone: "error", message, actionLabel: "刷新模型状态", action: () => { expertSubmitError.value = null; return models.refresh(); } };
+    }
+    if (code === "permission_denied" || code === "context_invalid") {
+      return { tone: "error", message, actionLabel: "刷新权限", action: async () => { if (await retryChatAuthority()) expertSubmitError.value = null; } };
+    }
+    if (code === "permission_mode_unavailable") {
+      return { tone: "error", message, actionLabel: "刷新会话权限", action: () => { expertSubmitError.value = null; return permissions.refresh(); } };
+    }
+    return { tone: "error", message, actionLabel: "重新读取", action: refreshExpert };
+  }
+  const session = routeSessionId.value;
+  if (expertPicker.pending.value || (session && chatExperts.busy.has(session))) return null;
+  const binding = expertBinding.value;
+  const bindingError = session && chatExperts.errors[session];
+  if (binding?.state === "unknown" || binding?.state === "applying") {
+    return { tone: "warning", message: bindingError || "暂时无法确认专家切换结果。", actionLabel: "重新读取", action: refreshExpert };
+  }
+  const error = expertPicker.error.value || bindingError || (selectedExpert.value && expertResources.error);
+  if (error) return { tone: "error", message: error, actionLabel: "重新读取", action: refreshExpert };
+  if (binding?.state === "unavailable" || (selectedExpert.value && expertResources.snapshot && !expertResourceReady.value)) {
+    return { tone: "error", message: "所选专家资源或执行环境暂不可用，请重新读取或移除专家。", actionLabel: "重新读取", action: refreshExpert };
+  }
+  return null;
+});
 const draft = useScheduledDraft(() => isDraftMode.value, () => routeSessionId.value, () => draftLatestTurn.value, () => draftExecutionPending.value);
 let entryPrefilled = false;
 watch([isNewDraftMode, () => chatStore.context?.contextId, () => permissionScope.selectedTenantId, () => permissionScope.authorizationRevision], () => {
@@ -1019,9 +1068,16 @@ async function pickProject(): Promise<void> {
   }
 }
 
-let resolvingResource = false;
 async function submit(recoverExpert = false): Promise<void> {
-  if (resolvingResource || submitting.value || (!recoverExpert && !models.ready.value)) return;
+  if (submitRequested.value || submitting.value || (!recoverExpert && !models.ready.value)) return;
+  submitRequested.value = true;
+  try {
+    await submitDraft(recoverExpert);
+  } finally {
+    submitRequested.value = false;
+  }
+}
+async function submitDraft(recoverExpert: boolean): Promise<void> {
   if (isDraftMode.value) {
     const target = composerDraftTargetKey.value;
     const result = await draft.submit(prompt.value, models.intent.value);
@@ -1035,6 +1091,7 @@ async function submit(recoverExpert = false): Promise<void> {
   if (!normalPurposeReady.value || (!recoverExpert && !permissionCanSend.value)) return;
   if (!recoverExpert && !expertSendReady.value) return;
   if (recoverExpert && !expertSubmission.value) return;
+  expertSubmitError.value = null;
   const draftTargetAtStart = composerDraftTargetKey.value;
   const draftTextAtStart = prompt.value;
   const contextAtStart = chatStore.context?.contextId;
@@ -1064,32 +1121,27 @@ async function submit(recoverExpert = false): Promise<void> {
     const catalogReady = () => skills.phase === "ready" || skills.phase === "empty";
     const hasSkillRequest = Boolean(pickedSkills.length || initial.mentions.length || initial.nativeMentions.length || initial.issue);
     if (hasSkillRequest || skills.phase === "loading" || skills.phase === "idle" || (!catalogReady() && initial.directed)) {
-      resolvingResource = true;
-      try {
-        await skills.open(false);
-        if (!currentDraft()) return;
-        if ((skills.lastFailure || !catalogReady()) && (hasSkillRequest ||
-          (expertsUiEnabled && explicitExpertInvocation(draftTextAtStart, expertResources.entries, selectedExpert.value).kind === "ambiguous"))) {
-          skillFeedback.value = "暂时无法核对技能状态，请重试。";
-          return;
-        }
-        const named = resolve();
-        if (named.issue) { skillFeedback.value = named.issue; return; }
-        addressesSkill = named.addressesFirst;
-        // A picker choice fixes the identity and version even if the text also names it.
-        const removed = [...initial.mentions, ...initial.nativeMentions].filter(skill => !skills.skills.some(current => current.id === skill.id));
-        for (const skill of named.mentions) {
-          if (!turnSkills.some(picked => picked.id === skill.id)) turnSkills.push(skill);
-        }
-        for (const skill of [...turnSkills, ...named.nativeMentions, ...removed]) {
-          const issue = skills.operations[skill.id] ? "技能正在更新，请稍后重试" : selectedSkillIssue(skill, skills.skills);
-          if (issue) { skillFeedback.value = namedSkillIssue(skill.displayName, issue); return; }
-        }
-        const requested = new Set([...turnSkills, ...named.nativeMentions].map(skill => skill.id));
-        toolNotice = skills.skills.filter(skill => requested.has(skill.id)).map(skillInvocationToolNotice).filter(Boolean).join("\n");
-      } finally {
-        resolvingResource = false;
+      await skills.open(false);
+      if (!currentDraft()) return;
+      if ((skills.lastFailure || !catalogReady()) && (hasSkillRequest ||
+        (expertsUiEnabled && explicitExpertInvocation(draftTextAtStart, expertResources.entries, selectedExpert.value).kind === "ambiguous"))) {
+        skillFeedback.value = "暂时无法核对技能状态，请重试。";
+        return;
       }
+      const named = resolve();
+      if (named.issue) { skillFeedback.value = named.issue; return; }
+      addressesSkill = named.addressesFirst;
+      // A picker choice fixes the identity and version even if the text also names it.
+      const removed = [...initial.mentions, ...initial.nativeMentions].filter(skill => !skills.skills.some(current => current.id === skill.id));
+      for (const skill of named.mentions) {
+        if (!turnSkills.some(picked => picked.id === skill.id)) turnSkills.push(skill);
+      }
+      for (const skill of [...turnSkills, ...named.nativeMentions, ...removed]) {
+        const issue = skills.operations[skill.id] ? "技能正在更新，请稍后重试" : selectedSkillIssue(skill, skills.skills);
+        if (issue) { skillFeedback.value = namedSkillIssue(skill.displayName, issue); return; }
+      }
+      const requested = new Set([...turnSkills, ...named.nativeMentions].map(skill => skill.id));
+      toolNotice = skills.skills.filter(skill => requested.has(skill.id)).map(skillInvocationToolNotice).filter(Boolean).join("\n");
     }
   }
   if (!recoverExpert && expertsUiEnabled && !addressesSkill) {
@@ -1099,25 +1151,20 @@ async function submit(recoverExpert = false): Promise<void> {
       return;
     }
     if (named.kind === "select") {
-      resolvingResource = true;
-      try {
-        if (!await expertPicker.select(named.entry)) {
-          transientNotice.value = expertPicker.error.value ?? "专家选择未完成，请检查专家状态后再发送。";
-          return;
-        }
-        // Completing resource preparation clears the busy flag and starts the
-        // normal model-catalog refresh. Wait for an authoritative intent before
-        // freezing the new turn. No model call occurs during a catalog read.
-        await nextTick();
-        if (!models.ready.value) await models.refresh();
-        if (!currentDraft() || !expertSendReady.value || !permissionCanSend.value || !models.ready.value ||
-          selectedExpert.value?.expertId !== named.entry.display.expertId ||
-          selectedExpert.value.version !== named.entry.display.version) {
-          transientNotice.value = "已保留草稿，请核对当前专家、模型和附件后发送。";
-          return;
-        }
-      } finally {
-        resolvingResource = false;
+      if (!await expertPicker.select(named.entry)) {
+        transientNotice.value = expertPicker.error.value ?? "专家选择未完成，请检查专家状态后再发送。";
+        return;
+      }
+      // Completing resource preparation clears the busy flag and starts the
+      // normal model-catalog refresh. Wait for an authoritative intent before
+      // freezing the new turn. No model call occurs during a catalog read.
+      await nextTick();
+      if (!models.ready.value) await models.refresh();
+      if (!currentDraft() || !expertSendReady.value || !permissionCanSend.value || !models.ready.value ||
+        selectedExpert.value?.expertId !== named.entry.display.expertId ||
+        selectedExpert.value.version !== named.entry.display.version) {
+        transientNotice.value = "已保留草稿，请核对当前专家、模型和附件后发送。";
+        return;
       }
     }
   }
@@ -1132,6 +1179,10 @@ async function submit(recoverExpert = false): Promise<void> {
   let focusRestoreTarget = draftTargetAtStart;
   const frozenExpert = recoverExpert ? expertSubmission.value : undefined;
   const turnExpert = frozenExpert ? { expectedBindingRevision: frozenExpert.expectedBindingRevision, expert: frozenExpert.expert } : expertIntent.value;
+  const sameTarget = () => route.fullPath === routeAtStart && chatStore.context?.contextId === contextAtStart;
+  function reportNotAccepted(): void {
+    if (sameTarget() && !(turnExpert && expertSubmission.value)) actionErrorCode.value = chatStore.lastErrorCode ?? "chat_host_not_ready";
+  }
   const marketSelection = frozenExpert?.submission.selection ?? (marketConnectorsEnabled && (connectorSelection.value.length > 0 || marketChat.managed.value)
     ? connectorSelection.value.map(item => ({ ...item.reference })) : undefined);
   try {
@@ -1155,7 +1206,7 @@ async function submit(recoverExpert = false): Promise<void> {
         ? chatStore.submitTurnWithResult(input, models.intent.value ?? undefined, marketSelection)
         : models.intent.value ? chatStore.submitTurnWithResult(input, models.intent.value) : chatStore.submitTurnWithResult(input));
       if (result.status !== "local_durable_accepted") {
-        actionErrorCode.value = chatStore.lastErrorCode ?? "chat_host_not_ready";
+        reportNotAccepted();
         return;
       }
       rememberSkillUse(result.sessionId, result.turnId);
@@ -1178,7 +1229,7 @@ async function submit(recoverExpert = false): Promise<void> {
       ? chatStore.createSessionWithResult(availableProjectId.value, input, models.intent.value ?? undefined, marketSelection)
       : models.intent.value ? chatStore.createSessionWithResult(availableProjectId.value, input, models.intent.value) : chatStore.createSessionWithResult(availableProjectId.value, input));
     if (result.status !== "local_durable_accepted") {
-      actionErrorCode.value = chatStore.lastErrorCode ?? "chat_host_not_ready";
+      reportNotAccepted();
       return;
     }
     rememberSkillUse(result.sessionId, result.turnId);
@@ -1199,7 +1250,14 @@ async function submit(recoverExpert = false): Promise<void> {
     if (routeSessionId.value === result.sessionId) submittedTurnAnchor.value = { sessionId: result.sessionId, turnId: result.turnId, contextId: contextAtStart };
     focusRestoreTarget = chatComposerDraftKey(result.sessionId);
   } catch (error: unknown) {
-    captureError(error);
+    if (sameTarget()) {
+      if (turnExpert && error instanceof ExpertClientError) {
+        // A failed check cannot turn a retained original into a definite rejection.
+        if (!expertSubmission.value || !["outcome_unknown", "operation_pending", "temporarily_unavailable"].includes(error.code)) {
+          expertSubmitError.value = error.code;
+        }
+      } else if (!(turnExpert && expertSubmission.value)) captureError(error);
+    }
   } finally {
     submitting.value = false;
     await nextTick();
@@ -1435,8 +1493,8 @@ onBeforeUnmount(() => {
         {{ models.error.value || models.notice.value }}
         <button v-if="models.error.value" type="button" class="yj-control" :disabled="modelBlocked || models.saving.value || models.loading.value" @click="models.retry">{{ models.retryLabel.value }}</button>
       </p>
-      <p v-if="expertNotice" class="chat-workspace__composer-error" role="status">{{ expertNotice }} <button type="button" class="yj-control" :disabled="submitting" @click="refreshExpert">{{ expertSubmission ? "确认原提交" : "重新读取" }}</button><template v-if="expertRecoveryOperation">恢复会重新应用原选择，不发送消息。<button type="button" class="yj-control" :disabled="expertRecoveryBlocked" @click="recoverExpertBinding">恢复原操作</button></template></p>
-      <p v-if="uncertainLocalSubmission" class="chat-workspace__composer-error" role="status">原提交结果尚未确认，请勿重复发送。<button type="button" class="yj-control" :disabled="submitting || chatStore.phase === 'resyncing' || !chatStore.hasAction('read_sessions')" @click="chatStore.resyncSelected">重新读取原提交</button></p>
+      <ChatSubmissionNotice v-if="submissionNotice" :notice="submissionNotice" :disabled="submitRequested"
+        :recoverable="!!expertRecoveryOperation" :recovery-disabled="expertRecoveryBlocked" @recover="recoverExpertBinding" />
       <ChatDeliveryControl v-if="kimiK31Candidate && chatModelsEnabled && !isDraftMode && normalPurposeReady && routeSessionId && chatStore.hasAction('read_sessions')" :states="delivery.states.value" :loading="delivery.loading.value" :cancelling="delivery.cancelling.value" :can-cancel="chatStore.hasAction('interrupt_turn')" :error="delivery.error.value" :notice="delivery.notice.value" @refresh="delivery.refresh" @cancel="delivery.cancel" />
       <ChatComposer
         :read-attachment-presentation="readAttachmentPresentation"
@@ -1463,6 +1521,7 @@ onBeforeUnmount(() => {
         :waiting-for-model="composerSendReadiness === 'pending'"
         :can-attach="attachmentInteractionAllowed"
         :submission-state="composerSubmissionState"
+        :preparing-submit="submitRequested"
         :streaming="false"
         :recovery-available="canRecoverReadiness"
         :attachments="isDraftMode ? [] : chatStore.draftAttachments"
@@ -1492,7 +1551,7 @@ onBeforeUnmount(() => {
             @update:create-open="workspacePicker.setCreateOpen" @create="workspacePicker.create"
           />
         </template>
-        <template v-if="selectedExpert" #expert-control><ChatExpertChip :expert="selectedExpert" :disabled="expertRemovalBlocked || expertPicker.pending.value" :pending="!!routeSessionId && (chatExperts.busy.has(routeSessionId) || expertBinding?.state === 'applying')" @details="showExpertDetails" @remove="removeExpert" /></template>
+        <template v-if="selectedExpert" #expert-control><ChatExpertChip :expert="selectedExpert" :disabled="expertRemovalBlocked || expertPicker.pending.value" :pending="expertBinding?.state === 'applying'" @details="showExpertDetails" @remove="removeExpert" /></template>
         <template v-if="expertsUiEnabled && !isDraftMode && permissionScope.hasCapability('plugin.read')" #expert-picker="{ close }">
           <ChatExpertControl :entries="expertResources.entries" :selected="selectedExpert" :disabled="expertRemovalBlocked || expertContextBlocked || expertPicker.pending.value" :loading="!expertResources.snapshot && expertResources.refreshing" :refreshing="!!expertResources.snapshot && expertResources.refreshing" :error="expertPicker.error.value ?? expertResources.error" :execution-available="expertResources.snapshot?.executionAvailable === true" :can-manage="expertResources.canManage" :busy-keys="expertResources.busy" :operation-errors="expertResources.operationErrors" :pending-keys="expertPendingKeys" @refresh="refreshExpertPicker" @select="selectExpert($event, close)" @close="close" @manage="browseExperts" />
         </template>
@@ -1728,8 +1787,8 @@ onBeforeUnmount(() => {
         {{ models.error.value || models.notice.value }}
         <button v-if="models.error.value" type="button" class="yj-control" :disabled="modelBlocked || models.saving.value || models.loading.value" @click="models.retry">{{ models.retryLabel.value }}</button>
       </p>
-      <p v-if="expertNotice" class="chat-workspace__composer-error" role="status">{{ expertNotice }} <button type="button" class="yj-control" :disabled="submitting" @click="refreshExpert">{{ expertSubmission ? "确认原提交" : "重新读取" }}</button><template v-if="expertRecoveryOperation">恢复会重新应用原选择，不发送消息。<button type="button" class="yj-control" :disabled="expertRecoveryBlocked" @click="recoverExpertBinding">恢复原操作</button></template></p>
-      <p v-if="uncertainLocalSubmission" class="chat-workspace__composer-error" role="status">原提交结果尚未确认，请勿重复发送。<button type="button" class="yj-control" :disabled="submitting || chatStore.phase === 'resyncing' || !chatStore.hasAction('read_sessions')" @click="chatStore.resyncSelected">重新读取原提交</button></p>
+      <ChatSubmissionNotice v-if="submissionNotice" :notice="submissionNotice" :disabled="submitRequested"
+        :recoverable="!!expertRecoveryOperation" :recovery-disabled="expertRecoveryBlocked" @recover="recoverExpertBinding" />
       <ChatComposer
         :read-attachment-presentation="readAttachmentPresentation"
         :presentation-scope="attachmentPresentationScope"
@@ -1757,6 +1816,7 @@ onBeforeUnmount(() => {
         :waiting-for-model="composerSendReadiness === 'pending'"
         :can-attach="attachmentInteractionAllowed"
         :submission-state="composerSubmissionState"
+        :preparing-submit="submitRequested"
         :streaming="isStreaming"
         :recovery-available="canRecoverReadiness"
           :attachments="isDraftMode ? [] : chatStore.draftAttachments"
@@ -1774,7 +1834,7 @@ onBeforeUnmount(() => {
         @recover="recoverReadiness"
         @unsupported-input="showUnsupportedInput"
       >
-        <template v-if="selectedExpert" #expert-control><ChatExpertChip :expert="selectedExpert" :disabled="expertRemovalBlocked || expertPicker.pending.value" :pending="!!routeSessionId && (chatExperts.busy.has(routeSessionId) || expertBinding?.state === 'applying')" @details="showExpertDetails" @remove="removeExpert" /></template>
+        <template v-if="selectedExpert" #expert-control><ChatExpertChip :expert="selectedExpert" :disabled="expertRemovalBlocked || expertPicker.pending.value" :pending="expertBinding?.state === 'applying'" @details="showExpertDetails" @remove="removeExpert" /></template>
         <template v-if="expertsUiEnabled && !isDraftMode && permissionScope.hasCapability('plugin.read')" #expert-picker="{ close }">
           <ChatExpertControl :entries="expertResources.entries" :selected="selectedExpert" :disabled="expertRemovalBlocked || expertContextBlocked || expertPicker.pending.value" :loading="!expertResources.snapshot && expertResources.refreshing" :refreshing="!!expertResources.snapshot && expertResources.refreshing" :error="expertPicker.error.value ?? expertResources.error" :execution-available="expertResources.snapshot?.executionAvailable === true" :can-manage="expertResources.canManage" :busy-keys="expertResources.busy" :operation-errors="expertResources.operationErrors" :pending-keys="expertPendingKeys" @refresh="refreshExpertPicker" @select="selectExpert($event, close)" @close="close" @manage="browseExperts" />
         </template>

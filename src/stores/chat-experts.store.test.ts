@@ -54,8 +54,15 @@ describe("Native expert binding and immutable local submission", () => {
   });
   it("keeps a complete unknown send and reuses its exact operation after renewal", async () => {
     const { client, store } = setup(); const original = payload();
-    client.submit.mockRejectedValueOnce(new ExpertClientError("outcome_unknown"));
-    await expect(store.submit(id(1), original)).rejects.toMatchObject({ code: "outcome_unknown" });
+    let returnUnknown!: () => void;
+    client.submit.mockImplementationOnce(() => new Promise((_resolve, reject) => { returnUnknown = () => reject(new ExpertClientError("outcome_unknown")); }));
+    const first = store.submit(id(1), original);
+    expect(store.submissionStatus(id(2))).toBe("sending");
+    await expect(store.submit(id(1), original)).rejects.toMatchObject({ code: "operation_pending" });
+    expect(client.submit).toHaveBeenCalledOnce();
+    returnUnknown();
+    await expect(first).rejects.toMatchObject({ code: "outcome_unknown" });
+    expect(store.submissionStatus(id(2))).toBe("uncertain");
     store.bind(id(4), "scope-one");
     client.submit.mockRejectedValueOnce(new ExpertClientError("permission_denied"));
     await expect(store.submit(id(4), original)).rejects.toMatchObject({ code: "permission_denied" });
@@ -64,12 +71,14 @@ describe("Native expert binding and immutable local submission", () => {
     expect(client.submit).toHaveBeenCalledTimes(2);
     client.submit.mockResolvedValue({ bindingRevision: 1, expert: expertDisplay, receipt: { outcome: "local_durable_accepted", sessionId: id(2), localTurnId: id(5), turnOperationId: id(6), submissionOperationId: id(3), selectionDigest: "a".repeat(64) } });
     await store.submit(id(4), original);
+    expect(store.submissionStatus(id(2))).toBe("accepted");
     expect(client.submit).toHaveBeenLastCalledWith(id(4), original);
     expect(store.submissions[id(2)]).toEqual(original);
     const calls = client.submit.mock.calls.length;
     await store.submit(id(4), original);
     expect(client.submit).toHaveBeenCalledTimes(calls);
     store.acknowledgeSubmission(original.submission.operationId);
+    expect(store.submissionStatus(id(2))).toBe("idle");
     expect(store.submissions[id(2)]).toBeUndefined();
   });
   it("drops former-scope asynchronous bindings and pending intents", async () => {

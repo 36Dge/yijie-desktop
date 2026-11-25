@@ -45,6 +45,7 @@ const props = withDefaults(defineProps<{
   waitingForModel?: boolean;
   canAttach: boolean;
   submissionState: ChatComposerSubmissionState;
+  preparingSubmit?: boolean;
   streaming: boolean;
   recoveryAvailable: boolean;
   attachments?: readonly ChatAttachment[];
@@ -109,6 +110,7 @@ const activeAttachment = ref<string | null>(null);
 watch(() => [props.presentationScope, props.submissionState, props.canSend], () => { activeAttachment.value = null; });
 const composing = ref(false);
 const composerElement = ref<HTMLElement | null>(null);
+const addControl = ref<InstanceType<typeof ChatAddControl> | null>(null);
 const textareaElement = ref<HTMLTextAreaElement | null>(null);
 const inlineEditor = ref<InstanceType<typeof ChatInlineSkillEditor> | null>(null);
 const connectorPrefixElement = ref<HTMLElement | null>(null);
@@ -166,6 +168,15 @@ const attachmentConstraintMessage = computed(() => {
   return imageBytes > 10 * 1024 * 1024 ? "每条消息中的图片总大小不能超过 10 MB。" : null;
 });
 const submissionBusy = computed(() => props.submissionState !== "idle");
+const sendBusy = computed(() => submissionBusy.value || !!props.preparingSubmit);
+const showSendSpinner = ref(false);
+watch([sendBusy, () => props.presentationScope], ([busy], _, onCleanup) => {
+  showSendSpinner.value = false;
+  if (busy) {
+    const timer = window.setTimeout(() => { showSendSpinner.value = true; }, 800);
+    onCleanup(() => window.clearTimeout(timer));
+  }
+}, { immediate: true });
 const inputContainer = ref<HTMLElement | null>(null);
 const caretMirror = ref<HTMLElement | null>(null);
 const { position: caretPosition, refresh: refreshCaret, hide: hideCaret } =
@@ -178,7 +189,7 @@ const connectorSelectionLocked = computed(() =>
 );
 const unavailableConnectors = computed(() => props.textOnly ? [] : props.connectors.filter(entry => entry.unavailableReason));
 const draftBlocksSend = computed(() =>
-  submissionBusy.value || props.streaming || validationMessage.value !== null ||
+  sendBusy.value || props.streaming || validationMessage.value !== null ||
   props.attachmentImporting || props.attachmentImportAttempt !== null ||
   props.attachments.some((attachment) => attachment.status !== "ready") ||
   unavailableConnectors.value.length > 0 ||
@@ -187,13 +198,11 @@ const draftBlocksSend = computed(() =>
 );
 const sendDisabled = computed(() => !props.canSend || props.waitingForModel || draftBlocksSend.value);
 const sendLabel = computed(() => {
-  if (props.submissionState === "validating") return "正在验证任务";
   if (props.submissionState === "submitting") return "正在提交任务";
+  if (sendBusy.value) return "正在验证任务";
   return "发送任务";
 });
-const submissionAnnouncement = computed(() => props.submissionState === "idle"
-  ? ""
-  : sendLabel.value);
+const submissionAnnouncement = computed(() => sendBusy.value ? sendLabel.value : "");
 const attachmentButtonDisabled = computed(() =>
   !props.canSend || !props.canAttach || submissionBusy.value || props.streaming ||
   props.attachmentImporting || props.attachments.length >= 10,
@@ -371,7 +380,8 @@ function focusInput(): boolean {
   textarea.setSelectionRange(textarea.value.length, textarea.value.length);
   return true;
 }
-defineExpose({ captureInputFocus, restoreInputFocus, focusInput });
+function openExpertPicker(): void { void addControl.value?.openExpertPicker(); }
+defineExpose({ captureInputFocus, restoreInputFocus, focusInput, openExpertPicker });
 
 async function closeResourcePicker(close: () => Promise<void>, reason?: "selection", caret = pickerCaret): Promise<void> {
   // The menu restores its trigger first. A selection then returns to the draft caret.
@@ -625,7 +635,7 @@ function handlePaste(event: ClipboardEvent): void {
         </div>
         <div class="chat-composer__actions">
           <div class="chat-composer__leading-actions">
-            <ChatAddControl
+            <ChatAddControl ref="addControl"
               v-if="!textOnly"
               :disabled="submissionBusy || streaming || (attachmentButtonDisabled && !$slots['skill-control'] && !$slots['connector-control'] && !expertsAvailable)"
               :attachment-disabled="attachmentButtonDisabled"
@@ -688,17 +698,17 @@ function handlePaste(event: ClipboardEvent): void {
               </button></YjTooltip>
             </slot>
           </template>
-          <YjTooltip v-else :text="sendLabel"><button
+          <YjTooltip v-else :text="sendBusy ? null : sendLabel"><button
 
             class="chat-composer__send"
             type="button"
             :disabled="sendDisabled"
-            :aria-busy="waitingForModel && !draftBlocksSend || undefined"
+            :aria-busy="sendBusy || (waitingForModel && !draftBlocksSend) || undefined"
             :aria-label="sendLabel"
 
             @click="submit"
           >
-            <YjIcon name="send" size="md" />
+            <YjIcon :name="showSendSpinner ? 'loading' : 'send'" size="md" :class="{ 'chat-composer__send-spinner': showSendSpinner }" />
           </button></YjTooltip>
           </div>
         </div>
@@ -1212,6 +1222,10 @@ function handlePaste(event: ClipboardEvent): void {
 }
 
 .chat-composer__send :deep(.yj-icon) { color: inherit; }
+@media (prefers-reduced-motion: no-preference) {
+  .chat-composer__send-spinner { animation: chat-send-spin var(--yj-motion-chat-task-spin) linear infinite; }
+}
+@keyframes chat-send-spin { to { transform: rotate(360deg); } }
 .chat-composer__send:hover:is(:enabled, [aria-busy="true"]) { background: var(--yj-color-brand-hover); }
 .chat-composer__send:active:not(:disabled):not(.chat-composer__send--stop) { background: var(--yj-color-brand-active); }
 .chat-composer__send:disabled:not([aria-busy="true"]) { color: var(--yj-color-text-disabled); background: var(--yj-color-control-disabled-bg); cursor: not-allowed; }

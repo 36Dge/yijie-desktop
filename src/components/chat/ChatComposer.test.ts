@@ -766,6 +766,29 @@ describe("ChatComposer", () => {
     expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeUndefined();
   });
 
+  it("locks send immediately and shows its spinner only after 800 ms of continuous work", async () => {
+    vi.useFakeTimers();
+    const wrapper = mountComposer();
+    const spinner = () => wrapper.find(".chat-composer__send-spinner").exists();
+    try {
+      await wrapper.setProps({ preparingSubmit: true });
+      expect(wrapper.get<HTMLButtonElement>(".chat-composer__send").element.disabled).toBe(true);
+      await vi.advanceTimersByTimeAsync(400);
+      await wrapper.setProps({ preparingSubmit: false, submissionState: "submitting" });
+      await vi.advanceTimersByTimeAsync(399);
+      expect(spinner()).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(spinner()).toBe(true);
+      await wrapper.setProps({ submissionState: "idle" });
+      expect(spinner()).toBe(false);
+      await wrapper.setProps({ submissionState: "submitting" });
+      await vi.advanceTimersByTimeAsync(100);
+      await wrapper.setProps({ submissionState: "idle" });
+      await vi.advanceTimersByTimeAsync(800);
+      expect(spinner()).toBe(false);
+    } finally { wrapper.unmount(); vi.useRealTimers(); }
+  });
+
   it("disables send for blank input, unavailable readiness and active turn", async () => {
     expect(mountComposer({ modelValue: "" }).get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
     expect(mountComposer({ canSend: false }).get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();

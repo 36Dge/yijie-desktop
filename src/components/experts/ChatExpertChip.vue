@@ -47,6 +47,7 @@ const emit = defineEmits<{ details: []; remove: [] }>();
 .chat-expert-chip > .chat-expert-chip__remove { flex: none; width: var(--yj-chat-expert-chip-height); }
 .chat-expert-chip__icon { display: inline-grid; place-items: center; width: var(--yj-space-6); height: var(--yj-space-6); }
 .chat-expert-chip__icon > * { grid-area: 1 / 1; }
+.chat-expert-chip__icon > .chat-expert-chip__symbol { border-radius: var(--yj-radius-full); }
 .chat-expert-chip__dismiss { visibility: hidden; }
 .chat-expert-chip--removable:is(:hover, :focus-within) .chat-expert-chip__symbol { visibility: hidden; }
 .chat-expert-chip--removable:is(:hover, :focus-within) .chat-expert-chip__dismiss { visibility: visible; }
