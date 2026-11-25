@@ -20,7 +20,7 @@ it.each(["kimi-k3-1-pro-high-v1","kimi-k3-1-pro-max-v1","kimi-k3-max-v1"] as con
  const root=mount(defineComponent({setup:()=>()=>h(NDialogProvider,null,{default:()=>h(ScheduledPlanForm,{plan:null,initialDefinition,busy:false,uncertain:false,error:"",preview:async()=>({next_at:1800000000,skipped_slots:[],candidates_examined:1,rule_version:1,tzdb_version:"2026b"}),targets:async()=>({items:[]}),onSave:saved})})}),{attachTo:document.body});
  disposers.push(()=>root.unmount());
  const form=root.findComponent(ScheduledPlanForm);
- await vi.waitFor(()=>expect(document.body.textContent).toContain("启用后预计"));
+ await vi.waitFor(()=>expect(document.querySelector('.schedule-form__preview[data-state="ready"]')).not.toBeNull());
  const save=form.findAllComponents(NButton).find(b=>b.text()==="保存")!;
  expect(save.props("disabled")).toBe(model==="kimi-k3-max-v1");
  document.querySelector<HTMLFormElement>("form")!.dispatchEvent(new Event("submit",{bubbles:true,cancelable:true}));

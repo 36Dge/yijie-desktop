@@ -11,7 +11,8 @@ import { usePermissionStore } from "../../stores/permission.store";
 import type { PlanSummary, Requests, RecordDetail } from "../../api/generated/scheduled-task-ipc-v2.gen";
 import { CHAT_EXECUTION_PREPARE_KEY } from "../../authorization/chat-authority-recovery";
 import type { GrantView, RunView } from "../../domain/scheduled-execution.generated";
-import type { PlanView } from "../../domain/scheduled-plan-v2.generated";
+import type { PlanView, TimePreview } from "../../domain/scheduled-plan-v2.generated";
+import { timeLabel } from "../../domain/scheduled-task-ui";
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: native.invoke }));
@@ -26,9 +27,10 @@ interface PageOptions {
   state?: PlanView["state"];
   targetState?: PlanView["target_state"];
   rule?: PlanView["definition"]["rule"];
+  previewTime?: () => TimePreview | Promise<TimePreview>;
 }
 
-async function page({ emptyLists = false, failToggle = false, manualReady = false, failRun = false, state = "paused", targetState = "unbound",
+async function page({ emptyLists = false, failToggle = false, manualReady = false, failRun = false, state = "paused", targetState = "unbound", previewTime,
   rule = { frequency: "daily", time_zone: "Asia/Shanghai", local_time: "23:00" } }: PageOptions = {}) {
   const plan: PlanView = { plan_id: crypto.randomUUID(), revision: 1, schedule_epoch: 1, definition: { name: "午夜闹铃", content: "整理每日摘要", rule, target: { mode: "dedicated_chat" } }, state, target_state: targetState, effective_from: 1790000000, rule_version: 1, tzdb_version: "2026b" };
   const summary: PlanSummary = { plan_id: plan.plan_id, name: plan.definition.name, revision: 1, raw_state: state, effective_state: state, target_mode: plan.definition.target.mode, target_state: targetState };
@@ -54,7 +56,7 @@ async function page({ emptyLists = false, failToggle = false, manualReady = fals
         data = run; break;
       case "schedule_get_record_v1": data = detail; break;
       case "schedule_get_plan_v1": data = { plan, summary }; break;
-      case "schedule_preview_time_v1": data = { skipped_slots: [], candidates_examined: 1, rule_version: 1, tzdb_version: "2026b" }; break;
+      case "schedule_preview_time_v1": data = previewTime ? await previewTime() : { skipped_slots: [], candidates_examined: 1, rule_version: 1, tzdb_version: "2026b" }; break;
       case "schedule_enable_plan_v1":
       case "schedule_pause_plan_v1":
         if (failToggle) throw { schemaVersion: 1, requestId: request.requestId, code: "revision_conflict" };
@@ -82,6 +84,75 @@ async function page({ emptyLists = false, failToggle = false, manualReady = fals
 function dialogButton(label: string) {
   return Array.from(document.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')).find(b => b.textContent === label)!;
 }
+
+function dailyPreview(date: string) {
+  const slot = `${date}T09:00`;
+  return { logical_slot: slot, next_at: new Date(slot).getTime() / 1000, skipped_slots: [], candidates_examined: 1, rule_version: 1, tzdb_version: "2026b" } satisfies TimePreview;
+}
+
+it("opens both create entries with the prepared time on the first render and refreshes it at the execution boundary", async () => {
+  const today = dailyPreview("2026-11-25"), tomorrow = dailyPreview("2026-11-26");
+  const clock = vi.spyOn(Date, "now").mockReturnValue((today.next_at - 60) * 1000);
+  const previewTime = vi.fn().mockResolvedValueOnce(today).mockResolvedValueOnce(tomorrow);
+  const { root } = await page({ emptyLists: true, previewTime });
+  const body = new DOMWrapper(document.body);
+  const create = root.findAll("button").find(button => button.text() === "新建定时任务")!;
+  expect(previewTime).toHaveBeenCalledOnce();
+  for (const trigger of [root.get(".schedule-empty button"), create]) {
+    await trigger.trigger("click");
+    expect(body.get(".schedule-form__preview").attributes("data-state")).toBe("ready");
+    expect(body.get(".schedule-form__next strong").text()).toBe(timeLabel(today.next_at));
+    expect(previewTime).toHaveBeenCalledOnce();
+    await body.get('button[aria-label="关闭弹窗"]').trigger("click");
+  }
+  clock.mockReturnValue(today.next_at * 1000);
+  await create.trigger("click");
+  await flushPromises();
+  expect(previewTime).toHaveBeenCalledTimes(2);
+  expect(body.get(".schedule-form__next strong").text()).toBe(timeLabel(tomorrow.next_at));
+});
+
+it("opens immediately during a pending native preview and fills the time into the same visible panel", async () => {
+  let finish!: (result: TimePreview) => void;
+  const previewTime = vi.fn(() => new Promise<TimePreview>(resolve => { finish = resolve; }));
+  const { root } = await page({ emptyLists: true, previewTime });
+  await root.get(".schedule-empty button").trigger("click");
+  const body = new DOMWrapper(document.body);
+  const panel = body.get(".schedule-form__preview");
+  const heading = panel.get(".schedule-form__next-meta").element;
+  expect(heading.textContent).toContain("启用后预计执行");
+  expect(heading.textContent).toContain(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  expect(panel.attributes("aria-busy")).toBe("true");
+  await body.get('input[aria-label="任务名称"]').setValue("巡检");
+  await body.get('textarea[aria-label="任务内容"]').setValue("核对商品信息");
+  expect(body.get<HTMLButtonElement>('button[type="submit"]').element.disabled).toBe(true);
+  expect(previewTime).toHaveBeenCalledOnce();
+  finish(dailyPreview("2026-11-26"));
+  await flushPromises();
+  expect(panel.get(".schedule-form__next-meta").element).toBe(heading);
+  expect(panel.attributes("aria-busy")).toBe("false");
+  expect(body.get<HTMLButtonElement>('button[type="submit"]').element.disabled).toBe(false);
+  expect(previewTime).toHaveBeenCalledOnce();
+});
+
+it("retries a failed preload on click and refreshes a slot that passes while that read is pending", async () => {
+  const today = dailyPreview("2026-11-25"), tomorrow = dailyPreview("2026-11-26");
+  const clock = vi.spyOn(Date, "now").mockReturnValue(today.next_at * 1000 - 1000);
+  let finish!: (result: TimePreview) => void;
+  const previewTime = vi.fn()
+    .mockRejectedValueOnce(new Error("Preview unavailable"))
+    .mockImplementationOnce(() => new Promise<TimePreview>(resolve => { finish = resolve; }))
+    .mockResolvedValueOnce(tomorrow);
+  const { root } = await page({ emptyLists: true, previewTime });
+  expect(previewTime).toHaveBeenCalledOnce();
+  await root.get(".schedule-empty button").trigger("click");
+  expect(previewTime).toHaveBeenCalledTimes(2);
+  clock.mockReturnValue(today.next_at * 1000);
+  finish(today);
+  await flushPromises();
+  expect(previewTime).toHaveBeenCalledTimes(3);
+  expect(new DOMWrapper(document.body).get(".schedule-form__next strong").text()).toBe(timeLabel(tomorrow.next_at));
+});
 
 it("offers the first plan form from the empty list and waits for results when switching to empty history", async () => {
   const { root, calls } = await page({ emptyLists: true });
@@ -170,6 +241,9 @@ it("keeps the switch off and reports the error if enabling fails", async () => {
 it("renders history, run and delete as matching compact outline icons", async () => {
   const { root } = await page({ manualReady: true });
   const actions = root.get('[role="group"][aria-label="任务操作"]');
+  expect(actions.findAll('[role="switch"], button').map(control => control.attributes("aria-label"))).toEqual([
+    "开启 午夜闹铃", "编辑 午夜闹铃", "查看历史记录", "立即执行", "删除任务",
+  ]);
   for (const label of ["查看历史记录", "立即执行", "删除任务"]) {
     const svg = actions.get(`button[aria-label="${label}"] svg`);
     expect(svg.attributes()).toMatchObject({
@@ -194,7 +268,7 @@ it("opens the editor only from the card's edit button", async () => {
   await card.get('button[aria-label="编辑 午夜闹铃"]').trigger("click");
   await flushPromises();
   const editor = new DOMWrapper(document.body).get('[role="dialog"][aria-label="编辑定时任务"]');
-  expect(editor.get<HTMLInputElement>('input[aria-label="计划名称"]').element.value).toBe("午夜闹铃");
+  expect(editor.get<HTMLInputElement>('input[aria-label="任务名称"]').element.value).toBe("午夜闹铃");
   expect(calls.filter(call => call.command === "schedule_get_plan_v1")).toHaveLength(1);
 });
 

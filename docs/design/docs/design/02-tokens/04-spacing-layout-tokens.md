@@ -54,7 +54,7 @@
 - FEAT-166 文件预览面板为对话保留至少400px，预览默认及最小宽度为336px，布局数值集中于 `conversation-file-preview.ts`。预览标签条复用对话顶部栏，100%缩放下总高64px。标签宽度使用 `--yj-layout-preview-tab-min` 120px 和 `--yj-layout-preview-tab-max` 240px，空说明使用 `--yj-layout-preview-empty-max` 320px。详见[文件预览](../05-patterns/17-feat-166-conversation-file-preview.md)。
 - 表单最大宽度：720–960px。
 - 专家详情弹窗最大宽度：600px（`--yj-layout-expert-detail-width`），最小高度700px（`--yj-layout-expert-detail-min-height`）；最小高度也受视口限制，上下至少留32px，居中显示，超高时固定头部、正文内部滚动。内部标准边距24px，窄窗口减为20px。
-- 定时任务创建、编辑及草案确认弹窗：520px（`--yj-layout-schedule-form-width`），竖向分组；标题和底部操作固定，内容超高时在弹窗内滚动，按实际缩放后的可用视口限制宽高。
+- 定时任务创建、编辑及草案确认弹窗的标准宽度为 760px（`--yj-layout-schedule-form-width`）。左栏填写名称和任务内容，右栏设置时间和执行模型。弹窗可用宽度降至 640px 时改为单列，降至 440px 时，更多设置中的时区和聊天目标也改为单列。标题和底部操作固定，正文独立滚动。
 - 定时任务页签与筛选工具栏同排：搜索、状态、排序的标准宽度为 240 / 112 / 112px（`--yj-layout-schedule-search-width` / `--yj-layout-schedule-state-width` / `--yj-layout-schedule-sort-width`）；状态与排序组件等宽，排序显示“最新优先”或“最早优先”。执行记录页的任务筛选与状态筛选同为 112px（`--yj-layout-schedule-plan-filter-width` 引用状态宽度 token），占位文字为“全部任务”，下拉仅显示任务标题；下拉菜单可随标题内容展开，宽度不超过可用视口。可用宽度不足时换行。列表空状态最小高度为 256px（`--yj-layout-schedule-empty-min-height`）。
 - 新建任务内容列最大宽度：760px（`--yj-layout-chat-entry-max`）；活跃会话正文与输入区同为 760px，在 `.chat-workspace` 内复用该 token 覆盖内容列和输入框宽度，保持居中与等宽。
 - 2026-11-02 复核：正式对话的760px局部覆盖优先于全局880px回退值；加宽导航后继续保留760px，不再实施此前基于全局回退值提出的800px方案。窗口尺寸见[窗口与页面密度基线](../01-foundations/06-window-density-baseline.md)。折叠导航为72px，180%/200%下展开导航适配为196px。
@@ -88,7 +88,7 @@
 
 - 定时任务执行记录详情：520px（`--yj-layout-schedule-record-width`），五项标签/值布局，底部操作右对齐；窗口不足时保留 16px 两侧安全间距，长内容在弹窗内滚动。
 
-- 定时任务计划卡纵向排列，卡片间距 8px，桌面宽度下按时刻、任务、状态和操作对齐。卡片高度随内容自然调整，标准加载骨架为 84px。内容区在 760px 和 460px 两档宽度重排。
+- 定时任务计划卡纵向排列，卡片间距 8px，桌面宽度下按时刻、任务、状态和操作对齐。卡片高度随内容自然调整，标准加载骨架为 84px。内容区在 47.5rem 和 28.75rem 两档宽度重排，标准字号下分别为 760px 和 460px。操作区在最窄布局中独占底行。
 - 执行记录使用 72px 标准行高（`--yj-layout-schedule-record-row-height`），长名称或状态说明允许行高自然增加。记录容器宽度不超过 660px 时，时间、状态和操作在行内重新排列。
 
 - 任务和项目的右键操作菜单统一宽 175px（`--yj-layout-chat-context-menu-width`，按用户要求从 200px 缩小 25px），受可用视口约束，不再按短文案收窄。

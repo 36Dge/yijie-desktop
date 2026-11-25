@@ -21,9 +21,9 @@ import ScheduledPlanForm from "../../components/schedules/ScheduledPlanForm.vue"
 import { CHAT_AUTHORITY_RETRY_KEY, CHAT_EXECUTION_PREPARE_KEY } from "../../authorization/chat-authority-recovery";
 import { usePermissionStore } from "../../stores/permission.store";
 import { ScheduledTaskNativeError } from "../../api/scheduled-task-native-client";
-import type { PlanDefinition, PlanView } from "../../domain/scheduled-plan-v2.generated";
+import type { PlanDefinition, PlanView, TimePreview, TimeRule } from "../../domain/scheduled-plan-v2.generated";
 import type { PlanCard, PlanSummary, RecordDetail, RecordRow } from "../../api/generated/scheduled-task-ipc-v2.gen";
-import { executionError, recordStatus, ruleLabel, scheduleError, stateLabels, stateOptions, targetLabels, timeLabel, recordElementId } from "../../domain/scheduled-task-ui";
+import { defaultScheduledTimeRule, executionError, recordStatus, ruleLabel, scheduleError, stateLabels, stateOptions, targetLabels, timeLabel, recordElementId } from "../../domain/scheduled-task-ui";
 import { useScheduledManagement } from "./use-scheduled-management";
 import { useScheduledManual } from "./use-scheduled-manual";
 
@@ -104,6 +104,52 @@ async function rerunRecord(row: RecordRow) {
 function restoreRunFocus() { document.getElementById(runReturnFocus.value)?.focus(); }
 const editingBoundConversation = ref<string | null>(null);
 const formOpen = ref(false); const editing = shallowRef<PlanView | null>(null); const form = ref<InstanceType<typeof ScheduledPlanForm>>();
+interface DefaultPreview {
+  zone: string;
+  validFrom: number;
+  request: Promise<TimePreview>;
+  result?: TimePreview;
+}
+let defaultPreview: DefaultPreview | undefined;
+const canPreparePreview = computed(() => canManage.value && capabilities.value?.read.available === true);
+function readTimePreview(rule: TimeRule) {
+  return m.call("schedule_preview_time_v1", { rule });
+}
+function prepareDefaultPreview(rule: TimeRule): TimePreview | Promise<TimePreview> {
+  const now = Date.now();
+  if (defaultPreview?.zone === rule.time_zone && now >= defaultPreview.validFrom) {
+    if (!defaultPreview.result) return defaultPreview.request;
+    if ((defaultPreview.result.next_at ?? 0) * 1000 > now) return defaultPreview.result;
+  }
+  const entry: DefaultPreview = { zone: rule.time_zone, validFrom: now, request: readFreshTime() };
+  defaultPreview = entry;
+  void entry.request.then(result => {
+    entry.result = result;
+    entry.validFrom = Date.now();
+  }, () => {
+    if (defaultPreview === entry) defaultPreview = undefined;
+  });
+  return entry.request;
+
+  async function readFreshTime() {
+    const result = await readTimePreview(rule);
+    const receivedAt = Date.now();
+    const slot = (result.next_at ?? 0) * 1000;
+    // A pending read can cross the scheduled instant while the device sleeps.
+    if (defaultPreview === entry && (receivedAt < now || (now < slot && slot <= receivedAt))) return readTimePreview(rule);
+    return result;
+  }
+}
+function previewNewPlanTime(rule: TimeRule) {
+  const defaults = defaultScheduledTimeRule();
+  return canPreparePreview.value && rule.frequency === defaults.frequency && rule.local_time === defaults.local_time && rule.time_zone === defaults.time_zone
+    ? prepareDefaultPreview(rule)
+    : readTimePreview(rule);
+}
+watch([context, () => permissions.selectedTenantId, () => permissions.authorizationRevision, canPreparePreview], ([bound, tenant, revision, allowed]) => {
+  defaultPreview = undefined;
+  if (bound && tenant && revision !== null && allowed) void prepareDefaultPreview(defaultScheduledTimeRule());
+}, { immediate: true });
 const deleting = shallowRef<PlanSummary | null>(null); const deleteReturnFocus = ref("");
 const recordDetail = shallowRef<RecordDetail | null>(null); const recordName = ref("");
 const recordReturnFocus = ref("");
@@ -297,7 +343,6 @@ onBeforeRouteLeave(() => {
           <div v-else-if="tab === 'plans'" class="schedules-plans">
             <ScheduledPlanCard v-for="card in cards" :key="card.summary.plan_id" :card="card">
               <template #controls>
-                <ScheduledCardAction :id="`schedule-plan-${card.summary.plan_id}`" icon="edit" :label="`编辑 ${card.summary.name}`" :disabled="managementDisabled" @click="edit(card.summary)" />
                 <NSwitch :id="`schedule-enable-${card.summary.plan_id}`" class="schedule-switch"
                   :value="card.summary.effective_state === 'enabled'"
                   :aria-label="`${card.summary.effective_state === 'enabled' ? '关闭' : '开启'} ${card.summary.name}`"
@@ -307,6 +352,7 @@ onBeforeRouteLeave(() => {
                   @update:value="value => togglePlan(value, card)" />
               </template>
               <template #actions>
+                <ScheduledCardAction :id="`schedule-plan-${card.summary.plan_id}`" icon="edit" :label="`编辑 ${card.summary.name}`" :disabled="managementDisabled" @click="edit(card.summary)" />
                 <ScheduledCardAction icon="scheduleHistory" label="查看历史记录" @click="viewHistory(card.summary)" />
                 <ScheduledCardAction :id="`schedule-run-${card.summary.plan_id}`" icon="scheduleRun" label="立即执行" :loading="runningAction && runningPlanId === card.summary.plan_id" :disabled="!canPrepare || autoBusy || autoPending || runningAction || runPending || writing || !!pending || card.summary.raw_state === 'deleted' || card.summary.target_state === 'missing' || (kimiK31Candidate && card.model_profile === 'kimi-k3-max-v1')" @click="runNow(card.summary.plan_id)" />
                 <ScheduledCardAction :id="`schedule-delete-${card.summary.plan_id}`" icon="scheduleDelete" label="删除任务" :disabled="managementDisabled" @click="confirmMutation(card.summary)" />
@@ -325,7 +371,7 @@ onBeforeRouteLeave(() => {
         @positive-click="requestReschedule" @update:show="completedPlan = null" @after-leave="afterCompletedNotice">
         <span id="schedule-completed-description">原定的执行时间已过。要再次定时运行，请设置新的日期和时间，保存后再开启任务。</span>
       </NModal>
-      <ScheduledPlanForm v-if="formOpen" ref="form" :plan="editing" :bound-conversation-id="editingBoundConversation" :busy="writing" :uncertain="!!pending && !writing" :error="scheduleError(error)" :preview="rule => m.call('schedule_preview_time_v1', { rule })" :targets="(search, cursor) => m.call('schedule_list_targets_v1', { search, limit: 30, ...(cursor ? { cursor } : {}) })" @close="formOpen = false" @save="save" @query="checkReceipt" @retry="retryWrite" />
+      <ScheduledPlanForm v-if="formOpen" ref="form" :plan="editing" :bound-conversation-id="editingBoundConversation" :busy="writing" :uncertain="!!pending && !writing" :error="scheduleError(error)" :preview="editing ? readTimePreview : previewNewPlanTime" :targets="(search, cursor) => m.call('schedule_list_targets_v1', { search, limit: 30, ...(cursor ? { cursor } : {}) })" @close="formOpen = false" @save="save" @query="checkReceipt" @retry="retryWrite" />
       <NModal :show="!!runReview" @after-enter="focusRunCancel" @after-leave="restoreRunFocus" :mask-closable="!runningAction && !runPending" :close-on-esc="!runningAction && !runPending" @update:show="manual.closeReview"><NCard class="scheduled-record-detail scheduled-run-confirmation" content-style="min-height: 0; display: flex; flex-direction: column; overflow: hidden" :title="rerunReview ? '确认重新执行一次' : '确认运行一次'" role="dialog" aria-modal="true" :aria-label="rerunReview ? '确认重新执行一次' : '确认运行一次'">
         <section class="scheduled-run-body" tabindex="0" aria-label="本次运行配置与差异"><template v-if="runReview"><NAlert v-if="rerunReview" type="info" :show-icon="false">使用当前已保存配置创建一次新运行，保留原记录及其结果。</NAlert><template v-if="rerunReview"><section v-for="change in rerunChanges" :key="change.label" class="scheduled-rerun-change"><h3>{{ change.label }}已变化</h3><p class="schedules-meta">原运行配置</p><p class="scheduled-record-body">{{ change.original }}</p><p class="schedules-meta">本次采用的当前配置</p><p class="scheduled-record-body">{{ change.current }}</p></section><p v-if="!rerunChanges.length">当前配置与原运行快照一致，仍会创建新运行。</p></template><h2>{{ runReview.plan.definition.name }}</h2><p v-if="chatModelsEnabled">执行模型：{{ scheduleModelLabel(runReview.plan.definition.model_profile) }}</p><p class="schedules-meta">当前版本 {{ runReview.plan.revision }} · 运行于{{ targetLabels[runReview.plan.definition.target.mode] }}</p><p v-if="runReview.plan.definition.target.mode === 'existing_chat'">目标聊天：{{ manual.targetTitle.value || '已选择的聊天' }}<br>使用该聊天的原目录；权限模式固定为 Ask。</p><p v-else>使用应用为计划管理的独立目录；权限模式固定为 Ask。</p><p class="scheduled-record-body">{{ runReview.plan.definition.content }}</p><p>计划当前：{{ stateLabels[runReview.summary.effective_state] }}。{{ runReview.plan.definition.target.mode === 'new_chat_each_run' ? '本次将创建新聊天。' : '沿当前有效聊天关联执行，不恢复已删除的聊天。' }}</p><p v-if="runIntent?.grant">本次许可截止：{{ timeLabel(runIntent.grant.expires_at) }}</p><p>需要审批时，请进入完整对话处理；关闭详情不会停止已开始的任务。</p></template>
         <NAlert v-if="runError" type="error">{{ executionError(runError) }}</NAlert><p v-if="runPending" role="status">{{ runNotice || '正在提交，请稍候。' }}</p></section>

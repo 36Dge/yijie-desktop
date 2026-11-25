@@ -4,6 +4,9 @@ import type { IpcErrorCode, RecordView, PauseReason, Timing } from "../api/gener
 export const stateLabels: Record<PlanState, string> = { paused: "已暂停", enabled: "已开启", completed: "已完成", deleted: "已删除" };
 export const targetLabels: Record<TargetMode, string> = { dedicated_chat: "专属聊天", new_chat_each_run: "每次新建聊天", existing_chat: "已有聊天" };
 export const frequencyLabels = { once: "仅一次", daily: "每天", weekdays: "工作日", weekly: "每周" };
+export function defaultScheduledTimeRule(): TimeRule {
+  return { frequency: "daily", local_time: "09:00", time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone };
+}
 export const stateOptions = [{ label: "全部状态", value: "all" }, { label: "已开启", value: "enabled" }, { label: "已暂停", value: "paused" }, { label: "已完成", value: "completed" }];
 export function timeLabel(value?: number, zone?: string): string {
   if (value === undefined) return "未知";

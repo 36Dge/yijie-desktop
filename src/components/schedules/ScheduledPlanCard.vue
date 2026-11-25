@@ -38,8 +38,10 @@ const statusText = computed(() => {
         {{ scheduleModelLabel(card.model_profile) }}
       </span>
     </div>
-    <div class="schedule-card__controls"><slot name="controls" /></div>
-    <div class="schedule-card__actions" role="group" aria-label="任务操作"><slot name="actions" /></div>
+    <div class="schedule-card__toolbar" role="group" aria-label="任务操作">
+      <slot name="controls" />
+      <div class="schedule-card__actions"><slot name="actions" /></div>
+    </div>
   </article>
 </template>
 
@@ -49,7 +51,7 @@ const statusText = computed(() => {
   --schedule-dot: var(--yj-color-text-tertiary);
   display: grid;
   grid-template-columns: clamp(8.5rem, 14%, 9rem) minmax(0, 1fr) minmax(13rem, 22%) auto;
-  grid-template-areas: "clock copy meta controls" "clock copy meta actions";
+  grid-template-areas: "clock copy meta toolbar";
   align-items: center;
   column-gap: var(--yj-space-4);
   min-width: 0;
@@ -81,22 +83,23 @@ const statusText = computed(() => {
 .schedule-card__brand { display: inline-flex; flex: none; align-items: center; justify-content: center; }
 .schedule-card__brand.is-kimi { border-radius: var(--yj-radius-xs); background: var(--yj-color-model-kimi-bg); color: var(--yj-color-model-kimi-ink); }
 .schedule-card__brand .yj-icon { color: inherit; }
-.schedule-card__controls, .schedule-card__actions { display: flex; justify-content: flex-end; align-items: center; justify-self: end; }
-.schedule-card__controls { grid-area: controls; align-self: end; gap: var(--yj-space-2); }
-.schedule-card__actions { --action-size: calc(var(--yj-control-height-sm) - var(--yj-space-1)); grid-area: actions; align-self: start; gap: var(--yj-space-1); }
-.schedule-card__controls > :deep(span), .schedule-card__actions > :deep(span) { display: inline-flex; }
+.schedule-card__toolbar { grid-area: toolbar; display: flex; align-items: center; justify-self: end; gap: var(--yj-space-2); }
+.schedule-card__actions { --action-size: calc(var(--yj-control-height-sm) - var(--yj-space-1)); display: flex; align-items: center; }
+.schedule-card__actions::before { content: ""; width: var(--yj-border-width); height: var(--yj-space-4); margin-inline-end: var(--yj-space-2); background: var(--yj-color-border-default); }
+.schedule-card__actions > :deep(span) { display: inline-flex; }
 .schedule-card__actions :deep(.n-button) { width: var(--action-size); height: var(--action-size); border-radius: var(--yj-radius-sm); }
-.schedule-card__actions :deep(.yj-icon) { color: var(--yj-color-text-secondary); }
+.schedule-card__actions :deep(.yj-icon) { color: var(--yj-color-icon-subtle); }
 .schedule-card__actions :deep(.n-button:enabled:is(:hover, :focus-visible, :active) .yj-icon) { color: var(--yj-color-text-primary); }
 .schedule-card__actions :deep(.n-button:disabled .yj-icon) { color: var(--yj-color-text-disabled); }
-@container schedules (max-width: 760px) {
-  .schedule-plan-card { grid-template-columns: 7rem minmax(0, 1fr) auto; grid-template-areas: "clock copy controls" "clock meta actions"; gap: var(--yj-space-1) var(--yj-space-3); }
+/* Root-relative breakpoints follow the desktop's CSS zoom in WebKit. */
+@container schedules (max-width: 47.5rem) {
+  .schedule-plan-card { grid-template-columns: 7rem minmax(0, 1fr) auto; grid-template-areas: "clock copy toolbar" "clock meta toolbar"; gap: var(--yj-space-1) var(--yj-space-3); }
   .schedule-card__meta { display: flex; flex-wrap: wrap; gap: var(--yj-space-1) var(--yj-space-3); }
 }
-@container schedules (max-width: 460px) {
-  .schedule-plan-card { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "copy controls" "clock actions" "meta meta"; gap: var(--yj-space-2); padding: var(--yj-space-3); }
-  .schedule-card__schedule { flex-direction: row; justify-self: start; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: var(--yj-space-2); padding: var(--yj-space-1) var(--yj-space-2); }
+@container schedules (max-width: 28.75rem) {
+  .schedule-plan-card { grid-template-columns: minmax(0, 7rem) minmax(0, 1fr); grid-template-areas: "copy copy" "clock meta" "toolbar toolbar"; gap: var(--yj-space-2) var(--yj-space-3); padding: var(--yj-space-3); }
+  .schedule-card__schedule { flex-direction: row; justify-self: start; align-self: center; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: var(--yj-space-2); padding: var(--yj-space-1) var(--yj-space-2); }
   .schedule-card__clock { font-size: var(--yj-font-size-card-title); line-height: var(--yj-line-height-card-title); }
-  .schedule-card__controls { align-self: start; }
+  .schedule-card__toolbar { justify-self: stretch; justify-content: flex-end; padding-top: var(--yj-space-2); border-top: var(--yj-border-width) solid var(--yj-color-border-subtle); }
 }
 </style>
