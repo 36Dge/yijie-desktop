@@ -127,7 +127,7 @@ const sortOptions = [
         <template #description><template v-if="workflowLocalUiEnabled">集中管理和编排本地文本流程，点击创建工作流开始。</template><template v-else>集中查看常用自动化流程与推荐方案，点击创建工作流按钮开始。</template></template>
       </YjPageHeader>
 
-      <YjSection title="我的工作流" icon="workflow">
+      <YjSection title="我的工作流">
         <template #actions>
           <button ref="createTrigger" type="button" class="workflow-page__create-card workflow-showcase-control yj-control"
             :data-restored-focus="createFocusReturned || undefined" :aria-describedby="showCreateGuide ? 'workflow-guide-description' : undefined"
@@ -173,7 +173,7 @@ const sortOptions = [
         <button v-if="workflowLocalUiEnabled && nextCursor" type="button" class="workflow-showcase-control yj-control" :disabled="loading" @click="state.refresh(true)">加载更多工作流</button>
       </YjSection>
 
-      <YjSection :title="workflowLocalUiEnabled ? '推荐工作流 · 方案示意' : '推荐工作流'" icon="skillContentStrategy">
+      <YjSection :title="workflowLocalUiEnabled ? '推荐工作流 · 方案示意' : '推荐工作流'">
         <template #actions>
           <button type="button" class="workflow-page__view-all workflow-showcase-control yj-control"
             :aria-pressed="viewAllSelected" @click="viewAllSelected = !viewAllSelected">

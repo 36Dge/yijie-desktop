@@ -60,6 +60,7 @@ async function refresh(): Promise<void> {
         v-model:value="queries[tab]"
         class="extensions-page__search"
         clearable
+        :theme-overrides="{ border: 'var(--yj-border-width) solid var(--yj-color-border-subtle)' }"
         :placeholder="tab === 'skills' ? '搜索技能名称、描述或分类' : '搜索专家、平台或擅长领域'"
         :input-props="{ 'aria-label': tab === 'skills' ? '搜索技能' : '搜索专家' }"
       >

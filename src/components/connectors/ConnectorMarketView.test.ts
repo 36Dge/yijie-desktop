@@ -53,7 +53,17 @@ it("keeps a single icon-only header refresh for empty and unavailable catalogs a
   expect(refresh.get("svg").attributes("aria-hidden")).toBe("true");
   expect(refresh.attributes("data-yj-tooltip")).toBe("刷新数据");
   expect(refresh.find(".n-button__border").exists()).toBe(false);
-  expect(header.text()).toBe("返回对话");
+  expect(header.findAll("button").map(button => button.attributes("aria-label") ?? button.text()))
+    .toEqual(["返回对话", "刷新数据", "添加连接器"]);
+  const addHint = header.get('[data-yj-tooltip="即将支持"]');
+  const add = addHint.get<HTMLButtonElement>("button");
+  expect(add.element.disabled).toBe(true);
+  await addHint.trigger("mouseenter");
+  await flushPromises();
+  expect(document.getElementById(addHint.attributes("aria-describedby") ?? "")?.textContent).toBe("即将支持");
+  add.element.click();
+  expect(wrapper.emitted("action")).toBeUndefined();
+  await addHint.trigger("mouseleave");
   expect(wrapper.findAll("button").some(button => button.text() === "刷新")).toBe(false);
   await wrapper.setProps({ model: { ...model, phase: "unavailable" } });
   expect(wrapper.findAll("button").some(button => button.text() === "重新读取")).toBe(false);

@@ -31,6 +31,7 @@ describe("WorkflowPage", () => {
       "我的工作流",
       "推荐工作流",
     ]);
+    expect(wrapper.findAll(".yj-section__heading svg")).toHaveLength(0);
     expect(wrapper.get(".yj-page-header__description").text()).toBe("集中查看常用自动化流程与推荐方案，点击创建工作流按钮开始。");
     expect(wrapper.findAll('[aria-label="我的工作流分类"] li').map((item) => item.text().trim()))
       .toEqual(["全部", "获客引流", "内容创作", "图片处理", "数据分析", "运营管理", "新建分类"]);

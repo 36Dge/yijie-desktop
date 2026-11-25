@@ -34,7 +34,7 @@ defineEmits<{
 
 <style scoped>
 .connector-installed { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--yj-space-3); list-style: none; margin: 0; padding: 0; }
-.connector-installed__row { display: flex; min-width: 0; align-items: center; gap: var(--yj-space-3); padding: var(--yj-space-4); border: var(--yj-border-width) solid var(--yj-color-border-default); border-radius: var(--yj-radius-lg); background: var(--yj-color-bg-card); transition: border-color var(--yj-motion-fast) var(--yj-ease-standard); }
+.connector-installed__row { display: flex; min-width: 0; align-items: center; gap: var(--yj-space-3); padding: var(--yj-space-4); border: var(--yj-border-width) solid var(--yj-color-border-subtle); border-radius: var(--yj-radius-lg); background: var(--yj-color-bg-card); transition: border-color var(--yj-motion-fast) var(--yj-ease-standard); }
 .connector-installed__row:not([aria-busy="true"]):is(:hover, :focus-within) { border-color: var(--yj-color-brand-primary); }
 .connector-installed__details { display: flex; flex: 1; align-items: center; gap: var(--yj-space-3); min-width: 0; padding: 0; border: 0; border-radius: var(--yj-radius-md); color: var(--yj-color-text-primary); background: transparent; text-align: left; font: inherit; cursor: pointer; }
 .connector-installed__details:focus-visible, .connector-installed__remove:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-space-1); }

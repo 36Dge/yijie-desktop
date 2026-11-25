@@ -32,7 +32,7 @@ defineEmits<{ open: [id: string] }>();
 </template>
 
 <style scoped>
-.connector-card { display: flex; align-items: center; gap: var(--yj-space-3); width: 100%; height: 100%; min-width: 0; padding: var(--yj-space-4); border: var(--yj-border-width) solid var(--yj-color-border-default); border-radius: var(--yj-radius-lg); background: var(--yj-color-bg-card); color: var(--yj-color-text-primary); text-align: left; font: inherit; cursor: pointer; transition: border-color var(--yj-motion-fast) var(--yj-ease-standard); }
+.connector-card { display: flex; align-items: center; gap: var(--yj-space-3); width: 100%; height: 100%; min-width: 0; padding: var(--yj-space-4); border: var(--yj-border-width) solid var(--yj-color-border-subtle); border-radius: var(--yj-radius-lg); background: var(--yj-color-bg-card); color: var(--yj-color-text-primary); text-align: left; font: inherit; cursor: pointer; transition: border-color var(--yj-motion-fast) var(--yj-ease-standard); }
 .connector-card:not([aria-busy="true"]):is(:hover, :focus-visible) { border-color: var(--yj-color-brand-primary); }
 .connector-card:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-space-1); }
 .connector-card__copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: var(--yj-space-1); }
