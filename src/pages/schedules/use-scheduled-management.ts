@@ -144,6 +144,7 @@ export function useScheduledManagement(client = createScheduledTaskNativeClient(
   watch(context, () => { epoch++; liveRequested = false; cards.value = []; records.value = []; cursor.value = undefined; capabilities.value = null; void refresh(); }, { immediate: true });
   watch([tab, search, state, order, planFilter], () => {
     epoch++; cursor.value = undefined; clearTimeout(timer);
+    loading.value = context.value !== null;
     timer = setTimeout(() => { void refresh(); }, 220);
   });
   onScopeDispose(() => { disposed = true; stopLive(); epoch++; clearTimeout(timer); pending.value = null; });

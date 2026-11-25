@@ -1,5 +1,6 @@
 import type { Component } from "vue";
 import { svgIcon } from "./svg-icon";
+import { ScheduleDelete, ScheduleHistory } from "./schedule-action-icons";
 import taskRunning from "./custom/task-running.svg?no-inline";
 import { AnswerCopy, AnswerThumbsDown, AnswerThumbsUp, ThumbsDownFilled, ThumbsUpFilled } from "./answer-feedback-icons";
 import { ModelDeepSeek, ModelGlm, ModelKimi, ModelMiniMax } from "./model-icons";
@@ -224,6 +225,9 @@ export const iconRegistry = {
   rerun: RotateCcw,
   scanSearch: ScanSearch,
   scheduledTask: CalendarDays,
+  scheduleHistory: ScheduleHistory,
+  scheduleRun: Play,
+  scheduleDelete: ScheduleDelete,
   run: Play,
   send: ArrowUp,
   settings: Settings,
@@ -307,6 +311,10 @@ export const iconRegistry = {
 
 export type YjIconName = keyof typeof iconRegistry;
 
+export const navigationIconStrokeWidth = 1.5;
+// Both sets use a 24-unit viewBox. Keep the visible stroke equal at 16px and 18px.
+const scheduleActionStrokeWidth = navigationIconStrokeWidth * 18 / 16;
+
 // Shared navigation/resource symbols match the composer's fine-line controls
 // everywhere they appear. Explicit component overrides still take precedence.
 export const iconStrokeWidths: Partial<Record<YjIconName, number>> = {
@@ -315,7 +323,10 @@ export const iconStrokeWidths: Partial<Record<YjIconName, number>> = {
   newTask: 1.5,
   workspace: 1.5,
   workflow: 1.5,
-  scheduledTask: 1.5,
+  scheduledTask: navigationIconStrokeWidth,
+  scheduleHistory: scheduleActionStrokeWidth,
+  scheduleRun: scheduleActionStrokeWidth,
+  scheduleDelete: scheduleActionStrokeWidth,
   skillOperations: 1.5,
   toolGroup: 1.5,
   connector: 1.5,

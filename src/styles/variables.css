@@ -256,12 +256,13 @@
   --yj-layout-workflow-leave-width: 400px;
   --yj-layout-schedule-form-width: 520px;
   --yj-layout-schedule-record-width: 520px;
-  --yj-layout-schedule-record-skeleton-height: 176px;
+  --yj-layout-schedule-plan-skeleton-height: 84px;
+  --yj-layout-schedule-record-row-height: 72px;
   --yj-layout-schedule-search-width: 240px;
   --yj-layout-schedule-state-width: 112px;
   --yj-layout-schedule-sort-width: 112px;
   --yj-layout-schedule-plan-filter-width: var(--yj-layout-schedule-state-width);
-  --yj-layout-schedule-empty-min-height: 360px;
+  --yj-layout-schedule-empty-min-height: 256px;
   --yj-z-workflow-card-action: 1;
   --yj-z-onboarding: 1900;
   --yj-z-popover: 1100;

@@ -55,7 +55,7 @@
 - 表单最大宽度：720–960px。
 - 专家详情弹窗最大宽度：600px（`--yj-layout-expert-detail-width`），最小高度700px（`--yj-layout-expert-detail-min-height`）；最小高度也受视口限制，上下至少留32px，居中显示，超高时固定头部、正文内部滚动。内部标准边距24px，窄窗口减为20px。
 - 定时任务创建、编辑及草案确认弹窗：520px（`--yj-layout-schedule-form-width`），竖向分组；标题和底部操作固定，内容超高时在弹窗内滚动，按实际缩放后的可用视口限制宽高。
-- 定时任务页签与筛选工具栏同排：搜索、状态、排序的标准宽度为 240 / 112 / 112px（`--yj-layout-schedule-search-width` / `--yj-layout-schedule-state-width` / `--yj-layout-schedule-sort-width`）；状态与排序组件等宽，排序显示“最新优先”或“最早优先”。执行记录页的任务筛选与状态筛选同为 112px（`--yj-layout-schedule-plan-filter-width` 引用状态宽度 token），占位文字为“全部任务”，下拉仅显示任务标题；下拉菜单可随标题内容展开，宽度不超过可用视口。可用宽度不足时换行。列表空状态最小高度为 360px（`--yj-layout-schedule-empty-min-height`）。
+- 定时任务页签与筛选工具栏同排：搜索、状态、排序的标准宽度为 240 / 112 / 112px（`--yj-layout-schedule-search-width` / `--yj-layout-schedule-state-width` / `--yj-layout-schedule-sort-width`）；状态与排序组件等宽，排序显示“最新优先”或“最早优先”。执行记录页的任务筛选与状态筛选同为 112px（`--yj-layout-schedule-plan-filter-width` 引用状态宽度 token），占位文字为“全部任务”，下拉仅显示任务标题；下拉菜单可随标题内容展开，宽度不超过可用视口。可用宽度不足时换行。列表空状态最小高度为 256px（`--yj-layout-schedule-empty-min-height`）。
 - 新建任务内容列最大宽度：760px（`--yj-layout-chat-entry-max`）；活跃会话正文与输入区同为 760px，在 `.chat-workspace` 内复用该 token 覆盖内容列和输入框宽度，保持居中与等宽。
 - 2026-11-02 复核：正式对话的760px局部覆盖优先于全局880px回退值；加宽导航后继续保留760px，不再实施此前基于全局回退值提出的800px方案。窗口尺寸见[窗口与页面密度基线](../01-foundations/06-window-density-baseline.md)。折叠导航为72px，180%/200%下展开导航适配为196px。
 - 180%/200%下主导航区允许独立纵向滚动，普通导航项不压缩，展开的任务区域至少128px，底部设置固定可达；避免最小窗口中后面的导航项被裁掉。普通缩放仍沿用原任务树独立滚动。
@@ -88,7 +88,8 @@
 
 - 定时任务执行记录详情：520px（`--yj-layout-schedule-record-width`），五项标签/值布局，底部操作右对齐；窗口不足时保留 16px 两侧安全间距，长内容在弹窗内滚动。
 
-- 定时任务记录卡片：双栏、16px 间距、20px 内边距，容器不足 720px 时单栏。标题预留两行 24px 行高，普通卡片及加载骨架约 176px 高（`--yj-layout-schedule-record-skeleton-height`），特殊说明允许自然增高；底部允许换行，不能压缩图标操作。
+- 定时任务计划卡纵向排列，卡片间距 8px，桌面宽度下按时刻、任务、状态和操作对齐。卡片高度随内容自然调整，标准加载骨架为 84px。内容区在 760px 和 460px 两档宽度重排。
+- 执行记录使用 72px 标准行高（`--yj-layout-schedule-record-row-height`），长名称或状态说明允许行高自然增加。记录容器宽度不超过 660px 时，时间、状态和操作在行内重新排列。
 
 - 任务和项目的右键操作菜单统一宽 175px（`--yj-layout-chat-context-menu-width`，按用户要求从 200px 缩小 25px），受可用视口约束，不再按短文案收窄。
 - 工作流卡片「编辑／删除」操作菜单统一宽 160px（`--yj-layout-workflow-menu-width`），受可用视口约束，不随两字文案收窄；右侧对齐「更多」入口。

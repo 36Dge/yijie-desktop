@@ -18,9 +18,20 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: native.invoke }));
 const disposers: (() => void)[] = [];
 afterEach(() => { disposers.splice(0).forEach(f => f()); document.body.innerHTML = ""; vi.restoreAllMocks(); });
 
-async function page(failToggle = false, manualReady = false, failRun: boolean | "operation_unknown" = false) {
-  const plan: PlanView = { plan_id: crypto.randomUUID(), revision: 1, schedule_epoch: 1, definition: { name: "午夜闹铃", content: "整理每日摘要", rule: { frequency: "daily", time_zone: "Asia/Shanghai", local_time: "23:00" }, target: { mode: "dedicated_chat" } }, state: "paused", target_state: "unbound", effective_from: 1790000000, rule_version: 1, tzdb_version: "2026b" };
-  const summary: PlanSummary = { plan_id: plan.plan_id, name: plan.definition.name, revision: 1, raw_state: "paused", effective_state: "paused", target_mode: "dedicated_chat", target_state: "unbound" };
+interface PageOptions {
+  emptyLists?: boolean;
+  failToggle?: boolean;
+  manualReady?: boolean;
+  failRun?: boolean | "operation_unknown";
+  state?: PlanView["state"];
+  targetState?: PlanView["target_state"];
+  rule?: PlanView["definition"]["rule"];
+}
+
+async function page({ emptyLists = false, failToggle = false, manualReady = false, failRun = false, state = "paused", targetState = "unbound",
+  rule = { frequency: "daily", time_zone: "Asia/Shanghai", local_time: "23:00" } }: PageOptions = {}) {
+  const plan: PlanView = { plan_id: crypto.randomUUID(), revision: 1, schedule_epoch: 1, definition: { name: "午夜闹铃", content: "整理每日摘要", rule, target: { mode: "dedicated_chat" } }, state, target_state: targetState, effective_from: 1790000000, rule_version: 1, tzdb_version: "2026b" };
+  const summary: PlanSummary = { plan_id: plan.plan_id, name: plan.definition.name, revision: 1, raw_state: state, effective_state: state, target_mode: plan.definition.target.mode, target_state: targetState };
   const grant: GrantView = { grant_id: crypto.randomUUID(), plan_id: plan.plan_id, plan_revision: 1, authorization_revision: 1, definition_digest: "a".repeat(64), workspace: { source: "managed_schedule", resource_id: plan.plan_id }, max_runs: 1, occupied_runs: 0, expires_at: Math.floor(Date.now() / 1000) + 600, state: "active" };
   const run: RunView = { run_id: crypto.randomUUID(), request_id: crypto.randomUUID(), plan_id: plan.plan_id, plan_revision: 1, schedule_epoch: 1, grant_id: grant.grant_id, operation_id: crypto.randomUUID(), trigger: "manual", workspace: grant.workspace, permission_mode: "ask", snapshot_digest: "b".repeat(64), delivery_state: "reserved", native_outcome: "unobserved", needs_attention: false };
   const detail: RecordDetail = { record: { kind: "run", key: { kind: "run", run_id: run.run_id }, plan: summary, run, conversation: { status: "unavailable" }, timing: { execution_time: "unknown", duration: "unknown", source: "no_execution_clock" }, attention: "none", business_result: "not_evaluated" }, configuration: { name: plan.definition.name, content: plan.definition.content, rule: plan.definition.rule, target_mode: plan.definition.target.mode } };
@@ -32,8 +43,8 @@ async function page(failToggle = false, manualReady = false, failRun: boolean | 
     let data: unknown;
     switch (command) {
       case "schedule_operation_capabilities_v1": data = Object.fromEntries(["read", "save", "manual", "automatic", "draft", "single_run"].map(k => [k, { available: k === "read" || k === "save" || (k === "single_run" && manualReady), reason: k === "read" || k === "save" || (k === "single_run" && manualReady) ? "ready" : "candidate_disabled" }])); break;
-      case "schedule_list_plan_cards_v1": data = { items: plan.state === "deleted" ? [] : [{ summary, content_preview: plan.definition.content, rule: plan.definition.rule, created_at: plan.effective_from }] }; break;
-      case "schedule_list_record_rows_v1": data = { items: [{ record: detail.record, name: plan.definition.name, content_preview: plan.definition.content, source: detail.record.kind === "run" ? "run_snapshot" : "current_plan_reference" }] }; break;
+      case "schedule_list_plan_cards_v1": data = { items: emptyLists || plan.state === "deleted" ? [] : [{ summary, content_preview: plan.definition.content, rule: plan.definition.rule, created_at: plan.effective_from }] }; break;
+      case "schedule_list_record_rows_v1": data = { items: emptyLists ? [] : [{ record: detail.record, name: plan.definition.name, content_preview: plan.definition.content, source: detail.record.kind === "run" ? "run_snapshot" : "current_plan_reference" }] }; break;
       case "schedule_list_plans_v1": data = { items: [summary] }; break;
       case "schedule_preview_rerun_v1": data = { confirmation: { original_run_id: run.run_id, original_snapshot_digest: run.snapshot_digest, plan_id: plan.plan_id, revision: plan.revision, definition_digest: "c".repeat(64) }, original: plan.definition, current: plan.definition }; break;
       case "schedule_confirm_single_run_v1": data = { grant, kind: "manual" }; break;
@@ -43,6 +54,7 @@ async function page(failToggle = false, manualReady = false, failRun: boolean | 
         data = run; break;
       case "schedule_get_record_v1": data = detail; break;
       case "schedule_get_plan_v1": data = { plan, summary }; break;
+      case "schedule_preview_time_v1": data = { skipped_slots: [], candidates_examined: 1, rule_version: 1, tzdb_version: "2026b" }; break;
       case "schedule_enable_plan_v1":
       case "schedule_pause_plan_v1":
         if (failToggle) throw { schemaVersion: 1, requestId: request.requestId, code: "revision_conflict" };
@@ -70,6 +82,37 @@ async function page(failToggle = false, manualReady = false, failRun: boolean | 
 function dialogButton(label: string) {
   return Array.from(document.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')).find(b => b.textContent === label)!;
 }
+
+it("offers the first plan form from the empty list and waits for results when switching to empty history", async () => {
+  const { root, calls } = await page({ emptyLists: true });
+  const empty = () => root.get(".schedule-empty");
+  expect(empty().get("h2").text()).toBe("还没有定时任务");
+  await empty().get("button").trigger("click");
+  await flushPromises();
+  const editor = new DOMWrapper(document.body).get('[role="dialog"][aria-label="新建定时任务"]');
+  await editor.findAll("button").find(button => button.text() === "取消")!.trigger("click");
+
+  await root.get("#scheduled-panel-tab-records").trigger("click");
+  expect(root.get("#scheduled-panel").attributes("aria-busy")).toBe("true");
+  expect(root.find(".schedule-empty").exists()).toBe(false);
+  await vi.waitFor(() => expect(empty().get("h2").text()).toBe("还没有执行记录"));
+  expect(empty().get("button").text()).toBe("查看定时任务");
+  await empty().get("button").trigger("click");
+  await vi.waitFor(() => expect(empty().get("h2").text()).toBe("还没有定时任务"));
+  expect(calls.some(call => call.command === "schedule_save_active_plan_v1" || call.command === "schedule_manual_run_v1")).toBe(false);
+});
+
+it("shows a clear-filter action for an empty search and restores the first-use action after clearing", async () => {
+  const { root } = await page({ emptyLists: true });
+  const search = root.get<HTMLInputElement>('input[aria-label="搜索任务名称或内容"]');
+  await search.setValue("明日巡检");
+  await vi.waitFor(() => expect(root.get(".schedule-empty h2").text()).toBe("没有匹配的记录"));
+  const clear = root.get(".schedule-empty button");
+  expect(clear.text()).toBe("清空筛选");
+  await clear.trigger("click");
+  await vi.waitFor(() => expect(root.get(".schedule-empty button").text()).toBe("创建第一个任务"));
+  expect(search.element.value).toBe("");
+});
 
 it("shows the task name and retained-history explanation, and cancels without deleting", async () => {
   const { root, calls } = await page();
@@ -117,16 +160,83 @@ it("switches on and off directly and announces both successful changes", async (
 });
 
 it("keeps the switch off and reports the error if enabling fails", async () => {
-  const { root } = await page(true);
+  const { root } = await page({ failToggle: true });
   await root.get('[role="switch"]').trigger("click"); await flushPromises();
   expect(root.get('[role="switch"]').attributes("aria-checked")).toBe("false");
   expect(document.body.textContent).not.toContain("定时任务已开启");
   expect(root.find('[role="alert"]').exists()).toBe(true);
 });
 
+it("renders history, run and delete as matching compact outline icons", async () => {
+  const { root } = await page({ manualReady: true });
+  const actions = root.get('[role="group"][aria-label="任务操作"]');
+  for (const label of ["查看历史记录", "立即执行", "删除任务"]) {
+    const svg = actions.get(`button[aria-label="${label}"] svg`);
+    expect(svg.attributes()).toMatchObject({
+      width: "16", height: "16", viewBox: "0 0 24 24",
+      fill: "none", stroke: "currentColor", "stroke-width": "1.6875",
+      "stroke-linecap": "round", "stroke-linejoin": "round",
+    });
+  }
+  expect(actions.find('button[aria-label="立即执行"] circle').exists()).toBe(false);
+});
+
+it("opens the editor only from the card's edit button", async () => {
+  const { root, calls } = await page();
+  const card = root.get(".schedule-plan-card");
+  await card.trigger("click");
+  await card.get("h2").trigger("click");
+  await card.get(".schedule-card__content").trigger("click");
+  await flushPromises();
+  expect(calls.some(call => call.command === "schedule_get_plan_v1")).toBe(false);
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+
+  await card.get('button[aria-label="编辑 午夜闹铃"]').trigger("click");
+  await flushPromises();
+  const editor = new DOMWrapper(document.body).get('[role="dialog"][aria-label="编辑定时任务"]');
+  expect(editor.get<HTMLInputElement>('input[aria-label="计划名称"]').element.value).toBe("午夜闹铃");
+  expect(calls.filter(call => call.command === "schedule_get_plan_v1")).toHaveLength(1);
+});
+
+it("explains a finished one-time schedule without submitting an enable request", async () => {
+  const { root, calls } = await page({ state: "completed", rule: { frequency: "once", local_date: "2026-11-25", local_time: "13:05", time_zone: "Asia/Shanghai" } });
+  const toggle = root.get('[role="switch"]');
+  await toggle.trigger("click");
+  const notice = new DOMWrapper(document.body).get('[role="dialog"][aria-label="一次性任务已结束"]');
+  expect(notice.text()).toContain("原定的执行时间已过");
+  expect(notice.text()).toContain("编辑时间");
+  expect(toggle.attributes("aria-checked")).toBe("false");
+  await notice.findAll("button").find(button => button.text() === "关闭")!.trigger("click");
+  await flushPromises();
+  expect(notice.isVisible()).toBe(false);
+  expect(root.find('[role="alert"]').exists()).toBe(false);
+  expect(calls.some(call => call.command === "schedule_enable_plan_v1" || call.command === "schedule_get_plan_v1")).toBe(false);
+});
+
+it("allows a pending one-time schedule to be enabled directly", async () => {
+  const { root, calls } = await page({ rule: { frequency: "once", local_date: "2099-01-01", local_time: "13:05", time_zone: "Asia/Shanghai" } });
+  await root.get('[role="switch"]').trigger("click");
+  await flushPromises();
+  expect(calls.filter(call => call.command === "schedule_enable_plan_v1")).toHaveLength(1);
+  expect(document.querySelector('[aria-label="一次性任务已结束"]')).toBeNull();
+});
+
+it("shows why a missing dedicated chat disables the switch and keeps editing available", async () => {
+  const { root, calls } = await page({ targetState: "missing" });
+  const card = root.get(".schedule-plan-card");
+  const toggle = card.get('[role="switch"]');
+  expect(toggle.attributes("aria-disabled")).toBe("true");
+  const status = card.get(`[id="${toggle.attributes("aria-describedby")}"]`);
+  expect(status.text()).toContain("已关闭");
+  expect(status.text()).toContain("专属聊天已删除");
+  await toggle.trigger("click");
+  expect(calls.some(call => call.command === "schedule_enable_plan_v1")).toBe(false);
+  expect(card.get('button[aria-label="编辑 午夜闹铃"]').attributes("disabled")).toBeUndefined();
+});
+
 
 it("starts immediately without a dialog and shows a closable toast after native acceptance", async () => {
-  const { root, calls, finishRun } = await page(false, true);
+  const { root, calls, finishRun } = await page({ manualReady: true });
   await root.get('[aria-label="立即执行"]').trigger("click"); await flushPromises();
   expect(document.querySelector('[aria-label="确认运行一次"]')).toBeNull();
   expect(document.body.textContent).not.toContain("任务已开始执行");
@@ -141,7 +251,7 @@ it("starts immediately without a dialog and shows a closable toast after native 
 });
 
 it("reports a rejected immediate run without a success toast or confirmation dialog", async () => {
-  const { root, calls, finishRun } = await page(false, true, true);
+  const { root, calls, finishRun } = await page({ manualReady: true, failRun: true });
   await root.get('[aria-label="立即执行"]').trigger("click"); await flushPromises();
   finishRun(); await flushPromises();
   expect(document.body.textContent).not.toContain("任务已开始执行");
@@ -159,7 +269,7 @@ it("reports a rejected immediate run without a success toast or confirmation dia
 });
 
 it("removes stale rejection feedback after deleting the last task", async () => {
-  const { root, finishRun, finishDelete } = await page(false, true, true);
+  const { root, finishRun, finishDelete } = await page({ manualReady: true, failRun: true });
   await root.get('[aria-label="立即执行"]').trigger("click"); await flushPromises();
   finishRun(); await flushPromises();
   expect(root.find('[aria-label="执行操作提示"]').exists()).toBe(true);
@@ -171,7 +281,7 @@ it("removes stale rejection feedback after deleting the last task", async () => 
 });
 
 it("allows dismissing a resolved error without changing tasks or submitting again", async () => {
-  const { root, calls, finishRun } = await page(false, true, true);
+  const { root, calls, finishRun } = await page({ manualReady: true, failRun: true });
   await root.get('[aria-label="立即执行"]').trigger("click"); await flushPromises();
   finishRun(); await flushPromises();
   await root.get('[aria-label="执行操作提示"] .n-alert__close').trigger("click"); await flushPromises();
@@ -181,7 +291,7 @@ it("allows dismissing a resolved error without changing tasks or submitting agai
 });
 
 it("keeps uncertainty in one non-dismissible recovery alert across list refreshes", async () => {
-  const { root, calls, finishRun } = await page(false, true, "operation_unknown");
+  const { root, calls, finishRun } = await page({ manualReady: true, failRun: "operation_unknown" });
   await root.get('[aria-label="立即执行"]').trigger("click"); await flushPromises();
   finishRun(); await flushPromises();
   const alert = root.get('[aria-label="本次运行待查证"]');
@@ -189,26 +299,28 @@ it("keeps uncertainty in one non-dismissible recovery alert across list refreshe
   expect(alert.text()).toContain("查证本次原请求");
   expect(alert.find('.n-alert__close').exists()).toBe(false);
   await root.get('#scheduled-panel-tab-records').trigger("click");
-  await vi.waitFor(() => expect(root.find('.scheduled-records__card').exists()).toBe(true));
+  await vi.waitFor(() => expect(root.find('.scheduled-records__row').exists()).toBe(true));
   expect(root.find('[aria-label="本次运行待查证"]').exists()).toBe(true);
   expect(calls.filter(c => c.command === "schedule_manual_run_v1")).toHaveLength(1);
 });
 
 
-it("opens a compact record dialog from the record card or its title without a view-record action", async () => {
-  const { root, detail, run } = await page(false, true);
+it("opens a compact record dialog from the record row or its title without a view-record action", async () => {
+  const { root, detail, run } = await page({ manualReady: true });
   run.delivery_state = "terminal"; run.native_outcome = "completed";
   detail.record.timing = { execution_time: "known", duration: "known", source: "runtime_read", started_at: 1790151297, duration_ms: 2505, time_zone: "Asia/Shanghai" };
   await root.get('#scheduled-panel-tab-records').trigger("click");
-  await vi.waitFor(() => expect(root.find('.scheduled-records__card').exists()).toBe(true));
+  await vi.waitFor(() => expect(root.find('.scheduled-records__row').exists()).toBe(true));
   expect(root.findAll('button').some(button => button.text() === "查看记录")).toBe(false);
-  const list = root.get('ul[aria-label="执行记录"]');
-  expect(list.text()).toContain("2026-09-23 16:14"); expect(list.text()).toContain("3 秒");
+  const list = root.get('table[aria-label="执行记录"]');
+  expect(list.findAll('thead th').map(header => header.text())).toEqual(["执行时间", "任务名称", "执行状态", "耗时", "操作"]);
+  expect(list.get('.scheduled-records__date').text()).toBe("2026-09-23");
+  expect(list.get('.scheduled-records__clock').text()).toBe("16:14");
   expect(list.get('.scheduled-records__status').text()).toBe("已结束");
   expect(list.get('.scheduled-records__status').attributes("data-yj-tooltip")).toBeUndefined();
   expect(list.get('.scheduled-records__duration').text()).toBe("耗时 3 秒");
   for (const text of ["业务结果尚未评估", "聊天关联", "运行时快照", "计划当前", "整理每日摘要", "GMT+"]) expect(list.text()).not.toContain(text);
-  await root.get('.scheduled-records__card').trigger("click"); await flushPromises();
+  await root.get('.scheduled-records__row').trigger("click"); await flushPromises();
   const modal = new DOMWrapper(document.querySelector('[aria-label="执行记录详情"]')!);
   expect(modal.findAll('dt').map(label => label.text())).toEqual(["任务名称", "执行状态", "触发方式", "执行时间", "执行耗时"]);
   expect(modal.text()).toContain("午夜闹铃"); expect(modal.text()).toContain("手动触发");
@@ -217,15 +329,15 @@ it("opens a compact record dialog from the record card or its title without a vi
   expect(modal.find('[data-yj-tooltip*="Asia/Shanghai"]').exists()).toBe(false);
   expect(modal.findAll('button').find(button => button.text() === "查看完整对话")?.attributes("disabled")).toBeDefined();
   await modal.get('.n-card-header__close').trigger("click"); await flushPromises();
-  await root.get('.scheduled-records__card .scheduled-records__title').trigger("click"); await flushPromises();
+  await root.get('.scheduled-records__row .scheduled-records__title').trigger("click"); await flushPromises();
   expect(new DOMWrapper(document.querySelector('[aria-label="执行记录详情"]')!).isVisible()).toBe(true);
 });
 
 it("keeps row actions separate from opening record details", async () => {
-  const { root, calls } = await page(false, true);
+  const { root, calls } = await page({ manualReady: true });
   await root.get('#scheduled-panel-tab-records').trigger("click");
-  await vi.waitFor(() => expect(root.find('.scheduled-records__card').exists()).toBe(true));
-  await root.findAll('.scheduled-records__card button').find(button => button.attributes("aria-label") === "重新执行")!.trigger("click"); await flushPromises();
+  await vi.waitFor(() => expect(root.find('.scheduled-records__row').exists()).toBe(true));
+  await root.findAll('.scheduled-records__row button').find(button => button.attributes("aria-label") === "重新执行")!.trigger("click"); await flushPromises();
   expect(document.querySelector('[aria-label="执行记录详情"]')).toBeNull();
   expect(document.querySelector('[aria-label="确认重新执行一次"]')).not.toBeNull();
   expect(calls.some(call => call.command === "schedule_get_record_v1")).toBe(false);
@@ -233,17 +345,17 @@ it("keeps row actions separate from opening record details", async () => {
 
 
 it("shows a skipped occurrence without inventing execution timing or offering unavailable actions", async () => {
-  const { root, detail } = await page(false, true);
+  const { root, detail } = await page({ manualReady: true });
   const key = { kind: "occurrence" as const, plan_id: detail.record.plan.plan_id, schedule_epoch: 1, logical_slot: "2026-09-25T09:00" };
   detail.record = { kind: "occurrence", key, plan: detail.record.plan, occurrence: { key, scheduled_at: 1790298000, disposition: "skipped_paused" }, timing: { execution_time: "not_started", duration: "not_started", source: "no_execution_clock" } };
   delete detail.configuration;
   await root.get('#scheduled-panel-tab-records').trigger("click");
-  await vi.waitFor(() => expect(root.find('.scheduled-records__card').exists()).toBe(true));
-  expect(root.get('ul[aria-label="执行记录"]').text()).toContain("暂停跳过");
-  expect(root.get('ul[aria-label="执行记录"]').text()).toContain("本次未执行");
-  expect(root.get('ul[aria-label="执行记录"]').text()).not.toContain("未开始");
+  await vi.waitFor(() => expect(root.find('.scheduled-records__row').exists()).toBe(true));
+  expect(root.get('table[aria-label="执行记录"]').text()).toContain("暂停跳过");
+  expect(root.get('table[aria-label="执行记录"]').text()).toContain("本次未执行");
+  expect(root.get('table[aria-label="执行记录"]').text()).not.toContain("未开始");
   expect(root.findAll('.scheduled-records__actions button')).toHaveLength(0);
-  await root.get('.scheduled-records__card .scheduled-records__title').trigger("click"); await flushPromises();
+  await root.get('.scheduled-records__row .scheduled-records__title').trigger("click"); await flushPromises();
   const modal = new DOMWrapper(document.querySelector('[aria-label="执行记录详情"]')!);
   expect(modal.text()).toContain("暂停跳过"); expect(modal.text()).toContain("定时计划");
   expect(modal.findAll('dd').map(value => value.text()).filter(value => value === "未开始")).toHaveLength(2);
@@ -252,11 +364,11 @@ it("shows a skipped occurrence without inventing execution timing or offering un
 
 
 it.each(["failed", "uncertain"] as const)("keeps %s status visible in the compact record list", async status => {
-  const { root, run } = await page(false, true);
+  const { root, run } = await page({ manualReady: true });
   run.delivery_state = status === "failed" ? "terminal" : "uncertain";
   run.native_outcome = status === "failed" ? "failed" : "unobserved";
   await root.get('#scheduled-panel-tab-records').trigger("click");
-  await vi.waitFor(() => expect(root.find('.scheduled-records__card').exists()).toBe(true));
+  await vi.waitFor(() => expect(root.find('.scheduled-records__row').exists()).toBe(true));
   expect(root.get('.scheduled-records__status').text()).toBe(status === "failed" ? "执行失败" : "结果待查证");
-  expect(root.get('.scheduled-records__card').attributes('data-tone')).toBe(status === "failed" ? "error" : "warning");
+  expect(root.get('.scheduled-records__row').attributes('data-tone')).toBe(status === "failed" ? "error" : "warning");
 });

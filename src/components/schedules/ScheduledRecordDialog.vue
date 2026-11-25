@@ -37,8 +37,8 @@ const note = computed(() => {
       <p v-else-if="note" class="scheduled-record-dialog__note">{{ note }}</p>
       <template #footer>
         <div class="scheduled-record-dialog__actions">
-          <NButton :disabled="!run || rerunDisabled" @click="emit('rerun')"><template #icon><YjIcon name="rerun" size="sm" /></template>重新执行</NButton>
-          <NButton type="primary" :disabled="conversationUnavailable" @click="emit('conversation')"><template #icon><YjIcon name="arrowUpRight" size="sm" /></template>查看完整对话</NButton>
+          <NButton :bordered="false" :disabled="!run || rerunDisabled" @click="emit('rerun')"><template #icon><YjIcon name="rerun" size="sm" /></template>重新执行</NButton>
+          <NButton type="primary" :bordered="false" :disabled="conversationUnavailable" @click="emit('conversation')"><template #icon><YjIcon name="arrowUpRight" size="sm" /></template>查看完整对话</NButton>
         </div>
       </template>
     </NCard>

@@ -3,6 +3,7 @@ import YjTooltip from "./YjTooltip.vue";
 import { computed } from "vue";
 import { RouterLink } from "vue-router";
 import type { AppNavItem } from "../../navigation/app-nav";
+import { navigationIconStrokeWidth } from "../../icons/registry";
 import YjIcon from "./YjIcon.vue";
 
 const props = defineProps<{
@@ -27,7 +28,7 @@ const accessibleLabel = computed(() =>
     :aria-label="collapsed ? accessibleLabel : undefined"
 
   >
-    <YjIcon :name="item.icon" tone="primary" :stroke-width="1.5" />
+    <YjIcon :name="item.icon" tone="primary" :stroke-width="navigationIconStrokeWidth" />
     <span v-if="!collapsed" class="yj-nav-item__label">{{ item.label }}</span>
   </RouterLink></YjTooltip>
 
@@ -39,7 +40,7 @@ const accessibleLabel = computed(() =>
     :aria-label="accessibleLabel"
 
   >
-    <YjIcon :name="item.icon" tone="muted" :stroke-width="1.5" />
+    <YjIcon :name="item.icon" tone="muted" :stroke-width="navigationIconStrokeWidth" />
     <span v-if="!collapsed" class="yj-nav-item__label">{{ item.label }}</span>
     <span v-if="!collapsed" class="yj-nav-item__status">即将开放</span>
   </div></YjTooltip>

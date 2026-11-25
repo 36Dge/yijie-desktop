@@ -16,7 +16,7 @@ const parts = computed(() => time.value.split(":"));
         <ScheduledTimeColumn label="分钟" :count="60" :value="parts[1]!" @select="time = `${parts[0]}:${$event}`" @finish="finish" />
       </div>
       <div class="schedule-clock__footer">
-        <span>{{ time }}</span><NButton size="small" type="primary" @click="finish">完成</NButton>
+        <span>{{ time }}</span><NButton size="small" type="primary" :bordered="false" @click="finish">完成</NButton>
       </div>
     </template>
   </ScheduledPicker>

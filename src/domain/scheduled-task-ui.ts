@@ -43,9 +43,12 @@ export function timingNote(timing: Timing): string {
   if (timing.execution_time === "unknown" || timing.duration === "unknown") return "缺少可靠时间事实的字段显示未知。可重新打开详情补读，原操作不会重发。";
   return "执行时间使用本次运行的时区；耗时来自实际整轮执行，包含等待时间。";
 }
-export function ruleLabel(rule: TimeRule): string {
+export function scheduleCadenceLabel(rule: TimeRule): string {
   const days = ["", "一", "二", "三", "四", "五", "六", "日"];
-  return `${frequencyLabels[rule.frequency]}${rule.frequency === "weekly" ? `（${rule.weekdays?.map(n => days[n]).join("、")}）` : ""}${rule.local_date ? ` ${rule.local_date}` : ""} ${rule.local_time} · ${rule.time_zone}`;
+  return `${frequencyLabels[rule.frequency]}${rule.frequency === "weekly" ? `（${rule.weekdays?.map(n => days[n]).join("、")}）` : ""}`;
+}
+export function ruleLabel(rule: TimeRule): string {
+  return `${scheduleCadenceLabel(rule)}${rule.local_date ? ` ${rule.local_date}` : ""} ${rule.local_time} · ${rule.time_zone}`;
 }
 export function scheduleError(code: IpcErrorCode | null): string {
   const messages: Partial<Record<IpcErrorCode, string>> = {

@@ -15,9 +15,11 @@ withDefaults(defineProps<{
 
 <template>
   <div class="yj-empty" :role="role">
-    <span class="yj-empty__icon" aria-hidden="true">
-      <YjIcon :name="icon" size="xl" tone="muted" />
-    </span>
+    <slot name="illustration">
+      <span class="yj-empty__icon" aria-hidden="true">
+        <YjIcon :name="icon" size="xl" tone="muted" />
+      </span>
+    </slot>
     <div class="yj-empty__copy">
       <h2 class="yj-empty__title">{{ title }}</h2>
       <p class="yj-empty__description">{{ description }}</p>

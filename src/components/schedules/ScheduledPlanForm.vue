@@ -114,7 +114,7 @@ defineExpose({ dirty, close });
         </details>
       </NForm>
       </NConfigProvider>
-      <template #footer><div class="schedule-form__actions"><NButton :disabled="blocked" @click="close">取消</NButton><NButton type="primary" attr-type="submit" :form="formId" :disabled="!valid || blocked" :loading="busy">保存</NButton></div></template>
+      <template #footer><div class="schedule-form__actions"><NButton :disabled="blocked" @click="close">取消</NButton><NButton type="primary" :bordered="false" attr-type="submit" :form="formId" :disabled="!valid || blocked" :loading="busy">保存</NButton></div></template>
     </NCard>
   </NModal>
 </template>
