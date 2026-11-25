@@ -776,9 +776,17 @@ describe("FEAT-126 ChatPage", () => {
       const menu = new DOMWrapper(document.querySelector(".model-menu")!);
       const options = menu.findAll<HTMLButtonElement>('button[role="menuitemradio"]');
       expect(options.map(option => option.get(".model-option-label").text()))
-        .toEqual(["MiniMax-M3", "Kimi K3.1 Pro", "Deepseek-V4-Pro", "GLM-5.3"]);
+        .toEqual(["MiniMax-M3", "Kimi K3.1 Pro", "Deepseek-V4-Pro", "GLM-5.4"]);
       expect(options[0]!.attributes("aria-checked")).toBe("true");
       expect(options.map(option => option.element.disabled)).toEqual([false, true, true, true]);
+      const upcomingRows = menu.findAll('[data-yj-tooltip="即将支持"]');
+      expect(upcomingRows.map(row => row.get("button").element)).toEqual(options.slice(2).map(option => option.element));
+      for (const row of upcomingRows) {
+        await row.trigger("mouseenter");
+        expect(document.getElementById(row.attributes("aria-describedby") ?? "")?.textContent).toBe("即将支持");
+        await row.trigger("mouseleave");
+        expect(row.attributes("aria-describedby")).toBeUndefined();
+      }
       await menu.trigger("keydown", { key: "Escape" });
       expect(input.element.value).toBe(draft);
       expect(send.element.disabled).toBe(false);

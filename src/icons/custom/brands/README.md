@@ -17,7 +17,7 @@
   独立鲸鱼图形路径，保留原始几何与 `currentColor`，画布仅容纳图形、不含英文商标字样。
 - `glm.svg`：来自 [Z.ai](https://z.ai/) 引用的
   [官方标识 SVG](https://z-cdn.chatglm.cn/z-ai/static/logo.svg)，取内部 Z 图形的三段原始几何，
-  去除应用图标底板，以 `currentColor` 单色呈现。仅用于 GLM-5.3 的待支持入口。
+  去除应用图标底板，以 `currentColor` 单色呈现。仅用于 GLM-5.4 的待支持入口。
 
 四者经 `model-icons.ts` 注册为 `modelKimi` / `modelMiniMax` / `modelDeepSeek` / `modelGlm`，由 `YjIcon` 引用，
 运行时不请求官方站点。

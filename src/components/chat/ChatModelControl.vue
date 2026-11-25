@@ -5,6 +5,7 @@ import type { Catalog, ProfileId } from "../../api/chat-model-client";
 import { CHAT_COMPOSER_DEFAULT_PROFILE } from "../../domain/chat-composer-draft";
 import type { YjIconName } from "../../icons/registry";
 import YjIcon from "../yijie/YjIcon.vue";
+import YjTooltip from "../yijie/YjTooltip.vue";
 
 const props = defineProps<{
   catalog: Catalog | null;
@@ -28,8 +29,9 @@ const presentation: Record<ProfileId, { label: string; icon: YjIconName; trigger
 // Display-only placeholders deliberately have no runtime profile IDs or handlers.
 const upcomingModels: readonly { label: string; icon: YjIconName }[] = [
   { label: "Deepseek-V4-Pro", icon: "modelDeepSeek" },
-  { label: "GLM-5.3", icon: "modelGlm" },
+  { label: "GLM-5.4", icon: "modelGlm" },
 ];
+const upcomingHint = "即将支持";
 const selected = computed(() => props.profile ? presentation[props.profile] : null);
 const busyLabel = computed(() => props.saving ? "正在切换模型…" : props.loading ? "模型加载中" : "");
 const label = computed(() => selected.value?.triggerLabel ?? selected.value?.label ?? (busyLabel.value || "模型待识别"));
@@ -103,10 +105,14 @@ function key(event: KeyboardEvent): void {
         <span v-if="!entry.available" class="model-option-status">{{ unavailableLabel(entry.reason) }}</span>
       </button>
       <span v-if="!catalog?.models.length" class="model-menu-empty">暂无可用模型</span>
-      <button v-for="entry in upcomingModels" :key="entry.label" class="chat-control-option" type="button" role="menuitemradio" :aria-checked="false" :aria-label="`${entry.label}，即将支持`" disabled>
-        <span class="model-brand"><YjIcon :name="entry.icon" size="sm" /></span>
-        <span class="model-option-label">{{ entry.label }}</span>
-      </button>
+      <YjTooltip v-for="entry in upcomingModels" :key="entry.label" :text="upcomingHint" placement="right" to="body" :keep-alive-on-hover="false">
+        <span class="model-upcoming-option">
+          <button class="chat-control-option" type="button" role="menuitemradio" :aria-checked="false" :aria-label="`${entry.label}，${upcomingHint}`" disabled>
+            <span class="model-brand"><YjIcon :name="entry.icon" size="sm" /></span>
+            <span class="model-option-label">{{ entry.label }}</span>
+          </button>
+        </span>
+      </YjTooltip>
     </div>
   </NPopover>
   <span class="model-status" role="status">{{ busyLabel || (unavailable ? unavailableLabel(selectedAvailability?.reason) : '') }}</span>
@@ -162,6 +168,8 @@ function key(event: KeyboardEvent): void {
 .model-option-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .model-menu [aria-checked="true"] .model-option-label { font-weight: var(--yj-font-weight-semibold); }
 .model-option-status { font-size: var(--yj-font-size-caption); }
+.model-upcoming-option { display: block; }
+.model-upcoming-option > button { pointer-events: none; }
 .model-menu-empty { display: block; padding: var(--yj-space-3); color: var(--yj-color-text-secondary); }
 .model-status {
   position: absolute;
