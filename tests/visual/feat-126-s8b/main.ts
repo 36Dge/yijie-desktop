@@ -9,7 +9,7 @@ import type {
   ChatReasoningItem,
   ChatSession,
 } from "../../../src/domain/chat-ipc";
-import ChatPage from "../../../src/pages/chat/ChatPage.vue";
+import { createAppRouteRecords } from "../../../src/router";
 import { useChatStore } from "../../../src/stores/chat.store";
 import "../../../src/styles/variables.css";
 import "../../../src/styles/main.css";
@@ -157,8 +157,7 @@ if (view === "projectless") {
 const router = createRouter({
   history: createMemoryHistory(),
   routes: [
-    { path: "/chat", component: ChatPage },
-    { path: "/chat/:sessionId", component: ChatPage },
+    ...createAppRouteRecords(undefined, true).filter(record => record.name === "chat" || record.name === "chat-session"),
     { path: "/settings", component: { template: "<div>设置</div>" } },
   ],
 });

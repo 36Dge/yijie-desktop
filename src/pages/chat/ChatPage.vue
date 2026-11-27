@@ -67,7 +67,7 @@ import { useMarketConnectorStore } from "../../stores/market-connectors.store";
 import { useMarketConnectorBinding } from "../../composables/useMarketConnectorBinding";
 import { useChatComposerDraftStore } from "../../stores/chat-composer-drafts.store";
 import { type ConnectorChipView } from "../../domain/connector-ui";
-import { useChatShopPreview } from "../../composables/useChatShopPreview";
+import { useChatPageState } from "./chat-page-state";
 import ChatWorkspaceControl from "../../components/chat/ChatWorkspaceControl.vue";
 import { useChatWorkspaces } from "../../composables/useChatWorkspaces";
 import ChatHomeOpening from "../../components/chat/ChatHomeOpening.vue";
@@ -95,7 +95,6 @@ import {
   chatComposerDraftKey,
   chatComposerDraftValue,
   clearChatComposerDraft,
-  createChatComposerDrafts,
   updateChatComposerDraft,
 } from "../../domain/chat-composer-draft";
 import type {
@@ -155,12 +154,7 @@ const readingStore = useChatReadingStore();
 let anchoredSidebarSession: string | null = null;
 provideWebSourceActions(() => chatStore.context?.contextId);
 provideArtifactMediaCache(() => chatStore.context?.contextId ?? null, () => chatStore.hasAction("read_sessions"));
-const readAttachmentPresentation = useChatAttachmentPresentation(
-  () => chatStore.context?.contextId ?? null,
-  () => chatStore.draftTarget,
-  () => chatStore.draftAttachments.map(a => a.attachmentId),
-  () => chatStore.canSend && chatStore.submissionState === "idle",
-);
+const { readAttachmentPresentation, localComposerDrafts, localSelectedProjectId, localProfile, shopPreview } = useChatPageState();
 const attachmentPresentationScope = computed(() => `${chatStore.context?.contextId ?? ""}:${JSON.stringify(chatStore.draftTarget)}`);
 
 const previewWorkspace = ref<InstanceType<typeof ChatDocumentWorkspace>>();
@@ -217,7 +211,6 @@ const permissionScope = usePermissionStore();
 const draftPanel = ref<InstanceType<typeof ScheduledDraftPanel>>();
 
 const retryChatAuthority = inject(CHAT_AUTHORITY_RETRY_KEY, async () => false);
-const localComposerDrafts = shallowRef(createChatComposerDrafts());
 const sharedDrafts = useChatComposerDraftStore();
 const chatExperts = useChatExpertsStore(), expertResources = useExpertsStore();
 const sharedComposerDraftsEnabled = marketConnectorsEnabled || expertsUiEnabled || skillMarketplaceUiEnabled;
@@ -370,12 +363,10 @@ function showExpertDetails(): void {
   if (!selectedExpert.value) return;
   void router.push({ path: "/plugins", query: { tab: "experts", from: routeSessionId.value ? `/chat/${routeSessionId.value}` : "/chat", expert: selectedExpert.value.expertId, expertVersion: selectedExpert.value.version } });
 }
-const localSelectedProjectId = ref<string | null>(null);
 const selectedProjectId = computed({
   get: () => sharedComposerDraftsEnabled ? sharedDrafts.workspaceId : localSelectedProjectId.value,
   set: value => { if (sharedComposerDraftsEnabled) sharedDrafts.workspaceId = value; else localSelectedProjectId.value = value; },
 });
-const shopPreview = useChatShopPreview(() => chatStore.context?.contextId ?? null, () => routeSessionId.value ?? "new");
 // A new task owns its picker state. Historical session projects may be removed
 // or internal, and must never become a hidden destination for a new submission.
 const availableProjectId = computed(() => chatStore.projects.find(project =>
@@ -647,7 +638,7 @@ const modelDisabledReason = computed(() => modelReadOnly.value ? "当前聊天�
 const models = useChatModels(() => chatStore.context?.contextId ?? null, () => routeSessionId.value, () => modelBlocked.value, sharedComposerDraftsEnabled ? {
   get: () => isNewDraftMode.value ? sharedDrafts.planProfile : sharedDrafts.newProfile,
   set: profile => { if (isNewDraftMode.value) sharedDrafts.planProfile = profile; else sharedDrafts.newProfile = profile; },
-} : undefined);
+} : { get: () => localProfile.value, set: profile => { localProfile.value = profile; } });
 const composerSendReadiness = computed(() => {
   const workspaceReady = isSessionRoute.value || !workspacePicker.creating.value;
   const canSubmit = isDraftMode.value ? draft.canSubmit.value
@@ -869,17 +860,6 @@ watch(
     if (ready && selected !== null && available === null) selectedProjectId.value = null;
   },
   { immediate: true },
-);
-
-watch(
-  () => chatStore.context?.contextId ?? null,
-  (contextId, previousContextId) => {
-    if (sharedComposerDraftsEnabled) return;
-    if (contextId === previousContextId) return;
-    if (previousContextId === null && contextId !== null) return;
-    selectedProjectId.value = null;
-    composerDrafts.value = createChatComposerDrafts();
-  },
 );
 
 watch(
@@ -1474,8 +1454,8 @@ onBeforeUnmount(() => {
   dragDropUnlisten = null;
   document.removeEventListener("selectionchange", flushTimelineAfterSelection);
   timelineFrameProjection.dispose();
-  void chatStore.deactivatePageSession();
 });
+defineExpose({ committingDraft: computed(() => submitRequested.value || composerSubmissionState.value !== "idle") });
 </script>
 
 <template>

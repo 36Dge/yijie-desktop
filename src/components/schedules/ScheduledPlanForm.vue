@@ -16,6 +16,7 @@ const emit = defineEmits<{ close: []; query: []; retry: []; save: [definition: P
 const dialog = useDialog();
 const initial = props.plan?.definition ?? props.initialDefinition;
 const initialRule = initial?.rule ?? defaultScheduledTimeRule();
+const settingsInitiallyOpen = (!props.plan && !props.confirmation) || initial?.target.mode === "existing_chat";
 const title = computed(() => props.confirmation ? "确认定时任务草案" : props.plan ? "编辑定时任务" : "新建定时任务");
 const form = reactive({ modelProfile: (initial?.model_profile ?? (props.plan ? "minimax-m3-high-v1" : defaultModelProfile)) as ProfileId, name: initial?.name ?? "", content: initial?.content ?? "", frequency: initialRule.frequency, timeZone: initialRule.time_zone, localTime: initialRule.local_time, localDate: initialRule.local_date ?? "", weekdays: initialRule.weekdays?.slice() ?? [1], mode: initial?.target.mode ?? "dedicated_chat", conversationId: initial?.target.conversation_id ?? null });
 const {modelOptions,modelReady,modelNotice,modelLocked}=useScheduledPlanModel(form, () => props.boundConversationId ?? null);
@@ -198,7 +199,7 @@ defineExpose({ dirty, close });
             </div>
           </div>
 
-          <details class="schedule-form__settings" :open="initial?.target.mode === 'existing_chat'">
+          <details class="schedule-form__settings" :open="settingsInitiallyOpen">
             <summary>
               <YjIcon name="settings" size="sm" tone="muted" />
               <span class="schedule-form__settings-title">更多设置</span>

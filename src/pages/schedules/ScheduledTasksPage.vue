@@ -343,6 +343,10 @@ onBeforeRouteLeave(() => {
           <div v-else-if="tab === 'plans'" class="schedules-plans">
             <ScheduledPlanCard v-for="card in cards" :key="card.summary.plan_id" :card="card">
               <template #controls>
+                <NButton :id="`schedule-plan-${card.summary.plan_id}`" quaternary circle size="small"
+                  :aria-label="`编辑 ${card.summary.name}`" :disabled="managementDisabled" @click.stop="edit(card.summary)">
+                  <YjIcon name="edit" size="sm" />
+                </NButton>
                 <NSwitch :id="`schedule-enable-${card.summary.plan_id}`" class="schedule-switch"
                   :value="card.summary.effective_state === 'enabled'"
                   :aria-label="`${card.summary.effective_state === 'enabled' ? '关闭' : '开启'} ${card.summary.name}`"
@@ -352,7 +356,6 @@ onBeforeRouteLeave(() => {
                   @update:value="value => togglePlan(value, card)" />
               </template>
               <template #actions>
-                <ScheduledCardAction :id="`schedule-plan-${card.summary.plan_id}`" icon="edit" :label="`编辑 ${card.summary.name}`" :disabled="managementDisabled" @click="edit(card.summary)" />
                 <ScheduledCardAction icon="scheduleHistory" label="查看历史记录" @click="viewHistory(card.summary)" />
                 <ScheduledCardAction :id="`schedule-run-${card.summary.plan_id}`" icon="scheduleRun" label="立即执行" :loading="runningAction && runningPlanId === card.summary.plan_id" :disabled="!canPrepare || autoBusy || autoPending || runningAction || runPending || writing || !!pending || card.summary.raw_state === 'deleted' || card.summary.target_state === 'missing' || (kimiK31Candidate && card.model_profile === 'kimi-k3-max-v1')" @click="runNow(card.summary.plan_id)" />
                 <ScheduledCardAction :id="`schedule-delete-${card.summary.plan_id}`" icon="scheduleDelete" label="删除任务" :disabled="managementDisabled" @click="confirmMutation(card.summary)" />

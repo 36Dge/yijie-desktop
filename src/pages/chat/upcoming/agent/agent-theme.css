@@ -1,0 +1,12 @@
+:where(.agent-prompt, .agent-config, .scene-viewer) {
+  --agent-ink: var(--yj-color-connector-mention);
+  --agent-line: color-mix(in srgb, var(--yj-color-brand-primary) 19%, var(--yj-color-border-default));
+  --agent-tint: color-mix(in srgb, var(--yj-color-brand-primary) 9%, var(--yj-color-bg-card));
+  --agent-tint-strong: color-mix(in srgb, var(--yj-color-brand-primary) 19%, var(--yj-color-bg-card));
+  --agent-grid: color-mix(in srgb, var(--yj-color-brand-primary) 12%, transparent);
+  --agent-shadow: color-mix(in srgb, var(--yj-color-on-brand) 58%, transparent);
+}
+:where(.agent-prompt, .agent-config, .scene-viewer) button:focus-visible {
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
+  outline-offset: -2px;
+}

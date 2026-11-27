@@ -90,7 +90,7 @@ function dailyPreview(date: string) {
   return { logical_slot: slot, next_at: new Date(slot).getTime() / 1000, skipped_slots: [], candidates_examined: 1, rule_version: 1, tzdb_version: "2026b" } satisfies TimePreview;
 }
 
-it("opens both create entries with the prepared time on the first render and refreshes it at the execution boundary", async () => {
+it("opens both create entries with expanded settings and a prepared time that refreshes at the execution boundary", async () => {
   const today = dailyPreview("2026-11-25"), tomorrow = dailyPreview("2026-11-26");
   const clock = vi.spyOn(Date, "now").mockReturnValue((today.next_at - 60) * 1000);
   const previewTime = vi.fn().mockResolvedValueOnce(today).mockResolvedValueOnce(tomorrow);
@@ -103,6 +103,10 @@ it("opens both create entries with the prepared time on the first render and ref
     expect(body.get(".schedule-form__preview").attributes("data-state")).toBe("ready");
     expect(body.get(".schedule-form__next strong").text()).toBe(timeLabel(today.next_at));
     expect(previewTime).toHaveBeenCalledOnce();
+    const settings = body.get<HTMLDetailsElement>("details.schedule-form__settings");
+    expect(settings.element.open).toBe(true);
+    await settings.get("summary").trigger("click");
+    expect(settings.element.open).toBe(false);
     await body.get('button[aria-label="关闭弹窗"]').trigger("click");
   }
   clock.mockReturnValue(today.next_at * 1000);
@@ -238,13 +242,17 @@ it("keeps the switch off and reports the error if enabling fails", async () => {
   expect(root.find('[role="alert"]').exists()).toBe(true);
 });
 
-it("renders history, run and delete as matching compact outline icons", async () => {
+it("groups edit and the switch above the matching history, run and delete icons", async () => {
   const { root } = await page({ manualReady: true });
-  const actions = root.get('[role="group"][aria-label="任务操作"]');
-  expect(actions.findAll('[role="switch"], button').map(control => control.attributes("aria-label"))).toEqual([
-    "开启 午夜闹铃", "编辑 午夜闹铃", "查看历史记录", "立即执行", "删除任务",
+  const card = root.get(".schedule-plan-card");
+  const controls = card.get(".schedule-card__controls");
+  expect(controls.findAll('button, [role="switch"]').map(control => control.attributes("aria-label"))).toEqual([
+    "编辑 午夜闹铃", "开启 午夜闹铃",
   ]);
-  for (const label of ["查看历史记录", "立即执行", "删除任务"]) {
+  const actions = card.get('[role="group"][aria-label="任务操作"]');
+  const labels = ["查看历史记录", "立即执行", "删除任务"];
+  expect(actions.findAll("button").map(button => button.attributes("aria-label"))).toEqual(labels);
+  for (const label of labels) {
     const svg = actions.get(`button[aria-label="${label}"] svg`);
     expect(svg.attributes()).toMatchObject({
       width: "16", height: "16", viewBox: "0 0 24 24",
@@ -265,10 +273,18 @@ it("opens the editor only from the card's edit button", async () => {
   expect(calls.some(call => call.command === "schedule_get_plan_v1")).toBe(false);
   expect(document.querySelector('[role="dialog"]')).toBeNull();
 
-  await card.get('button[aria-label="编辑 午夜闹铃"]').trigger("click");
+  const editButton = card.get<HTMLButtonElement>('button[aria-label="编辑 午夜闹铃"]');
+  await editButton.trigger("mouseenter");
+  editButton.element.focus();
+  await flushPromises();
+  expect(document.activeElement).toBe(editButton.element);
+  expect(document.querySelector(".n-tooltip, [role=tooltip]")).toBeNull();
+  expect(editButton.attributes("title")).toBeUndefined();
+  await editButton.trigger("click");
   await flushPromises();
   const editor = new DOMWrapper(document.body).get('[role="dialog"][aria-label="编辑定时任务"]');
   expect(editor.get<HTMLInputElement>('input[aria-label="任务名称"]').element.value).toBe("午夜闹铃");
+  expect(editor.get<HTMLDetailsElement>("details.schedule-form__settings").element.open).toBe(false);
   expect(calls.filter(call => call.command === "schedule_get_plan_v1")).toHaveLength(1);
 });
 

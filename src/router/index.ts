@@ -39,7 +39,7 @@ export interface AppPageLoaders {
 
 const APP_PAGE_LOADERS: AppPageLoaders = {
   scheduledTasks: async () => (await import("../pages/schedules/ScheduledTasksPage.vue")).default,
-  chat: async () => (await import("../pages/chat/ChatPage.vue")).default,
+  chat: async () => (await import("../pages/chat/upcoming/ChatVersionsPage.vue")).default,
   store: async () => (await import("../pages/store/StorePage.vue")).default,
   workflows: async () => (await import("../pages/workflows/WorkflowPage.vue")).default,
   workflowEditor: async () => (await import("../pages/workflows/WorkflowEditorPage.vue")).default,
