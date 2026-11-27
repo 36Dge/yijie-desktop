@@ -16,6 +16,7 @@ import { describeConfig, type AgentConfig } from "./agent/presentation";
 import { demoConfig, newImageAgentState, type ImageAgentState } from "./image-agent/draft";
 import type { SceneId } from "./image-agent/scenes";
 import VideoScenarioGallery from "./video-agent/VideoScenarioGallery.vue";
+import SelectionScenarioGallery from "./sourcing/SelectionScenarioGallery.vue";
 import { newVideoAgentState, videoDemoConfig, type VideoAgentState } from "./video-agent/draft";
 import type { VideoSceneId } from "./video-agent/scenes";
 import "./agent/agent-theme.css";
@@ -136,6 +137,7 @@ onBeforeUnmount(() => notice?.destroy());
       </form>
       <ImageScenarioGallery v-if="task === 'image'" @apply="applyScene" />
       <VideoScenarioGallery v-if="task === 'video'" @apply="applyVideoScene" />
+      <SelectionScenarioGallery v-if="task === 'sourcing'" />
       <AgentConfigDialog v-if="activeConfig && section" :config="activeConfig" :section="section" @close="section = null"
         @confirm="confirmConfig" @service="serviceNotice" />
     </div>

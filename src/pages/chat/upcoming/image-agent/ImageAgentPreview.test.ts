@@ -5,6 +5,7 @@ import { NMessageProvider } from "naive-ui";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import UpcomingTaskPreview from "../UpcomingTaskPreview.vue";
 import AgentConfigDialog from "../agent/AgentConfigDialog.vue";
+import ImageSceneCover from "./ImageSceneCover.vue";
 import { demoConfig, missingSlots, newImageAgentState, outputCount, type ImageConfig } from "./draft";
 import { imageScenes, type SceneId } from "./scenes";
 import type { HomeCommerceTask } from "../commerce-tasks";
@@ -13,6 +14,21 @@ let view: VueWrapper | undefined;
 afterEach(() => { view?.unmount(); view = undefined; document.body.innerHTML = ""; vi.restoreAllMocks(); });
 
 describe("upcoming image agent", () => {
+  it.each([
+    ["model", "服装图", "上身效果"],
+    ["white", "佩戴图", "白底图"],
+    ["aplus", "原图", "A+ 排版"],
+  ] as const)("labels the original and its outputs on the %s cover", (id, before, after) => {
+    const scene = imageScenes[id];
+    view = mount(ImageSceneCover, { props: { scene } });
+    const input = view.get(".cover-input");
+    const output = view.get(".cover-output");
+    expect(input.get(".cover-tag").text()).toBe(before);
+    expect(input.get("img").attributes("src")).toBe(scene.input.images[0]!.thumbnail);
+    expect(output.get(".cover-tag").text()).toBe(after);
+    expect(output.findAll("img").map(img => img.attributes("src"))).toEqual(scene.result.images.map(img => img.thumbnail));
+  });
+
   it.each(Object.values(imageScenes))("applies the original $label inputs and example output count", scene => {
     const config = demoConfig(scene.id, null);
     expect(config.direction).toBe(scene.id);

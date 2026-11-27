@@ -63,7 +63,6 @@ async function returnToLibrary(id: string) {
   width: min(100%, var(--yj-layout-chat-entry-max));
   margin: clamp(var(--yj-space-6), 4.5%, 34px) auto 0;
   padding: clamp(18px, 3%, var(--yj-space-6)) 0 var(--yj-space-2);
-  border-top: var(--yj-border-width) solid var(--yj-color-border-default);
   color: var(--yj-color-text-primary);
 }
 .scene-gallery__samples {

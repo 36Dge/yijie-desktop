@@ -42,7 +42,7 @@ export interface ImageScene {
   title: string;
   description: string;
   operation: string;
-  comparison?: { source: SceneMedia; product?: SceneMedia; before: string; after: string; description: string };
+  comparison: { source: SceneMedia; product?: SceneMedia; before: string; after: string; description: string };
   input: SceneCard;
   result: SceneCard;
   product: { name: string; core: string; brand: string; recognized: number };
@@ -81,6 +81,10 @@ export const imageScenes: Record<SceneId, ImageScene> = {
     id: "model", label: "模特上身", icon: "shirt",
     detail: "印花连衣裙 · 试穿效果", title: "模特上身效果",
     description: "搭配服装原图与人物参考，预览系带连衣裙穿在模特身上的版型与花纹。", operation: "模特合成",
+    comparison: {
+      source: modelDressProduct, before: "服装图", after: "上身效果",
+      description: "左侧是印花连衣裙的服装图，右侧是模特穿上同款连衣裙的效果。",
+    },
     input: {
       badge: "商品与模特参考", caption: "待合成素材", detail: "商品原图 · 模特参考", summary: "2 项输入 · 已提供",
       images: [
@@ -104,6 +108,10 @@ export const imageScenes: Record<SceneId, ImageScene> = {
     id: "white", label: "白底主图", icon: "scan",
     detail: "格纹宽檐帽 · 白底精修", title: "平台白底主图",
     description: "从海边佩戴照中提取帽子。白底主图保留帽檐轮廓、蓝白格纹与红色滚边。", operation: "白底精修",
+    comparison: {
+      source: whiteHatSource, before: "佩戴图", after: "白底图",
+      description: "左侧是海边佩戴宽檐帽的原图，右侧是提取帽子后的白底主图。",
+    },
     input: {
       badge: "商品与环境参考", caption: "待处理素材", detail: "原始商品图", summary: "1 项输入 · 已提供",
       images: [
@@ -177,6 +185,10 @@ export const imageScenes: Record<SceneId, ImageScene> = {
     id: "aplus", label: "A+ 图", icon: "layoutTemplate",
     detail: "轻量连帽外套 · 详情页横幅", title: "A+ 详情页排版",
     description: "用两张横幅分别展示外套的穿着场景和防水细节，组成可上下排列的亚马逊 A+ 模块。", operation: "A+ 排版",
+    comparison: {
+      source: aplusJacketProduct, before: "原图", after: "A+ 排版",
+      description: "左侧是连帽外套的商品原图，右侧是展示穿着场景和防水细节的两张 A+ 横幅。",
+    },
     input: {
       badge: "商品基础素材", caption: "待排版素材", detail: "冰蓝连帽外套", summary: "1 项输入 · 已提供",
       images: [

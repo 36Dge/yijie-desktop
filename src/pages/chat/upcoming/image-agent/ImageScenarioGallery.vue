@@ -9,7 +9,7 @@ const scenes = Object.values(imageScenes);
 </script>
 
 <template>
-  <ScenarioWorkbench class="image-scenes" kind-label="生图" :scenes="scenes" :describe="scene => scene.comparison?.description ?? scene.detail">
+  <ScenarioWorkbench class="image-scenes" kind-label="生图" :scenes="scenes" :describe="scene => scene.comparison.description">
     <template #cover="{ scene }"><ImageSceneCover :scene="scene" /></template>
     <template #detail="{ scene }"><ImageSceneDetail :key="scene.id" :scene="scene" @apply="emit('apply', $event)" /></template>
   </ScenarioWorkbench>

@@ -1,47 +1,40 @@
 <script setup lang="ts">
-import { computed } from "vue";
 import YjIcon from "../../../../components/yijie/YjIcon.vue";
 import type { ImageScene } from "./scenes";
 
-const props = defineProps<{ scene: ImageScene }>();
-const coverImages = computed(() => props.scene.id === "aplus"
-  ? props.scene.result.images
-  : [props.scene.input.images[0], props.scene.result.images[0]]);
+defineProps<{ scene: ImageScene }>();
 </script>
 
 <template>
-  <span class="scene-cover" :class="[`scene-cover--${scene.id}`, { 'scene-cover--comparison': scene.comparison }]" aria-hidden="true">
-    <template v-if="scene.comparison">
-      <span class="cover-input">
-        <img class="cover-photo" :src="scene.comparison.source.thumbnail" alt="" decoding="async" draggable="false" />
-        <span v-if="scene.comparison.product" class="cover-product">
-          <img :src="scene.comparison.product.thumbnail" alt="" decoding="async" draggable="false" />
-          <span>+</span>
-        </span>
-        <span class="cover-tag">{{ scene.comparison.before }}</span>
+  <span class="scene-cover" :class="`scene-cover--${scene.id}`" aria-hidden="true">
+    <span class="cover-input">
+      <img class="cover-photo" :src="scene.comparison.source.thumbnail" alt="" decoding="async" draggable="false" />
+      <span v-if="scene.comparison.product" class="cover-product">
+        <img :src="scene.comparison.product.thumbnail" alt="" decoding="async" draggable="false" />
+        <span>+</span>
       </span>
-      <span class="cover-output">
-        <img v-for="image in scene.result.images" :key="image.src" class="cover-photo" :src="image.thumbnail" alt="" decoding="async" draggable="false" />
-        <span class="cover-tag">{{ scene.comparison.after }}</span>
-      </span>
-      <span class="cover-arrow"><YjIcon name="arrowRight" size="xs" /></span>
-    </template>
-    <template v-else>
-      <img v-for="image in coverImages" :key="image.src" :src="image.thumbnail" alt="" decoding="async" draggable="false" />
-    </template>
+      <span class="cover-tag">{{ scene.comparison.before }}</span>
+    </span>
+    <span class="cover-output">
+      <img v-for="image in scene.result.images" :key="image.src" class="cover-photo" :src="image.thumbnail" alt="" decoding="async" draggable="false" />
+      <span class="cover-tag">{{ scene.comparison.after }}</span>
+    </span>
+    <span class="cover-arrow"><YjIcon name="arrowRight" size="xs" /></span>
   </span>
 </template>
 
 <style scoped>
 .scene-cover {
+  --split: 50%;
   display: grid;
   position: relative;
   width: 100%;
   aspect-ratio: 1.83;
-  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  grid-template: minmax(0, 1fr) / minmax(0, var(--split)) minmax(0, 1fr);
+  gap: 2px;
   overflow: hidden;
   border-radius: var(--yj-image-gallery-radius);
-  background: var(--yj-color-control-hover);
+  background: var(--yj-color-bg-page);
 }
 .scene-cover img {
   display: block;
@@ -50,12 +43,6 @@ const coverImages = computed(() => props.scene.id === "aplus"
   min-width: 0;
   min-height: 0;
   object-fit: cover;
-}
-.scene-cover--comparison {
-  --split: 50%;
-  grid-template-columns: minmax(0, var(--split)) minmax(0, 1fr);
-  gap: 2px;
-  background: var(--yj-color-bg-page);
 }
 .cover-input, .cover-output {
   display: grid;
@@ -91,9 +78,9 @@ const coverImages = computed(() => props.scene.id === "aplus"
   background: var(--yj-color-bg-card);
   box-shadow: 0 0 0 var(--yj-border-width) color-mix(in srgb, var(--yj-color-on-brand) 12%, transparent);
 }
-.scene-cover--suite { --split: 34%; }
-.scene-cover--suite .cover-input { background: var(--yj-color-bg-connector-artwork); }
-.scene-cover--suite .cover-input > img { object-fit: contain; padding: var(--yj-space-1) var(--yj-space-1) var(--yj-space-3); }
+.scene-cover--suite, .scene-cover--aplus { --split: 34%; }
+:is(.scene-cover--suite, .scene-cover--aplus) .cover-input { background: var(--yj-color-bg-connector-artwork); }
+:is(.scene-cover--suite, .scene-cover--aplus) .cover-input > img { object-fit: contain; padding: var(--yj-space-1) var(--yj-space-1) var(--yj-space-3); }
 .scene-cover--suite .cover-output { grid-template: auto minmax(0, 1fr) / repeat(2, minmax(0, 1fr)); gap: 2px; }
 .scene-cover--suite .cover-output > img:first-child { grid-column: 1 / -1; height: auto; aspect-ratio: 1962 / 802; object-fit: contain; }
 .scene-cover--suite .cover-output > img:nth-child(2) { object-fit: contain; background: var(--yj-color-bg-connector-artwork); }
@@ -127,21 +114,20 @@ const coverImages = computed(() => props.scene.id === "aplus"
   font-size: 11px;
   line-height: 1;
 }
-.scene-cover--model, .scene-cover--white { gap: 2px; background: var(--yj-color-bg-page); }
-.scene-cover--model { grid-template-columns: 35% minmax(0, 1fr); }
-.scene-cover--model img:first-child { object-position: 50% 48%; }
-.scene-cover--model img:last-child { object-position: 50% 4%; }
-.scene-cover--white { grid-template-columns: 37% minmax(0, 1fr); }
-.scene-cover--white img:first-child { object-position: 50% 35%; }
-.scene-cover--white img:last-child { object-fit: contain; background: var(--yj-color-bg-connector-artwork); }
-.scene-cover--aplus {
+.scene-cover--model { --split: 35%; }
+.scene-cover--model .cover-input img { object-position: 50% 48%; }
+.scene-cover--model .cover-output img { object-position: 50% 4%; }
+.scene-cover--white { --split: 37%; }
+.scene-cover--white .cover-input img { object-position: 50% 35%; }
+.scene-cover--white .cover-output img { object-fit: contain; background: var(--yj-color-bg-connector-artwork); }
+.scene-cover--aplus .cover-output {
   grid-template-rows: repeat(2, minmax(0, 1fr));
   justify-items: center;
   gap: 2px;
   padding-block: 5px;
   background: var(--yj-image-aplus-backdrop);
 }
-.scene-cover--aplus img { width: auto; max-width: 100%; object-fit: contain; }
+.scene-cover--aplus .cover-output img { width: auto; max-width: 100%; object-fit: contain; }
 @container scene-gallery (max-width: 355px) {
   .scene-cover { aspect-ratio: 1.42; }
   .scene-cover--replace .cover-photo { transform: scale(1.7); transform-origin: 50% 55%; }
