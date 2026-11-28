@@ -3,7 +3,7 @@ import { AriaComponent, GridComponent, TooltipComponent } from "echarts/componen
 import { BarChart, LineChart, PieChart } from "echarts/charts";
 import { init, use } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
-import { nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
 import type {
   ArtifactReportChartModel,
   ArtifactReportChartRenderableModel,
@@ -22,10 +22,20 @@ use([
 
 const props = defineProps<{
   model: ArtifactReportChartModel;
+  compact?: boolean;
 }>();
 
 const chartElement = ref<HTMLElement | null>(null);
 const runtimeFailed = ref(false);
+const foldTable = computed(() => props.compact && props.model.status === "renderable" && !runtimeFailed.value);
+const legendLabels = computed(() => {
+  const model = props.model;
+  if (model.status !== "renderable") return [];
+  if (!props.compact || model.kind !== "pie") return model.series.map(series => series.name);
+  const values = model.series[0]!.values;
+  const total = values.reduce((sum, value) => sum + value, 0);
+  return model.categories.map((name, index) => name + " · " + Math.round(values[index]! / total * 100) + "%");
+});
 const titleId = useId();
 const descriptionId = useId();
 let chart: ReturnType<typeof init> | null = null;
@@ -76,7 +86,7 @@ function fixedOption(model: ArtifactReportChartRenderableModel, palette: readonl
     animation: false,
     aria: {
       enabled: true,
-      decal: { show: true },
+      decal: { show: !props.compact || model.kind === "pie" },
       label: { enabled: true, description: model.description },
     },
     backgroundColor: "transparent",
@@ -98,13 +108,32 @@ function fixedOption(model: ArtifactReportChartRenderableModel, palette: readonl
       series: [{
         name: model.series[0]!.name,
         type: "pie",
-        radius: ["35%", "68%"],
+        radius: props.compact ? ["43%", "78%"] : ["35%", "68%"],
         center: ["50%", "50%"],
+        ...(props.compact ? { label: { show: false }, labelLine: { show: false } } : {}),
         data: model.categories.map((name, index) => ({
           name,
           value: model.series[0]!.values[index],
         })),
       }],
+    };
+  }
+
+  if (props.compact && model.kind === "bar") {
+    return {
+      ...common,
+      grid: { left: 3, right: 48, top: 8, bottom: 8, containLabel: true },
+      xAxis: { type: "value", ...axis(textColor, borderColor, gridColor), axisLabel: { show: false }, splitNumber: 3 },
+      yAxis: {
+        type: "category", inverse: true, data: [...model.categories],
+        axisLabel: { color: textColor, interval: 0, width: 100, overflow: "break", lineHeight: 15 },
+        splitLine: { show: false }, axisTick: { show: false }, axisLine: { show: false },
+      },
+      series: model.series.map(series => ({
+        name: series.name, type: "bar", data: [...series.values], barMaxWidth: 17,
+        label: { show: true, position: "right", color: textColor },
+        itemStyle: { borderRadius: [0, 3, 3, 0] },
+      })),
     };
   }
 
@@ -173,7 +202,7 @@ async function rebuildChart(): Promise<void> {
   createChart();
 }
 
-watch(() => props.model, () => {
+watch([() => props.model, () => props.compact], () => {
   void rebuildChart();
 });
 
@@ -204,6 +233,7 @@ onBeforeUnmount(() => {
 <template>
   <article
     class="yj-chart-card"
+    :class="{ 'yj-chart-card--compact': compact }"
     :aria-labelledby="titleId"
     :aria-describedby="descriptionId"
     aria-busy="false"
@@ -211,10 +241,10 @@ onBeforeUnmount(() => {
   >
     <header class="yj-chart-card__header">
       <div>
-        <h3 :id="titleId" class="yj-chart-card__title">{{ model.title }}</h3>
+        <component :is="compact ? 'h4' : 'h3'" :id="titleId" class="yj-chart-card__title">{{ model.title }}</component>
         <p :id="descriptionId" class="yj-chart-card__description">{{ model.description }}</p>
       </div>
-      <span class="yj-chart-card__mode yj-badge">图表增强</span>
+      <span v-if="!compact" class="yj-chart-card__mode yj-badge">图表增强</span>
     </header>
 
     <p
@@ -229,13 +259,13 @@ onBeforeUnmount(() => {
 
     <template v-if="model.status === 'renderable'">
       <ul class="yj-chart-card__legend" data-testid="yj-chart-legend" aria-label="数据系列">
-        <li v-for="(series, index) in model.series" :key="series.ordinal">
+        <li v-for="(label, index) in legendLabels" :key="index">
           <span
             class="yj-chart-card__legend-swatch"
             :class="`yj-chart-card__legend-swatch--${(index % 8) + 1}`"
             aria-hidden="true"
           />
-          <span>{{ series.name }}</span>
+          <span>{{ label }}</span>
         </li>
       </ul>
       <div
@@ -248,7 +278,8 @@ onBeforeUnmount(() => {
       />
     </template>
 
-    <div class="yj-chart-card__table-region" tabindex="0" aria-label="图表数据表格，可横向滚动">
+    <component :is="foldTable ? 'details' : 'div'" class="yj-chart-card__table-region" :tabindex="foldTable ? undefined : 0" aria-label="图表数据表格，可横向滚动">
+      <summary v-if="foldTable" class="yj-chart-card__summary">查看图表数据</summary>
       <table>
         <caption>图表数据</caption>
         <thead>
@@ -263,11 +294,17 @@ onBeforeUnmount(() => {
           </tr>
         </tbody>
       </table>
-    </div>
+    </component>
   </article>
 </template>
 
 <style scoped>
+.yj-chart-card__summary { width: fit-content; cursor: pointer; color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
+.yj-chart-card__summary:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); }
+.yj-chart-card.yj-chart-card--compact { padding: var(--yj-space-4); }
+.yj-chart-card--compact .yj-chart-card__legend { min-height: var(--yj-space-10); align-content: center; gap: var(--yj-space-1) var(--yj-space-2); font-size: var(--yj-font-size-caption); line-height: var(--yj-line-height-caption); }
+.yj-chart-card--compact .yj-chart-card__description { font-size: var(--yj-font-size-caption); line-height: var(--yj-line-height-caption); }
+.yj-chart-card--compact .yj-chart-card__canvas { height: 194px; }
 .yj-chart-card {
   min-width: 0;
   padding: var(--yj-space-5);

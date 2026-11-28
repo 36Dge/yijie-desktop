@@ -2,7 +2,7 @@
 import { onBeforeUnmount, ref } from "vue";
 import type { VideoExample } from "./scenes";
 
-defineProps<{ clip: VideoExample }>();
+defineProps<{ clip: VideoExample; autoplay?: boolean }>();
 const player = ref<HTMLVideoElement>();
 const failed = ref(false);
 function retry() {
@@ -29,7 +29,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="sample-player">
     <video ref="player" :src="clip.src" :poster="clip.poster" :aria-label="clip.label"
-      controls playsinline preload="metadata" @error="failed = true" @loadedmetadata="failed = false" />
+      controls playsinline :autoplay="autoplay" preload="metadata" @error="failed = true" @loadedmetadata="failed = false" />
     <div v-if="failed" class="sample-player__error" role="status">
       <span>视频加载失败</span><button type="button" @click="retry">重新加载</button>
     </div>

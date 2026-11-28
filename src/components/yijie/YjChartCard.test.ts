@@ -111,6 +111,25 @@ afterEach(() => {
 });
 
 describe("YjChartCard", () => {
+  it("shows full percentage labels and a keyboard disclosure for compact report charts", async () => {
+    const pie = createArtifactReportChartModel({
+      ordinal: 0, id: "price-bands", type: "chart", required: true, truncated: false, title: "价格带",
+      chartType: "pie", labels: ["基础款", "组合装"], series: [{ ordinal: 0, name: "款数", values: [3, 2] }], aligned: true,
+    });
+    const wrapper = mount(YjChartCard, { props: { model: pie, compact: true } });
+    try {
+      await flushPromises();
+      expect(wrapper.get("[data-testid='yj-chart-legend']").text()).toContain("基础款 · 60%");
+      expect(wrapper.get("[data-testid='yj-chart-legend']").text()).toContain("组合装 · 40%");
+      expect(wrapper.get("details").attributes("open")).toBeUndefined();
+      expect(wrapper.get("details summary").text()).toBe("查看图表数据");
+      expect(() => assertSafeStructure(mocks.instance.setOption.mock.calls[0]?.[0])).not.toThrow();
+      await wrapper.setProps({ compact: false }); await flushPromises();
+      expect(wrapper.find("details").exists()).toBe(false);
+      expect(wrapper.get("table").isVisible()).toBe(true);
+    } finally { wrapper.unmount(); }
+  });
+
   it("owns one Canvas chart with a closed safe option, HTML legend and visible table", async () => {
     const wrapper = mount(YjChartCard, { attachTo: document.body, props: { model } });
     await flushPromises();

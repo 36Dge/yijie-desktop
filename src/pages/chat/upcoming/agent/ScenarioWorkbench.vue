@@ -6,6 +6,7 @@ defineProps<{
   scenes: readonly Scene[];
   kindLabel: string;
   describe: (scene: Scene) => string;
+  isAvailable?: (scene: Scene) => boolean;
 }>();
 defineSlots<{
   cover(props: { scene: Scene }): unknown;
@@ -39,6 +40,7 @@ async function returnToLibrary(id: string) {
   <section ref="library" class="scene-gallery" :aria-label="kindLabel + '创作示例'">
     <div v-if="!current" class="scene-gallery__samples">
       <button v-for="scene in scenes" :key="scene.id" type="button" class="sample" :data-scene="scene.id"
+        :disabled="isAvailable && !isAvailable(scene)"
         :aria-label="'查看' + scene.label + '示例'" :aria-description="describe(scene)" @click="openScene(scene)">
         <slot name="cover" :scene="scene" />
         <span class="sample__title">
@@ -95,7 +97,8 @@ async function returnToLibrary(id: string) {
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
 }
-.sample:hover .sample__title strong, .scene-gallery__back:hover { text-decoration: underline; text-underline-offset: 3px; }
+.sample:enabled:hover .sample__title strong, .scene-gallery__back:hover { text-decoration: underline; text-underline-offset: 3px; }
+.sample:disabled { cursor: default; opacity: 1; }
 .scene-gallery__back {
   display: inline-flex;
   align-items: center;

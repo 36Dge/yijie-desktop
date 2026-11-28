@@ -17,6 +17,11 @@ import { demoConfig, newImageAgentState, type ImageAgentState } from "./image-ag
 import type { SceneId } from "./image-agent/scenes";
 import VideoScenarioGallery from "./video-agent/VideoScenarioGallery.vue";
 import SelectionScenarioGallery from "./sourcing/SelectionScenarioGallery.vue";
+import ListingScenarioGallery from "./listing/ListingScenarioGallery.vue";
+import ComplianceScenarioGallery from "./compliance/ComplianceScenarioGallery.vue";
+import type { CheckRecord } from "./compliance/manual";
+import CreatorOutreach from "./outreach/CreatorOutreach.vue";
+import { newContacts } from "./outreach/campaign";
 import { newVideoAgentState, videoDemoConfig, type VideoAgentState } from "./video-agent/draft";
 import type { VideoSceneId } from "./video-agent/scenes";
 import "./agent/agent-theme.css";
@@ -26,6 +31,8 @@ const task = defineModel<HomeCommerceTask>("task", { required: true });
 const imageState = defineModel<ImageAgentState>("imageState", { default: newImageAgentState });
 const videoState = defineModel<VideoAgentState>("videoState", { default: newVideoAgentState });
 const input = ref<HTMLTextAreaElement>();
+const complianceRecords = ref<CheckRecord[]>([]);
+const outreachContacts = ref(newContacts());
 const section = ref<ConfigSection | null>(null);
 const activeConfig = computed<AgentConfig | null>(() => {
   if (task.value === "image") return imageState.value.config;
@@ -138,6 +145,9 @@ onBeforeUnmount(() => notice?.destroy());
       <ImageScenarioGallery v-if="task === 'image'" @apply="applyScene" />
       <VideoScenarioGallery v-if="task === 'video'" @apply="applyVideoScene" />
       <SelectionScenarioGallery v-if="task === 'sourcing'" />
+      <ListingScenarioGallery v-if="task === 'listing'" />
+      <ComplianceScenarioGallery v-if="task === 'compliance'" v-model="complianceRecords" />
+      <CreatorOutreach v-if="task === 'outreach'" v-model:contacts="outreachContacts" />
       <AgentConfigDialog v-if="activeConfig && section" :config="activeConfig" :section="section" @close="section = null"
         @confirm="confirmConfig" @service="serviceNotice" />
     </div>
