@@ -12,7 +12,7 @@ import { createScheduledTaskNativeClient } from "../../api/scheduled-task-native
 import type { ImportantUpdate, RunRecord } from "../../api/generated/scheduled-task-ipc-v2.gen";
 import { useScheduledUpdates } from "../../pages/schedules/use-scheduled-updates";
 import { usePermissionStore } from "../../stores/permission.store";
-import type { ChatSessionPage } from "../../domain/chat-ipc";
+import type { ChatSession, ChatSessionPage } from "../../domain/chat-ipc";
 import { useChatStore } from "../../stores/chat.store";
 import { useSidebarStore } from "../../stores/sidebar.store";
 import { useChatReadingStore } from "../../stores/chat-reading.store";
@@ -23,6 +23,15 @@ import taskRunning from "../../icons/custom/task-running.svg?no-inline";
 
 const PROJECT_ID = "019c1a00-0000-7000-8000-000000000001";
 const SESSION_ID = "019c1a00-0000-7000-8000-000000000002";
+const SECOND_SESSION_ID = "019c1a00-0000-7000-8000-000000000003";
+const SECOND_PROJECT_ID = "019c1a00-0000-7000-8000-000000000004";
+
+function sessionsForOrdering(group: "project" | "pinned" | "other", first: ChatSession): ChatSession[] {
+  const second = { ...first, sessionId: SECOND_SESSION_ID, title: "第二条对话" };
+  if (group === "pinned") return [{ ...first, pinnedAt: 1 }, { ...second, projectId: SECOND_PROJECT_ID, pinnedAt: 2 }];
+  if (group === "other") return [{ ...first, projectAvailable: false }, { ...second, projectId: null }];
+  return [first, second];
+}
 
 async function mountTree(prepare?: (store: ReturnType<typeof useChatStore>) => void) {
   const pinia = createPinia();
@@ -440,7 +449,7 @@ describe("ChatSidebarTree", () => {
     wrapper.unmount();
   });
 
-  it("offers only pin/remove project and rename/pin/delete session actions", async () => {
+  it("offers pin/remove project and rename/pin/delete actions for a sole session", async () => {
     const { wrapper } = await mountTree();
     const dropdowns = wrapper.findAllComponents(NDropdown);
     expect(dropdowns).toHaveLength(2);
@@ -450,6 +459,150 @@ describe("ChatSidebarTree", () => {
     const sessionOptions = sessionMenu.props("options") ?? [];
     expect(projectOptions.filter((option) => option.type !== "divider").map((option) => option.label)).toEqual(["置顶项目", "移除"]);
     expect(sessionOptions.filter((option) => option.type !== "divider").map((option) => option.label)).toEqual(["重命名", "置顶", "永久删除"]);
+  });
+
+  it.each(["project", "pinned", "other"] as const)("moves conversations up and down from the keyboard menu within %s", async group => {
+    const { wrapper, router, store } = await mountTree(state => {
+      state.sessions = sessionsForOrdering(group, state.sessions[0]!);
+    });
+    const link = wrapper.get(`[data-session-id="${SESSION_ID}"]`);
+    const row = wrapper.findAllComponents(ChatSidebarSessionRow).find(entry => entry.props("session").sessionId === SESSION_ID)!;
+    const menu = row.getComponent(NDropdown);
+    const list = wrapper.get(group === "project" ? ".chat-tree__project .chat-tree__sessions" : `ul[data-task-section="${group}"]`);
+    const titles = () => list.findAll(".chat-tree__session-title").map(entry => entry.text());
+    const nativeOrder = store.sessions.map(session => session.sessionId);
+    for (const [action, disabled, expected] of [
+      ["move-up", "move-down", ["Synthetic Session", "第二条对话"]],
+      ["move-down", "move-up", ["第二条对话", "Synthetic Session"]],
+    ] as const) {
+      await link.trigger("keydown", { key: "F10", shiftKey: true });
+      expect(menu.props("options")?.find(option => option.key === disabled)?.disabled).toBe(true);
+      menu.vm.$emit("select", action);
+      await flushPromises();
+      expect(titles()).toEqual(expected);
+      expect(document.activeElement).toBe(link.element);
+      expect(store.sessions.map(session => session.sessionId)).toEqual(nativeOrder);
+      expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
+    }
+    wrapper.unmount();
+  });
+
+  it.each(["project", "pinned", "other"] as const)("commits a %s drag on release, and discards it on Escape", async group => {
+    const { wrapper, sidebar } = await mountTree(state => {
+      state.sessions = sessionsForOrdering(group, state.sessions[0]!);
+    });
+    const source = wrapper.get(`[data-session-id="${SESSION_ID}"]`);
+    const target = wrapper.get(`[data-session-id="${SECOND_SESSION_ID}"]`);
+    vi.spyOn(document, "elementFromPoint").mockReturnValue(target.element);
+    for (const cancel of [true, false]) {
+      await source.trigger("pointerdown", { pointerId: 1, button: 0, clientX: 20, clientY: 80 });
+      await source.trigger("pointermove", { pointerId: 1, clientX: 20, clientY: 40 });
+      expect(wrapper.find('[data-drop-placement="before"]').exists()).toBe(true);
+      expect(sidebar.sessionOrders).toEqual({});
+      if (cancel) await source.trigger("keydown", { key: "Escape" });
+      await source.trigger("pointerup", { pointerId: 1, clientX: 20, clientY: 40 });
+      await source.trigger("click", { detail: 1 });
+      expect(wrapper.find("[data-drop-placement]").exists()).toBe(false);
+      expect(sidebar.sessionOrders[group === "project" ? PROJECT_ID : group]).toEqual(cancel ? undefined : [SESSION_ID, SECOND_SESSION_ID]);
+      expect(useChatReadingStore().latestRequest).toBeNull();
+    }
+    wrapper.unmount();
+  });
+
+  it.each([
+    ["pinned", "other"], ["other", "pinned"],
+    ["project", "pinned"], ["pinned", "project"],
+    ["other", "project"], ["project", "other"],
+  ] as const)("rejects a drop from %s into %s without changing membership or order", async (from, to) => {
+    const { wrapper, store, sidebar } = await mountTree(state => {
+      const row = state.sessions[0]!;
+      state.sessions = [row, { ...row, sessionId: SECOND_SESSION_ID, pinnedAt: 8 },
+        { ...row, sessionId: "019c1a00-0000-7000-8000-000000000005", projectId: null }];
+    });
+    const list = (group: string) => wrapper.get(group === "project" ? ".chat-tree__sessions" : `ul[data-task-section="${group}"]`);
+    const source = list(from).get(".chat-tree__session-link");
+    const destination = to === "project" ? wrapper.get(".chat-tree__project-toggle")
+      : from === "project" ? wrapper.get(`h3[data-task-section="${to}"]`) : list(to).get(".chat-tree__session-link");
+    const original = store.sessions.map(row => [row.sessionId, row.projectId, row.pinnedAt]);
+    vi.spyOn(document, "elementFromPoint").mockReturnValue(destination.element);
+    await source.trigger("pointerdown", { pointerId: 1, button: 0, clientX: 15, clientY: 20 });
+    await source.trigger("pointermove", { pointerId: 1, clientX: 15, clientY: 80 });
+    expect(wrapper.find(".chat-tree--blocked").exists()).toBe(true);
+    expect(wrapper.find("[data-drop-placement]").exists()).toBe(false);
+    await source.trigger("pointerup", { pointerId: 1, clientX: 15, clientY: 80 });
+    await flushPromises();
+    const warning = document.querySelector('[role="alertdialog"]')?.textContent;
+    expect(warning).toContain("暂不支持跨分类移动");
+    if (from === "pinned") expect(warning).toContain("移除置顶标签");
+    if (to === "pinned") expect(warning).toContain("添加置顶标签");
+    expect(sidebar.sessionOrders).toEqual({});
+    expect(store.sessions.map(row => [row.sessionId, row.projectId, row.pinnedAt])).toEqual(original);
+    wrapper.unmount();
+  });
+
+  it.each(["folder", "task"])("warns once when dropping on another project's %s and leaves both tasks in place", async destination => {
+    const otherProject = "019c1a00-0000-7000-8000-000000000004";
+    const { wrapper, router, sidebar, store } = await mountTree(state => {
+      state.projects = [...state.projects, { ...state.projects[0]!, projectId: otherProject, safeName: "另一项目" }];
+      state.sessions = [...state.sessions, { ...state.sessions[0]!, projectId: otherProject, sessionId: "019c1a00-0000-7000-8000-000000000005" }];
+    });
+    const original = [...store.sessions];
+    const folder = wrapper.get(`[data-project-id="${otherProject}"]`);
+    if (destination === "folder") await folder.trigger("click");
+    const source = wrapper.get(`[data-session-id="${SESSION_ID}"]`);
+    const target = destination === "folder" ? folder : wrapper.get(`[data-project-group="${otherProject}"] [data-session-id]`);
+    vi.spyOn(document, "elementFromPoint").mockReturnValue(target.element);
+    await source.trigger("pointerdown", { pointerId: 1, button: 0, clientX: 12, clientY: 30 });
+    await source.trigger("pointermove", { pointerId: 1, clientX: 12, clientY: 90 });
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    await source.trigger("pointerup", { pointerId: 1, clientX: 12, clientY: 90 });
+    await source.trigger("click", { detail: 1 });
+    await flushPromises();
+    const dialogs = document.querySelectorAll('[role="alertdialog"]');
+    expect(dialogs).toHaveLength(1);
+    expect(dialogs[0]!.textContent).toContain("暂不支持跨项目移动");
+    expect(folder.attributes("aria-expanded")).toBe(String(destination === "task"));
+    expect(store.sessions).toEqual(original);
+    expect(sidebar.sessionOrders).toEqual({});
+    expect(useChatReadingStore().latestRequest).toBeNull();
+    expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
+    dialogs[0]!.querySelector("button")!.click();
+    await flushPromises();
+    expect(wrapper.findAllComponents(NModal).every(modal => !modal.props("show"))).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("moves the only task through its pin menu and hides the pinned section after unpinning", async () => {
+    const { wrapper, store, router } = await mountTree(state => {
+      state.projects = [];
+      state.sessions = [{ ...state.sessions[0]!, projectId: null }];
+    });
+    let session = store.sessions[0]!;
+    const pin = vi.spyOn(chatClient, "setSessionPinned").mockImplementation(async (_context, _id, pinned, operation) => {
+      session = { ...session, pinnedAt: pinned ? 5 : null };
+      return operation;
+    });
+    vi.spyOn(chatClient, "listSessions").mockImplementation(async () => ({ sessions: [session], nextCursor: null }));
+    const pinnedList = () => wrapper.find('ul[aria-label="置顶"]');
+    expect(pinnedList().exists()).toBe(false);
+    for (const pinned of [true, false]) {
+      await wrapper.get('[aria-current="page"]').trigger("keydown", { key: "F10", shiftKey: true });
+      const menu = wrapper.getComponent(ChatSidebarSessionRow).getComponent(NDropdown);
+      expect(menu.props("options")?.find(option => option.key === "pin")?.label).toBe(pinned ? "置顶" : "取消置顶");
+      menu.vm.$emit("select", "pin");
+      await flushPromises();
+      expect(pin).toHaveBeenLastCalledWith(store.context!.contextId, SESSION_ID, pinned, expect.any(String));
+      expect(pinnedList().exists()).toBe(pinned);
+      expect(wrapper.findAll("h3").map(heading => heading.text())).toEqual(pinned ? ["置顶"] : []);
+      expect(wrapper.findAllComponents(ChatSidebarSessionRow)).toHaveLength(1);
+      const row = wrapper.get(`ul[aria-label="${pinned ? "置顶" : "其他任务"}"] [aria-current="page"]`);
+      expect(row.element.firstElementChild).toBe(row.get(".chat-tree__session-title").element);
+      expect(row.text()).toBe("Synthetic Session");
+      expect(document.activeElement).toBe(row.element);
+      expect(wrapper.text()).not.toContain("暂无任务记录");
+      expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
+    }
+    wrapper.unmount();
   });
 
   it("opens the app menu for an unselected task, suppresses the native menu and keeps only one task menu open", async () => {
@@ -517,7 +670,9 @@ describe("ChatSidebarTree", () => {
       state.sessions = [...state.sessions, { ...state.sessions[0]!, sessionId: backgroundId, title: "Background Session" }];
       state.selectedSessionId = SESSION_ID;
     });
-    const pin = vi.spyOn(store, "setSessionPinned").mockResolvedValue();
+    const pin = vi.spyOn(store, "setSessionPinned").mockImplementation(async (id, pinned) => {
+      store.sessions = store.sessions.map(row => row.sessionId === id ? { ...row, pinnedAt: pinned ? 5 : null } : row);
+    });
     const rename = vi.spyOn(store, "renameSession").mockResolvedValue();
     const select = vi.spyOn(store, "selectSession");
     const row = wrapper.findAll(".chat-tree__session-link").find(entry => entry.text() === "Background Session")!;
@@ -526,8 +681,10 @@ describe("ChatSidebarTree", () => {
     menu.vm.$emit("select", "pin");
     await flushPromises();
     expect(pin).toHaveBeenCalledWith(backgroundId, true);
-    await row.trigger("contextmenu");
-    menu.vm.$emit("select", "rename");
+    expect(wrapper.findAll(".chat-tree__session-title").map(entry => entry.text())).toEqual(["Background Session", "Synthetic Session"]);
+    const pinnedRow = wrapper.get('ul[aria-label="置顶"] .chat-tree__session-link');
+    await pinnedRow.trigger("contextmenu");
+    wrapper.findAllComponents(NDropdown).find(entry => entry.props("show"))!.vm.$emit("select", "rename");
     await flushPromises();
     const input = document.body.querySelector<HTMLInputElement>('[role="dialog"] input')!;
     expect(input.value).toBe("Background Session");
@@ -537,6 +694,17 @@ describe("ChatSidebarTree", () => {
     [...document.body.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(button => button.textContent === "保存")!.click();
     await flushPromises();
     expect(rename).toHaveBeenCalledWith(backgroundId, "Updated background title");
+    const folder = wrapper.get(".chat-tree__project-toggle");
+    await folder.trigger("click");
+    await pinnedRow.trigger("keydown", { key: "F10", shiftKey: true });
+    wrapper.findAllComponents(NDropdown).find(entry => entry.props("show"))!.vm.$emit("select", "pin");
+    await flushPromises();
+    expect(pin).toHaveBeenLastCalledWith(backgroundId, false);
+    expect(wrapper.find('ul[aria-label="置顶"]').exists()).toBe(false);
+    expect(folder.attributes("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(folder.element);
+    await folder.trigger("click");
+    expect(wrapper.get(".chat-tree__project").text()).toContain("Background Session");
     expect(select).not.toHaveBeenCalled();
     expect(store.selectedSessionId).toBe(SESSION_ID);
     expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
@@ -758,7 +926,7 @@ describe("ChatSidebarTree", () => {
     expect(nativeRemove).not.toHaveBeenCalled();
     expect(JSON.stringify(store.sessions)).toBe(original);
     expect(wrapper.find(".chat-tree__project").exists()).toBe(false);
-    expect(wrapper.get(".chat-tree__projects > .chat-tree__session").text()).toContain("Synthetic Session");
+    expect(wrapper.get(".chat-tree__list > .chat-tree__session").text()).toContain("Synthetic Session");
     expect(sidebar.taskDirectoryPreferences).toEqual([{ projectId: PROJECT_ID, pinnedAt: null, removed: true }]);
     wrapper.unmount();
   });
@@ -784,7 +952,7 @@ describe("ChatSidebarTree", () => {
     wrapper.unmount();
   });
 
-  it("places all removed-project sessions at the top level after every directory, even when pinned or newest", async () => {
+  it("shows pinned removed-project tasks before folders and the remaining removed history after them", async () => {
     const { wrapper, store } = await mountTree();
     const session = store.sessions[0]!;
     store.sessions = [
@@ -797,12 +965,9 @@ describe("ChatSidebarTree", () => {
     await flushPromises();
 
     expect(wrapper.findAll(".chat-tree__project-name").map(row => row.text())).toEqual(["Synthetic Workspace", "任务目录"]);
-    expect(wrapper.findAll(".chat-tree__projects > .chat-tree__session .chat-tree__session-title").map(row => row.text())).toEqual([
-      "Removed Pinned", "Removed B", "Removed A",
-    ]);
-    expect(wrapper.findAll(".chat-tree__projects > li").map(row => row.classes()[0])).toEqual([
-      "chat-tree__project", "chat-tree__project", "chat-tree__session", "chat-tree__session", "chat-tree__session",
-    ]);
+    expect(wrapper.findAll("h3").map(row => row.text())).toEqual(["置顶", "项目", "其他任务"]);
+    expect(wrapper.get('ul[aria-label="置顶"] .chat-tree__session-title').text()).toBe("Removed Pinned");
+    expect(wrapper.findAll('ul[aria-label="其他任务"] .chat-tree__session-title').map(row => row.text())).toEqual(["Removed B", "Removed A"]);
     expect(wrapper.findAll(".chat-tree__session")).toHaveLength(5);
     expect(wrapper.text()).not.toContain("项目已移除");
   });
@@ -815,7 +980,7 @@ describe("ChatSidebarTree", () => {
       { ...existing, projectId: null, title: "No Project" },
     ];
     await flushPromises();
-    expect(wrapper.findAll(".chat-tree__projects > .chat-tree__session .chat-tree__session-title").map(row => row.text())).toEqual(["No Project", "Removed"]);
+    expect(wrapper.findAll(".chat-tree__list > .chat-tree__session .chat-tree__session-title").map(row => row.text())).toEqual(["No Project", "Removed"]);
     expect(wrapper.text()).not.toContain("任务目录");
     expect(wrapper.get('[aria-current="page"]').text()).toContain("No Project");
     store.projects = [];
@@ -843,7 +1008,7 @@ describe("ChatSidebarTree", () => {
     await flushPromises();
     const expected = [folderTask.title, original.title, managedTask.title, newestStandalone.title, olderStandalone.title];
     expect(titles()).toEqual(expected);
-    expect(wrapper.findAll(".chat-tree__projects > li").map(row => row.classes()[0])).toEqual([
+    expect(wrapper.findAll(".chat-tree__list > li").map(row => row.classes()[0])).toEqual([
       "chat-tree__project", "chat-tree__project", "chat-tree__session", "chat-tree__session",
     ]);
 
@@ -874,7 +1039,7 @@ describe("ChatSidebarTree", () => {
     wrapper.findComponent(NDropdown).vm.$emit("select", "remove");
     await flushPromises();
     expect(removeProject).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain("历史任务将移至“任务”顶层末尾");
+    expect(document.body.textContent).toContain("其余历史任务将归入“其他任务”");
     const confirm = [...document.body.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')].find(button => button.textContent === "移除")!;
     confirm.click();
     await flushPromises();
@@ -882,7 +1047,7 @@ describe("ChatSidebarTree", () => {
     expect(removeProject).toHaveBeenCalledWith(PROJECT_ID);
     expect(wrapper.findAllComponents(NModal)[2].props("show")).toBe(false);
     expect(wrapper.find(".chat-tree__project").exists()).toBe(false);
-    expect(wrapper.findAll(".chat-tree__projects > .chat-tree__session")).toHaveLength(2);
+    expect(wrapper.findAll(".chat-tree__list > .chat-tree__session")).toHaveLength(2);
     expect(wrapper.get('[aria-current="page"]').text()).toContain("Synthetic Session");
     expect(store.sessions.every(session => session.projectId === PROJECT_ID)).toBe(true);
     expect(wrapper.text()).not.toContain("暂无任务记录");
@@ -895,7 +1060,7 @@ describe("ChatSidebarTree", () => {
       store.sessions = store.sessions.map(session => ({ ...session, projectAvailable: false }));
     });
     expect(wrapper.find(".chat-tree__project").exists()).toBe(false);
-    expect(wrapper.findAll(".chat-tree__projects > .chat-tree__session")).toHaveLength(1);
+    expect(wrapper.findAll(".chat-tree__list > .chat-tree__session")).toHaveLength(1);
     expect(wrapper.text()).not.toContain("暂无任务记录");
 
     store.phase = "unavailable";
@@ -918,6 +1083,7 @@ describe("ChatSidebarTree", () => {
       store.sessions = [...store.sessions,
         { ...session, sessionId: "removed-page", projectId: "removed", title: "Removed Page", projectAvailable: false },
         { ...session, sessionId: "managed-page", projectId: "managed", title: "Managed Page" },
+        { ...session, sessionId: "pinned-page", pinnedAt: 3, title: "Pinned Page" },
       ];
       store.sessionsCursor = null;
     });
@@ -925,10 +1091,11 @@ describe("ChatSidebarTree", () => {
     await wrapper.get(".chat-tree__load-more").trigger("click");
     await flushPromises();
     expect(loadMore).toHaveBeenCalledOnce();
-    expect(wrapper.findAll(".chat-tree__projects > li").slice(-1)[0]!.text()).toContain("Removed Page");
+    expect(wrapper.get('ul[aria-label="置顶"] .chat-tree__session-link').text()).toBe("Pinned Page");
+    expect(wrapper.findAll(".chat-tree__list > li").slice(-1)[0]!.text()).toContain("Removed Page");
     expect(wrapper.find(".chat-tree__load-more").exists()).toBe(false);
 
-    await wrapper.get(".chat-tree__projects > .chat-tree__session .chat-tree__session-link").trigger("click");
+    await wrapper.get('ul[aria-label="其他任务"] .chat-tree__session-link').trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.path).toBe("/chat/removed-page");
     await wrapper.setProps({ currentPath: router.currentRoute.value.path });

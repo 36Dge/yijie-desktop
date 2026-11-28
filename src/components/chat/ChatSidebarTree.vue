@@ -4,6 +4,7 @@ import { NCard, NDropdown, NInput, NModal, type DropdownOption } from "naive-ui"
 import { isNavigationFailure, NavigationFailureType, useRouter } from "vue-router";
 import type { ChatSession } from "../../domain/chat-ipc";
 import { buildChatSidebarHistory, type ChatHistoryProjectGroup } from "../../domain/chat-sidebar-history";
+import { isTaskSection, type MovePlacement } from "../../domain/sidebar-session-order";
 import { useChatStore } from "../../stores/chat.store";
 import { useSidebarStore } from "../../stores/sidebar.store";
 import { useChatReadingStore } from "../../stores/chat-reading.store";
@@ -11,6 +12,7 @@ import { useChatComposerDraftStore } from "../../stores/chat-composer-drafts.sto
 import YjIcon from "../yijie/YjIcon.vue";
 import YjTooltip from "../yijie/YjTooltip.vue";
 import ChatSidebarSessionRow from "./ChatSidebarSessionRow.vue";
+import { useSidebarSessionDrag } from "./useSidebarSessionDrag";
 
 const props = withDefaults(defineProps<{
   currentPath: string;
@@ -37,10 +39,15 @@ const deleteTitlePreview = computed(() => {
   return characters.length > deleteTitleLimit ? characters.slice(0, deleteTitleLimit).join("") + "…" : title;
 });
 const removeProjectTarget = ref<ChatHistoryProjectGroup | null>(null);
+const moveBlocked = ref(false);
+const moveWarning = ref({ title: "", message: "" });
+const moveDialogTitleId = useId();
+const moveDialogCopyId = useId();
 const projectMenuId = ref<string | null>(null);
 const activeSessionMenuId = ref<string | null>(null);
 const projectMenuX = ref(0);
 const projectMenuY = ref(0);
+const tree = ref<HTMLElement | null>(null);
 const menuOverlay = ref<HTMLElement | null>(null);
 const renameValue = ref("");
 const actionPending = ref(false);
@@ -66,10 +73,60 @@ watch(() => props.visible && chatStore.hasBackgroundTurns && chatStore.hasAction
     onCleanup(() => { clearTimeout(timer); controller.abort(); });
   }, { immediate: true });
 
-const history = computed(() => buildChatSidebarHistory(chatStore.projects, chatStore.sessions, sidebarStore.taskDirectoryPreferences));
+const history = computed(() => buildChatSidebarHistory(
+  chatStore.projects, chatStore.sessions, sidebarStore.taskDirectoryPreferences, sidebarStore.sessionOrders,
+));
 const historyGroups = computed(() => history.value.groups);
-const topLevelSessions = computed(() => [...history.value.projectlessSessions, ...history.value.removedProjectSessions]);
-const hasHistory = computed(() => historyGroups.value.length > 0 || topLevelSessions.value.length > 0);
+const historySections = computed(() => {
+  const { groups, pinnedSessions, otherSessions } = history.value;
+  return [
+    { key: "pinned", label: "置顶", sessions: pinnedSessions },
+    { key: "projects", label: "项目", groups },
+    { key: "other", label: "其他任务", sessions: otherSessions },
+  ].filter(section => section.groups?.length || section.sessions?.length);
+});
+interface SessionPosition {
+  group: string;
+  sessions: readonly ChatSession[];
+  index: number;
+}
+const positions = computed(() => {
+  const entries = new Map<string, SessionPosition>();
+  function indexList(group: string, sessions: readonly ChatSession[]) {
+    sessions.forEach((row, index) => entries.set(row.sessionId, { group, sessions, index }));
+  }
+  for (const section of historySections.value) {
+    if (section.sessions) indexList(section.key, section.sessions);
+    for (const group of section.groups ?? []) indexList(group.projectId, group.sessions);
+  }
+  return entries;
+});
+const canReorder = computed(() => props.visible && chatStore.hasAction("pin_session")
+  && !actionPending.value && !chatStore.taskListLoading && !moveBlocked.value);
+const drag = useSidebarSessionDrag(tree, canReorder, (from, to) => {
+  const position = positions.value.get(from.sessionId);
+  if (!position || position.group !== from.group) return;
+  if (to.sessionId && positions.value.get(to.sessionId)?.group !== to.group) return;
+  if (from.group !== to.group) {
+    moveWarning.value = blockedMoveWarning(from.group, to.group);
+    moveBlocked.value = true;
+    return;
+  }
+  const anchor = to.sessionId ?? position.sessions[0]?.sessionId;
+  if (anchor) moveSession(position.group, from.sessionId, anchor, to.placement);
+});
+function blockedMoveWarning(from: string, to: string) {
+  if (!isTaskSection(from) && !isTaskSection(to)) {
+    return { title: "暂不支持跨项目移动", message: "请在同一个项目内上下移动对话。" };
+  }
+  const title = "暂不支持跨分类移动";
+  if (to === "pinned") return { title, message: "要添加置顶标签，请右键对话并选择“置顶”。" };
+  if (from === "pinned") return { title, message: "要移除置顶标签，请右键对话并选择“取消置顶”。对话将按原归属显示。" };
+  return { title, message: "请在对话当前所在的分类内调整顺序。" };
+}
+const { source: dragSource, target: dragTarget } = drag;
+const insertion = computed(() => dragSource.value && dragTarget.value?.group === dragSource.value.group
+  && dragTarget.value.sessionId !== dragSource.value.sessionId ? dragTarget.value : null);
 watch(() => props.visible ? Array.from(chatStore.scheduledSidebar) : [], markers => {
   if (!props.visible) return;
   const rows = new Map(chatStore.sessions.map(row => [row.sessionId, row]));
@@ -77,7 +134,9 @@ watch(() => props.visible ? Array.from(chatStore.scheduledSidebar) : [], markers
   for (const [id, marker] of markers) {
     if ((marker.state !== "created" && marker.state !== "running") || revealedScheduledTurns.get(id) === marker.turnId) continue;
     revealedScheduledTurns.set(id, marker.turnId);
-    const group = rows.get(id)?.projectId;
+    const session = rows.get(id);
+    if (session?.pinnedAt !== null) continue;
+    const group = session.projectId;
     if (group && !expandedProjectIds.value.has(group) && historyGroups.value.some(item => item.projectId === group)) {
       expandedProjectIds.value = new Set([...expandedProjectIds.value, group]);
     }
@@ -88,7 +147,7 @@ const treeError = computed(() => {
     return "无权读取任务记录";
   }
   if (chatStore.phase === "resync-required") return "任务记录需要重新同步，请稍后重试";
-  if (chatStore.phase === "unavailable" && !hasHistory.value) {
+  if (chatStore.phase === "unavailable" && !historySections.value.length) {
     return "任务记录暂不可用，请稍后重试";
   }
   if (chatStore.phase === "unavailable") return "任务记录更新失败，已显示上次读取内容";
@@ -112,11 +171,14 @@ watch(
 );
 
 watch([() => props.currentPath, () => chatStore.context?.allowedActions, actionPending], () => {
+  drag.cancel();
   projectMenuId.value = null;
   activeSessionMenuId.value = null;
   if (readingStore.latestRequest && props.currentPath !== `/chat/${readingStore.latestRequest.sessionId}`) readingStore.cancelLatest();
 });
 watch(() => chatStore.context?.contextId, () => {
+  drag.cancel();
+  moveBlocked.value = false;
   revealedScheduledTurns.clear();
   projectMenuId.value = null;
   activeSessionMenuId.value = null;
@@ -218,12 +280,33 @@ function sessionMenuOptions(session: ChatSession): DropdownOption[] {
   if (chatStore.hasAction("rename_session")) options.push({ label: "重命名", key: "rename" });
   if (chatStore.hasAction("pin_session")) {
     options.push({ label: session.pinnedAt === null ? "置顶" : "取消置顶", key: "pin" });
+    const position = positions.value.get(session.sessionId);
+    if (position && position.sessions.length > 1) {
+      options.push(
+        { label: "上移", key: "move-up", disabled: position.index === 0 },
+        { label: "下移", key: "move-down", disabled: position.index === position.sessions.length - 1 },
+      );
+    }
   }
   if (chatStore.hasAction("delete_session")) {
     if (options.length > 0) options.push({ type: "divider", key: "divider" });
     options.push({ label: "永久删除", key: "delete" });
   }
   return options;
+}
+
+function moveSession(group: string, sourceId: string, targetId: string, placement: MovePlacement): void {
+  if (!canReorder.value || sourceId === targetId) return;
+  actionError.value = null;
+  const focused = document.activeElement;
+  try {
+    sidebarStore.moveSession(group, history.value, sourceId, targetId, placement);
+    if (focused instanceof HTMLButtonElement && focused.dataset.sessionId === sourceId) {
+      void nextTick(() => { if (document.activeElement === document.body) focused.focus({ preventScroll: true }); });
+    }
+  } catch {
+    actionError.value = "任务顺序保存失败，请稍后重试";
+  }
 }
 
 async function openSession(session: ChatSession): Promise<void> {
@@ -279,8 +362,16 @@ async function handleProjectAction(target: ChatHistoryProjectGroup, key: string)
 
 async function handleSessionAction(session: ChatSession, key: string): Promise<void> {
   if (actionPending.value || !chatStore.sessions.some(entry => entry.sessionId === session.sessionId)
-    || !sessionMenuOptions(session).some(option => option.key === key)) return;
+    || !sessionMenuOptions(session).some(option => option.key === key && !option.disabled)) return;
   actionError.value = null;
+  if (key === "move-up" || key === "move-down") {
+    const position = positions.value.get(session.sessionId);
+    if (!position) return;
+    const up = key === "move-up";
+    const adjacent = position.sessions[position.index + (up ? -1 : 1)];
+    if (adjacent) moveSession(position.group, session.sessionId, adjacent.sessionId, up ? "before" : "after");
+    return;
+  }
   if (key === "rename") {
     renameSession.value = session;
     renameValue.value = session.title;
@@ -292,12 +383,22 @@ async function handleSessionAction(session: ChatSession, key: string): Promise<v
   }
   if (key === "pin") {
     actionPending.value = true;
+    const trigger = lastDialogTrigger;
     try {
       await chatStore.setSessionPinned(session.sessionId, session.pinnedAt === null);
     } catch {
       actionError.value = "任务置顶状态更新失败，请稍后重试";
+      return;
     } finally {
       actionPending.value = false;
+    }
+    await nextTick();
+    if (trigger?.dataset.sessionId === session.sessionId && !trigger.isConnected && document.activeElement === document.body) {
+      const row = tree.value?.querySelector<HTMLButtonElement>(`[data-session-id="${CSS.escape(session.sessionId)}"]`);
+      if (row) row.focus();
+      else if (session.projectId) {
+        tree.value?.querySelector<HTMLButtonElement>(`[data-project-id="${CSS.escape(session.projectId)}"]`)?.focus();
+      }
     }
   }
 }
@@ -363,76 +464,104 @@ async function confirmRemoveProject(): Promise<void> {
 
 <template>
   <Teleport to="body"><div ref="menuOverlay" class="chat-control-overlay" /></Teleport>
-  <section class="chat-tree" aria-label="任务：项目与对话" :aria-busy="chatStore.taskListLoading">
+  <section ref="tree" class="chat-tree" aria-label="任务：项目与对话" :aria-busy="chatStore.taskListLoading"
+    :class="{ 'chat-tree--moving': dragSource, 'chat-tree--blocked': dragSource && dragTarget && dragSource.group !== dragTarget.group }"
+    @pointerdown="drag.start" @pointermove="drag.move" @pointerup="drag.end"
+    @pointercancel="drag.cancelPointer" @keydown.esc="drag.cancel" @click.capture="drag.captureClick">
     <p v-if="actionError" class="chat-tree__error" role="alert">{{ actionError }}</p>
     <p v-if="treeError" class="chat-tree__error" role="alert">{{ treeError }}</p>
     <p v-if="chatStore.taskListLoading" class="chat-tree__state" role="status">
       正在读取本地任务…
     </p>
-    <p v-else-if="!hasHistory && !treeError" class="chat-tree__state">暂无任务记录</p>
+    <p v-else-if="!historySections.length && !treeError" class="chat-tree__state">暂无任务记录</p>
 
-    <ul v-else-if="hasHistory" class="chat-tree__projects">
-      <li v-for="group in historyGroups" :key="group.projectId" class="chat-tree__project">
-        <div class="chat-tree__project-row" @contextmenu="openProjectMenu(group, $event)">
-          <button
-            class="chat-tree__project-toggle"
-            type="button"
-            :aria-expanded="expandedProjectIds.has(group.projectId)"
-            :aria-label="`${expandedProjectIds.has(group.projectId) ? '折叠' : '展开'}项目 ${group.label}`"
-            :aria-haspopup="projectMenuOptions(group).length ? 'menu' : undefined"
-            :aria-keyshortcuts="projectMenuOptions(group).length ? 'Shift+F10' : undefined"
-            @click="toggleProject(group.projectId)"
-            @keydown="projectKeydown(group, $event)"
-          >
-            <YjIcon :name="expandedProjectIds.has(group.projectId) ? 'folderOpen' : 'folder'" tone="muted" :stroke-width="1.5" />
-            <span class="chat-tree__project-name" >{{ group.label }}</span>
-            <YjIcon v-if="group.pinnedAt !== null" name="pin" size="xs" tone="muted" />
-          </button>
-          <n-dropdown
-            v-if="projectMenuOptions(group).length > 0"
-            :to="menuOverlay ?? false"
-            :style="{ zoom: 'var(--yj-ui-scale, 1)', width: 'min(var(--yj-layout-chat-context-menu-width), calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-8)))' }"
-            trigger="manual"
-            placement="bottom-end"
-            :show="projectMenuId === group.projectId"
-            :x="projectMenuX"
-            :y="projectMenuY"
-            :options="projectMenuOptions(group)"
-            :disabled="actionPending"
-            @update:show="!$event && (projectMenuId = null)"
-            @clickoutside="projectMenuId = null"
-            @select="handleProjectAction(group, String($event))"
-          />
-          <div class="chat-tree__project-actions" :class="{ 'chat-tree__project-actions--open': projectMenuId === group.projectId }">
-            <button
-              v-if="projectMenuOptions(group).length > 0"
-              class="chat-tree__more"
-              type="button"
-              :aria-label="`项目 ${group.label} 的操作菜单`"
-              aria-haspopup="menu"
-              :aria-expanded="projectMenuId === group.projectId"
-              :disabled="actionPending"
-              @click.stop="openProjectMenu(group, $event)"
-              @keydown="projectKeydown(group, $event)"
-            >
-              <YjIcon name="more" size="sm" tone="muted" :stroke-width="1.5" />
-            </button>
-            <YjTooltip v-if="group.project && chatStore.hasAction('create_session') && chatStore.hasAction('use_project')" text="新建任务" placement="top" to="body">
+    <template v-else>
+      <template v-for="section in historySections" :key="section.key">
+        <h3 v-if="history.pinnedSessions.length" class="chat-tree__section-title" :data-task-section="section.key"
+          :data-drop-placement="insertion?.group === section.key && !insertion.sessionId ? 'after' : undefined">{{ section.label }}</h3>
+        <ul class="chat-tree__list" :aria-label="section.label" :data-task-section="section.key">
+          <li v-for="group in section.groups" :key="group.projectId" class="chat-tree__project" :data-project-group="group.projectId">
+            <div class="chat-tree__project-row" :data-drop-placement="insertion?.group === group.projectId && !insertion.sessionId ? 'after' : undefined" @contextmenu="openProjectMenu(group, $event)">
               <button
-                class="chat-tree__new-task"
+                class="chat-tree__project-toggle"
                 type="button"
-                :aria-label="`在工作空间 ${group.label} 中新建任务`"
-                :disabled="actionPending || !group.project.available"
-                @click.stop="startProjectTask(group.projectId)"
-              ><YjIcon name="newTask" size="xs" tone="muted" :stroke-width="1.5" /></button>
-            </YjTooltip>
-          </div>
-        </div>
+                :data-project-id="group.projectId"
+                :aria-expanded="expandedProjectIds.has(group.projectId)"
+                :aria-label="`${expandedProjectIds.has(group.projectId) ? '折叠' : '展开'}项目 ${group.label}`"
+                :aria-haspopup="projectMenuOptions(group).length ? 'menu' : undefined"
+                :aria-keyshortcuts="projectMenuOptions(group).length ? 'Shift+F10' : undefined"
+                @click="toggleProject(group.projectId)"
+                @keydown="projectKeydown(group, $event)"
+              >
+                <YjIcon :name="expandedProjectIds.has(group.projectId) ? 'folderOpen' : 'folder'" tone="muted" :stroke-width="1.5" />
+                <span class="chat-tree__project-name" >{{ group.label }}</span>
+                <YjIcon v-if="group.pinnedAt !== null" name="pin" size="xs" tone="muted" />
+              </button>
+              <n-dropdown
+                v-if="projectMenuOptions(group).length > 0"
+                :to="menuOverlay ?? false"
+                :style="{ zoom: 'var(--yj-ui-scale, 1)', width: 'min(var(--yj-layout-chat-context-menu-width), calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-8)))' }"
+                trigger="manual"
+                placement="bottom-end"
+                :show="projectMenuId === group.projectId"
+                :x="projectMenuX"
+                :y="projectMenuY"
+                :options="projectMenuOptions(group)"
+                :disabled="actionPending"
+                @update:show="!$event && (projectMenuId = null)"
+                @clickoutside="projectMenuId = null"
+                @select="handleProjectAction(group, String($event))"
+              />
+              <div class="chat-tree__project-actions" :class="{ 'chat-tree__project-actions--open': projectMenuId === group.projectId }">
+                <button
+                  v-if="projectMenuOptions(group).length > 0"
+                  class="chat-tree__more"
+                  type="button"
+                  :aria-label="`项目 ${group.label} 的操作菜单`"
+                  aria-haspopup="menu"
+                  :aria-expanded="projectMenuId === group.projectId"
+                  :disabled="actionPending"
+                  @click.stop="openProjectMenu(group, $event)"
+                  @keydown="projectKeydown(group, $event)"
+                >
+                  <YjIcon name="more" size="sm" tone="muted" :stroke-width="1.5" />
+                </button>
+                <YjTooltip v-if="group.project && chatStore.hasAction('create_session') && chatStore.hasAction('use_project')" text="新建任务" placement="top" to="body">
+                  <button
+                    class="chat-tree__new-task"
+                    type="button"
+                    :aria-label="`在工作空间 ${group.label} 中新建任务`"
+                    :disabled="actionPending || !group.project.available"
+                    @click.stop="startProjectTask(group.projectId)"
+                  ><YjIcon name="newTask" size="xs" tone="muted" :stroke-width="1.5" /></button>
+                </YjTooltip>
+              </div>
+            </div>
 
-        <ul v-if="expandedProjectIds.has(group.projectId)" class="chat-tree__sessions">
+            <ul v-if="expandedProjectIds.has(group.projectId)" class="chat-tree__sessions">
+              <ChatSidebarSessionRow
+                v-for="session in group.sessions"
+                :key="session.sessionId"
+                :data-drop-placement="insertion?.sessionId === session.sessionId ? insertion.placement : undefined"
+                :session="session"
+                :scheduled-state="chatStore.scheduledSidebar.get(session.sessionId)?.state"
+                :completion-unread="readingStore.hasUnreadCompletion(session)"
+                :current-path="currentPath"
+                :options="sessionMenuOptions(session)"
+                :action-pending="actionPending"
+                :active-menu-id="activeSessionMenuId"
+                :menu-target="menuOverlay ?? false"
+                @open="openSession"
+                @action="handleSessionAction"
+                @remember-trigger="rememberTrigger($event, session.sessionId)"
+              />
+              <li v-if="!group.hasSessions" class="chat-tree__empty-session">暂无对话</li>
+            </ul>
+          </li>
           <ChatSidebarSessionRow
-            v-for="session in group.sessions"
+            v-for="session in section.sessions"
             :key="session.sessionId"
+            :data-drop-placement="insertion?.sessionId === session.sessionId ? insertion.placement : undefined"
             :session="session"
             :scheduled-state="chatStore.scheduledSidebar.get(session.sessionId)?.state"
             :completion-unread="readingStore.hasUnreadCompletion(session)"
@@ -445,25 +574,9 @@ async function confirmRemoveProject(): Promise<void> {
             @action="handleSessionAction"
             @remember-trigger="rememberTrigger($event, session.sessionId)"
           />
-          <li v-if="group.sessions.length === 0" class="chat-tree__empty-session">暂无对话</li>
         </ul>
-      </li>
-      <ChatSidebarSessionRow
-        v-for="session in topLevelSessions"
-        :key="session.sessionId"
-        :session="session"
-        :scheduled-state="chatStore.scheduledSidebar.get(session.sessionId)?.state"
-        :completion-unread="readingStore.hasUnreadCompletion(session)"
-        :current-path="currentPath"
-        :options="sessionMenuOptions(session)"
-        :action-pending="actionPending"
-        :active-menu-id="activeSessionMenuId"
-        :menu-target="menuOverlay ?? false"
-        @open="openSession"
-        @action="handleSessionAction"
-        @remember-trigger="rememberTrigger($event, session.sessionId)"
-      />
-    </ul>
+      </template>
+    </template>
 
     <button
       v-if="chatStore.sessionsCursor"
@@ -515,11 +628,20 @@ async function confirmRemoveProject(): Promise<void> {
         <p class="chat-tree__dialog-copy">
           <template v-if="removeProjectTarget?.project">只会移除“{{ removeProjectTarget.label }}”的本地项目引用，不会删除文件或历史任务。</template>
           <template v-else>只会移除侧栏中的“任务目录”分组，不会删除文件或历史任务，也不会停止定时任务。</template>
-          历史任务将移至“任务”顶层末尾。
+          已置顶的任务保留在“置顶”中，其余历史任务将归入“其他任务”。
         </p>
         <div class="chat-tree__dialog-actions">
           <button class="chat-tree__dialog-button yj-control yj-control--regular" type="button" @click="removeProjectTarget = null; restoreDialogTrigger()">取消</button>
           <button class="chat-tree__dialog-button chat-tree__dialog-button--danger yj-control yj-control--regular" type="button" :disabled="actionPending" @click="confirmRemoveProject">移除</button>
+        </div>
+      </n-card>
+    </n-modal>
+    <n-modal v-model:show="moveBlocked">
+      <n-card class="chat-tree__dialog" role="alertdialog" aria-modal="true" :aria-labelledby="moveDialogTitleId" :aria-describedby="moveDialogCopyId" :bordered="false">
+        <template #header><span :id="moveDialogTitleId">{{ moveWarning.title }}</span></template>
+        <p :id="moveDialogCopyId" class="chat-tree__dialog-copy">{{ moveWarning.message }}</p>
+        <div class="chat-tree__dialog-actions">
+          <button type="button" class="chat-tree__dialog-button chat-tree__dialog-button--primary yj-control yj-control--regular" @click="moveBlocked = false">知道了</button>
         </div>
       </n-card>
     </n-modal>
@@ -538,7 +660,7 @@ async function confirmRemoveProject(): Promise<void> {
   scrollbar-width: thin;
 }
 
-.chat-tree__projects,
+.chat-tree__list,
 .chat-tree__sessions {
   padding: 0;
   margin: 0;
@@ -546,6 +668,34 @@ async function confirmRemoveProject(): Promise<void> {
 }
 
 .chat-tree__project + .chat-tree__project { margin-top: var(--yj-space-1); }
+
+.chat-tree--moving,
+.chat-tree--moving :deep(button) { cursor: grabbing; }
+.chat-tree--blocked,
+.chat-tree--blocked :deep(button) { cursor: not-allowed; }
+.chat-tree [data-drop-placement] { position: relative; }
+.chat-tree [data-drop-placement]::after {
+  position: absolute;
+  inset-inline: var(--yj-space-2);
+  height: var(--yj-focus-ring-width);
+  border-radius: var(--yj-radius-sm);
+  background: var(--yj-color-focus-ring);
+  content: "";
+  pointer-events: none;
+}
+.chat-tree [data-drop-placement="before"]::after { top: 0; }
+.chat-tree [data-drop-placement="after"]::after { bottom: 0; }
+
+.chat-tree__section-title {
+  margin: 0;
+  padding: var(--yj-space-1) var(--yj-space-3);
+  color: var(--yj-color-text-tertiary);
+  font-size: var(--yj-font-size-caption);
+  font-weight: var(--yj-font-weight-medium);
+  line-height: var(--yj-line-height-caption);
+}
+
+.chat-tree__list + .chat-tree__section-title { margin-top: var(--yj-space-3); }
 
 .chat-tree__project-row {
   display: flex;
@@ -626,6 +776,7 @@ async function confirmRemoveProject(): Promise<void> {
 }
 
 .chat-tree__sessions { padding: var(--yj-space-1) 0 var(--yj-space-2) var(--yj-space-6); }
+.chat-tree__sessions:empty { display: none; }
 
 .chat-tree__state,
 .chat-tree__empty-session,

@@ -1,5 +1,6 @@
 import type { ChatProject, ChatSession } from "./chat-ipc";
 import type { TaskDirectoryPreference } from "./task-directory-preference";
+import { applySessionOrder, type SessionOrders } from "./sidebar-session-order";
 import type { RunRecord } from "../api/generated/scheduled-task-ipc-v2.gen";
 
 export function isChatSessionRunning(status: ChatSession["latestTurnStatus"]): boolean {
@@ -40,7 +41,7 @@ function creationTimeMs(session: ChatSession): number {
 }
 
 function compareTasksByCreation(a: ChatSession, b: ChatSession): number {
-  return comparePins(a, b) || creationTimeMs(b) - creationTimeMs(a) || b.sessionId.localeCompare(a.sessionId);
+  return creationTimeMs(b) - creationTimeMs(a) || b.sessionId.localeCompare(a.sessionId);
 }
 
 export interface ChatHistoryProjectGroup {
@@ -48,35 +49,48 @@ export interface ChatHistoryProjectGroup {
   readonly project: ChatProject | null;
   readonly label: string;
   readonly pinnedAt: number | null;
+  /** Includes tasks displayed in the pinned section. */
+  readonly hasSessions: boolean;
   readonly sessions: readonly ChatSession[];
+}
+
+export interface ChatSidebarHistory {
+  readonly groups: readonly ChatHistoryProjectGroup[];
+  readonly pinnedSessions: readonly ChatSession[];
+  readonly otherSessions: readonly ChatSession[];
 }
 
 export function buildChatSidebarHistory(
   projects: readonly ChatProject[],
   sessions: readonly ChatSession[],
   taskDirectoryPreferences: readonly TaskDirectoryPreference[] = [],
-): { groups: readonly ChatHistoryProjectGroup[]; removedProjectSessions: readonly ChatSession[]; projectlessSessions: readonly ChatSession[] } {
+  sessionOrders: SessionOrders = {},
+): ChatSidebarHistory {
   const grouped = new Map<string, ChatSession[]>();
+  const pinnedSessions: ChatSession[] = [];
   const removedProjectSessions: ChatSession[] = [];
   const projectlessSessions: ChatSession[] = [];
   const availableProjectIds = new Set(projects.map((project) => project.projectId));
   const directoryPreferences = new Map(taskDirectoryPreferences.map((entry) => [entry.projectId, entry]));
   for (const session of sessions) {
+    let members: ChatSession[];
     if (session.projectId === null) {
-      projectlessSessions.push(session);
-      continue;
-    }
-    if (!session.projectAvailable
+      members = projectlessSessions;
+    } else if (!session.projectAvailable
       || (!availableProjectIds.has(session.projectId) && directoryPreferences.get(session.projectId)?.removed)) {
-      removedProjectSessions.push(session);
-      continue;
+      members = removedProjectSessions;
+    } else {
+      members = grouped.get(session.projectId) ?? [];
+      grouped.set(session.projectId, members);
     }
-    const group = grouped.get(session.projectId) ?? [];
-    group.push(session);
-    grouped.set(session.projectId, group);
+    if (session.pinnedAt !== null) pinnedSessions.push(session);
+    else members.push(session);
   }
 
-  for (const members of grouped.values()) members.sort(compareTasksByCreation);
+  pinnedSessions.sort((a, b) => comparePins(a, b) || compareTasksByCreation(a, b));
+  for (const [projectId, members] of grouped) {
+    grouped.set(projectId, applySessionOrder(members.sort(compareTasksByCreation), sessionOrders[projectId]));
+  }
   projectlessSessions.sort(compareTasksByCreation);
   removedProjectSessions.sort(compareTasksByCreation);
 
@@ -85,15 +99,24 @@ export function buildChatSidebarHistory(
     project,
     label: project.safeName,
     pinnedAt: project.pinnedAt,
+    hasSessions: grouped.has(project.projectId),
     sessions: grouped.get(project.projectId) ?? [],
   }));
   // Managed task directories can be available without appearing in the project picker.
   for (const [projectId, groupSessions] of grouped) {
     if (!availableProjectIds.has(projectId)) {
-      groups.push({ projectId, project: null, label: "任务目录", pinnedAt: directoryPreferences.get(projectId)?.pinnedAt ?? null, sessions: groupSessions });
+      groups.push({
+        projectId, project: null, label: "任务目录",
+        pinnedAt: directoryPreferences.get(projectId)?.pinnedAt ?? null,
+        hasSessions: true, sessions: groupSessions,
+      });
     }
   }
   // Stable sorting preserves the native order of unpinned groups and pin-time ties.
   groups.sort(comparePins);
-  return { groups, removedProjectSessions, projectlessSessions };
+  return {
+    groups,
+    pinnedSessions: applySessionOrder(pinnedSessions, sessionOrders.pinned),
+    otherSessions: applySessionOrder([...projectlessSessions, ...removedProjectSessions], sessionOrders.other),
+  };
 }

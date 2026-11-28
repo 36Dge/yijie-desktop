@@ -95,6 +95,7 @@ function selectAction(key: string | number): void {
       class="chat-tree__session-link"
       :class="{ 'chat-tree__session-link--active': selected }"
       type="button"
+      :data-session-id="session.sessionId"
       :aria-current="selected ? 'page' : undefined"
       :aria-describedby="description ? statusDescriptionId : undefined"
       :aria-haspopup="hasMenu ? 'menu' : undefined"
@@ -121,7 +122,6 @@ function selectAction(key: string | number): void {
       </span>
     </button>
     <span v-if="description" :id="statusDescriptionId" class="chat-tree__session-description">{{ description }}</span>
-    <YjIcon v-if="session.pinnedAt !== null" name="pin" size="xs" tone="muted" />
     <n-dropdown
       v-if="hasMenu"
       v-model:show="menuVisible"

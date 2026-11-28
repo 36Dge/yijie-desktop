@@ -43,7 +43,7 @@ describe("home opening playback",()=>{
     expect(wrapper.attributes("data-animating")).toBe("false");
     expect(wrapper.emitted("settled")).toHaveLength(1);
     expect(wrapper.get("h1").text()).toBe("易界AI");
-    expect(wrapper.text()).toContain("让跨境经营更高效，让全球生意更进一步。");
+    expect(wrapper.get("#new-task-subtitle").text()).toBe("为跨境团队打造的电商经营工作台");
     expect(frames.size).toBe(0);
   });
   it("replays on each homepage entry and cancels the previous entry's frames",async()=>{

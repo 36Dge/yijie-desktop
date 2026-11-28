@@ -120,7 +120,7 @@ defineExpose({finish});
       <span ref="logo" class="home-opening__logo" :class="{ 'is-hidden':active }" aria-hidden="true"><YjLogo variant="mark" size="md" /></span>
       <div class="home-opening__title-clip"><h1 id="new-task-title" class="home-opening__title" :style="titleStyle">易界AI</h1></div>
     </div>
-    <div class="home-opening__subtitle-clip"><p id="new-task-subtitle" class="home-opening__subtitle" :style="subtitleStyle">让跨境经营更高效，让全球生意更进一步。</p></div>
+    <div class="home-opening__subtitle-clip"><p id="new-task-subtitle" class="home-opening__subtitle" :style="subtitleStyle">为跨境团队打造的电商经营工作台</p></div>
     <svg ref="stage" class="home-opening__stage" :class="{ 'is-hidden':!active }" viewBox="0 0 320 136" aria-hidden="true" focusable="false" shape-rendering="geometricPrecision">
       <defs>
         <linearGradient :id="`${id}-shade`" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--yj-home-opening-shade)" stop-opacity="0" /><stop offset="1" stop-color="var(--yj-home-opening-shade)" /></linearGradient>
@@ -145,7 +145,7 @@ defineExpose({finish});
 .home-opening__title-clip { overflow:hidden; }
 .home-opening__title { margin:0; color:var(--yj-color-text-primary); font-size:var(--yj-font-size-display); line-height:var(--yj-line-height-display); font-weight:var(--yj-font-weight-semibold); }
 .home-opening__subtitle-clip { overflow:hidden; margin-top:var(--yj-space-3); }
-.home-opening__subtitle { margin:0; text-align:center; color:var(--yj-color-text-body); font-size:var(--yj-font-size-body); line-height:var(--yj-line-height-body); }
+.home-opening__subtitle { margin:0; text-align:center; color:var(--yj-color-text-body); font-size:var(--yj-font-size-home-opening-subtitle); line-height:var(--yj-line-height-body); }
 .home-opening__stage { position:absolute; top:calc(-1 * var(--yj-space-12)); left:calc(50% - var(--yj-home-opening-stage-width) / 2); width:var(--yj-home-opening-stage-width); height:var(--yj-home-opening-stage-height); overflow:visible; pointer-events:none; }
 .is-hidden { visibility:hidden; }
 .home-opening__face { fill:var(--yj-home-opening-face); }

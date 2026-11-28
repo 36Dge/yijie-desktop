@@ -1,5 +1,7 @@
-import { computed, ref } from "vue";
+import { computed, ref, shallowRef } from "vue";
 import { defineStore } from "pinia";
+import type { ChatSidebarHistory } from "../domain/chat-sidebar-history";
+import { readSessionOrders, saveSessionMove, type MovePlacement, type SessionOrders } from "../domain/sidebar-session-order";
 import {
   readTaskDirectoryPreferences,
   writeTaskDirectoryPreferences,
@@ -17,6 +19,7 @@ export const useSidebarStore = defineStore("sidebar", () => {
   const mode = ref<SidebarMode>(DEFAULT_SIDEBAR_MODE);
   const isHydrated = ref(false);
   const taskDirectoryPreferences = ref<readonly TaskDirectoryPreference[]>([]);
+  const sessionOrders = shallowRef<SessionOrders>({});
   let taskDirectoryPreferencesWritable = false;
   const isCollapsed = computed(() => mode.value === "collapsed");
   let storage: SidebarPreferenceStorage | undefined;
@@ -31,6 +34,7 @@ export const useSidebarStore = defineStore("sidebar", () => {
     const preferences = readTaskDirectoryPreferences(nextStorage);
     taskDirectoryPreferences.value = preferences.entries;
     taskDirectoryPreferencesWritable = preferences.writable;
+    if (storage) sessionOrders.value = readSessionOrders(storage);
     isHydrated.value = true;
   }
 
@@ -64,11 +68,19 @@ export const useSidebarStore = defineStore("sidebar", () => {
     saveTaskDirectoryPreference({ projectId, pinnedAt: null, removed: true });
   }
 
+  function moveSession(group: string, history: ChatSidebarHistory, sourceId: string, targetId: string, placement: MovePlacement): void {
+    if (!storage) throw new Error("sidebar-session-order-unavailable");
+    const updated = saveSessionMove(storage, group, history, sourceId, targetId, placement);
+    sessionOrders.value = { ...sessionOrders.value, ...updated };
+  }
+
   return {
     mode,
     isCollapsed,
     isHydrated,
     taskDirectoryPreferences,
+    sessionOrders,
+    moveSession,
     setTaskDirectoryPinned,
     removeTaskDirectory,
     hydrate,
